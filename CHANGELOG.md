@@ -3,6 +3,19 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.6.1 (2026-10-30)
+
+Upkeep with nothing new to see, and the first update a 0.6.0 Satchel finds on GitHub by itself.
+
+### Changed
+- Addon zips, and the addon settings the PCs share, are read with version 9.0 of the zip library,
+  which closes three security advisories about unpacking symbolic links and permission bits. The
+  Satchel never unpacked that way: it reads every file itself and refuses an addon zip that holds
+  a link.
+- The builds use the current versions of GitHub's checkout and artifact actions, still pinned by
+  commit, and a build image pinned by its digest. Dependabot proposes newer ones for both.
+- The README says where the Satchel keeps its settings: the exe needs no file beside it.
+
 ## 0.6.0 (2026-10-30)
 
 The first public release, on GitHub: from this version on, the Satchel knows where it comes from.

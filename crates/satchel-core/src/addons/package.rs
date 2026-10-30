@@ -96,8 +96,12 @@ pub fn inspect(zip: &[u8]) -> Result<Package, PackageError> {
     let mut total = 0u64;
     for i in 0..archive.len() {
         let entry = archive.by_index_raw(i).map_err(|e| PackageError::Unreadable(e.to_string()))?;
-        let Some(path) = clean(entry.name())? else { continue };
-        if entry.unix_mode().is_some_and(|mode| mode & 0o170000 == 0o120000) {
+        let name = entry.name().map_err(|e| PackageError::Unreadable(e.to_string()))?;
+        let Some(path) = clean(&name)? else { continue };
+        // zip 9 gives an entry made on MS-DOS no Unix mode, yet its upper 16 bits can still say
+        // "link" (many addon zips are marked that way): those bits are judged, and zip's view too.
+        let link = |mode: u32| mode & 0o170000 == 0o120000;
+        if link(entry.external_attributes() >> 16) || entry.unix_mode().is_some_and(link) {
             return Err(PackageError::Unsafe(format!("a link ({path})")));
         }
         if entry.is_dir() {
@@ -304,6 +308,66 @@ pub(crate) mod tests {
         assert_eq!(inspect(&zip_of(&[("readme.txt", b"x")])), Err(PackageError::NoAddon));
         let zip = zip_of(&[("One/A/A.toc", TOC), ("Two/A/A.toc", TOC)]);
         assert_eq!(inspect(&zip), Err(PackageError::Duplicate("A".into())));
+    }
+
+    #[test]
+    fn a_link_refuses_the_package() {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer.start_file("A/A.toc", SimpleFileOptions::default()).unwrap();
+        writer.write_all(TOC).unwrap();
+        writer.add_symlink("A/core.lua", "../../../outside.lua", SimpleFileOptions::default()).unwrap();
+        let zip = writer.finish().unwrap().into_inner();
+        let refused = |zip: &[u8]| matches!(inspect(zip), Err(PackageError::Unsafe(why)) if why.starts_with("a link"));
+        assert!(refused(&zip));
+        // Marked as made on MS-DOS, zip reports no Unix mode, yet the upper 16 bits say "link".
+        assert!(refused(&made_on_dos(&zip)));
+        // Plain files marked that way, as many addon zips are, still go in.
+        assert!(inspect(&made_on_dos(&zip_of(&[("A/A.toc", TOC), ("A/core.lua", b"x")]))).is_ok());
+    }
+
+    /// The zip with each central header's host (the high byte of "version made by") set to MS-DOS.
+    fn made_on_dos(zip: &[u8]) -> Vec<u8> {
+        let mut dos = zip.to_vec();
+        for at in (0..zip.len().saturating_sub(3)).filter(|&i| zip[i..i + 4] == *b"PK\x01\x02") {
+            dos[at + 5] = 0;
+        }
+        dos
+    }
+
+    #[test]
+    fn a_name_in_utf8_reads_as_utf8_even_without_its_flag() {
+        // zip 9 reads a name that is valid UTF-8 as UTF-8 whatever bit 11 says (zip 8 read it as
+        // CP437 then). Pinned, because names make the folders and their fingerprints.
+        let zip = zip_of(&[("A/A.toc", TOC), ("A/é.lua", b"x")]);
+        let mut unflagged = zip.clone();
+        for i in 0..zip.len().saturating_sub(3) {
+            match &zip[i..i + 4] {
+                b"PK\x03\x04" => unflagged[i + 7] &= !0x08, // local header: flags at 6, bit 11
+                b"PK\x01\x02" => unflagged[i + 9] &= !0x08, // central header: flags at 8, bit 11
+                _ => {}
+            }
+        }
+        assert_ne!(unflagged, zip, "the writer set bit 11");
+        assert!(inspect(&unflagged).unwrap().folders[0].files.contains_key("é.lua"));
+    }
+
+    #[test]
+    fn a_file_that_is_not_the_size_it_claims_refuses_the_package() {
+        // A stored .toc whose two headers claim another size: longer than it claims or shorter.
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer.start_file("A/A.toc", options).unwrap();
+        writer.write_all(TOC).unwrap();
+        let honest = writer.finish().unwrap().into_inner();
+        assert!(inspect(&honest).is_ok());
+        let central = honest.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        assert_eq!(&honest[..4], b"PK\x03\x04");
+        for claim in [3u32, TOC.len() as u32 + 100] {
+            let mut zip = honest.clone();
+            zip[22..26].copy_from_slice(&claim.to_le_bytes());
+            zip[central + 24..central + 28].copy_from_slice(&claim.to_le_bytes());
+            assert!(inspect(&zip).is_err(), "claims {claim}");
+        }
     }
 
     #[test]

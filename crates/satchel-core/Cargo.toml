@@ -13,9 +13,12 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
 toml = "1.1.8"
-# Addon zips are read with this, decompression only, pure Rust; pinned to a release that has had
-# months in use (9.x was weeks old and still patched daily on 29 Oct 2026).
-zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# Addon zips are read, and settings zips written and read, with this, pure Rust. Pinned: a newer
+# version comes as a Dependabot pull request once it is two weeks old, and goes in only after its
+# reading code is read against ours. 9.0.4 (16 Oct 2026) changed: names are fallible and read as
+# UTF-8 whenever they are valid UTF-8; an entry made on MS-DOS has no Unix mode (package.rs judges
+# the raw bits for links); a read past the declared size fails; a bad Unicode-path field is ignored.
+zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

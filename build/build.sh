@@ -17,7 +17,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-image=survivors-satchel-build:rust-1.99.1
+image=survivors-satchel-build
 cache=${SATCHEL_BUILD_CACHE:-$PWD/.build-cache}
 target=x86_64-pc-windows-msvc
 

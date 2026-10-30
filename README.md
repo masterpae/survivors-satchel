@@ -51,6 +51,9 @@ folder you chose. It sends nothing about you anywhere.
 
 Windows 10 or 11, 64-bit.
 
+The exe needs no file beside it: the Satchel keeps its settings in
+`%APPDATA%\SurvivorsSatchel\settings.toml` (Settings shows the path).
+
 ## How sync decides
 
 Each PC remembers the version it last had. When the Satchel looks (at start, at Play, when the

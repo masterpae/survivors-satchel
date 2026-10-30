@@ -582,7 +582,7 @@ impl Bundle {
             if file.is_dir() {
                 continue;
             }
-            let name = file.name().to_string();
+            let name = file.name().map_err(|e| bad(e.to_string()))?.into_owned();
             if !allowed(&name) {
                 return Err(bad(format!("a settings zip holds {name:?}")));
             }
