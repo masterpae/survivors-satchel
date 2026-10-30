@@ -1,0 +1,7 @@
+# The C runtime is linked in (`+crt-static`), so the exe runs on a clean Windows without the
+# Visual C++ Redistributable. cargo-xwin reads this file, keeps the flag and adds the static UCRT
+# linker flags it needs; nothing else must set RUSTFLAGS or CARGO_ENCODED_RUSTFLAGS beside it.
+# The static runtime's objects name debug files Microsoft doesn't ship (LNK4099, a warning for
+# every build); the linker is told not to mention it.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/ignore:4099"]

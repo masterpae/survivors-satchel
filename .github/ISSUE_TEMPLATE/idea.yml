@@ -1,0 +1,10 @@
+name: An idea
+description: Something you'd like the Satchel to do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like the Satchel to do, and why
+    validations:
+      required: true

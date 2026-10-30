@@ -1,0 +1,19 @@
+[package]
+name = "ui-preview"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Renders the Satchel's screens to images on any OS, to look at the UI without Windows."
+license = "MIT"
+publish = false
+
+[dependencies]
+# The built-in catalog fills Browse with the real verified addons.
+satchel-core = { path = "../../crates/satchel-core" }
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software", "software-renderer-path"] }
+# The app's Windows backend turns these on; without a backend the preview asks for them itself
+# (the icons are SVG).
+i-slint-core = { version = "=1.18.1", default-features = false, features = ["image-decoders", "svg"] }
+
+[build-dependencies]
+slint-build = "1.18.1"

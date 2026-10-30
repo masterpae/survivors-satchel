@@ -1,0 +1,182 @@
+# The catalog's addons: the game Discord's verified-addons channel, each pinned to its author's
+# GitHub repository, so a look-alike copy can't take its place. `tools/catalog` reads this list and
+# GitHub and writes catalog.json beside it (build.sh catalog); everything about releases comes from
+# GitHub, only the fields below are ours.
+#
+#   id, name, group     how the Satchel shows it; groups as in Browse
+#   repo                owner/name on GitHub, the only place its files come from
+#   summary             what it does, in one line, from the author's own description
+#   folders             its folders in AddOns, the main one first
+#   asset               the release file that is the addon (* = any text)
+#   by_tag = true       instead of asset: the author publishes by tag, with no file attached
+#   doesnt_mix_with     folders its author asks you to turn off
+#   notes               shown before installing
+#
+# Every repo here is the one its post in the verified channel links to (checked 29 Oct 2026).
+
+# Full interfaces
+
+[[addon]]
+id = "aether-hud"
+name = "AetherHUD"
+repo = "NORehabRocket/AetherHUD"
+group = "Full interfaces"
+summary = "A full interface: run HUD, enemy plates, combat numbers, bags, chat, minimap"
+folders = ["AetherHUD"]
+asset = "AetherHUD.zip"
+
+[[addon]]
+id = "blackwell-ui"
+name = "BlackwellUI"
+repo = "Blackwellcode/BlackwellUI"
+group = "Full interfaces"
+summary = "A full HUD and analytics overhaul"
+folders = ["BlackwellUI"]
+asset = "BlackwellUI.zip"
+
+[[addon]]
+id = "bordo-ui"
+name = "BordoUI"
+repo = "threenox/BordoUI"
+group = "Full interfaces"
+summary = "A full interface: unit frames, chest radar, boss timeline, damage stats, death recap"
+folders = ["BordoUI"]
+by_tag = true
+
+[[addon]]
+id = "keijin-ui"
+name = "KeijinUI"
+repo = "KeijinDE/KeijinUI_modern-as-ui"
+group = "Full interfaces"
+summary = "A modern interface inspired by Dragonflight"
+folders = ["KeijinUI"]
+asset = "KeijinUI-*.zip"
+doesnt_mix_with = ["SurvivorsDragonUi", "SurvivorUI", "KeijinBuildBar", "KeijinRunCounters", "KeijinAchievements"]
+
+[[addon]]
+id = "survivor-ui"
+name = "Survivor UI"
+repo = "morderous/survivor-ui"
+group = "Full interfaces"
+summary = "A simple interface, with Survivor Plates"
+folders = ["SurvivorUI", "SurvivorPlates"]
+# The same release carries SurvivorUI-Installer.zip, a program: never that one.
+asset = "SurvivorUI-v*.zip"
+
+[[addon]]
+id = "survivors-dragon-ui"
+name = "SurvivorsDragonUi"
+repo = "migwynkriid13/SurvivorsDragonUi"
+group = "Full interfaces"
+summary = "A fixed HUD: run and boss bars, combat text"
+folders = ["SurvivorsDragonUi"]
+# Each release also carries avrt.dll (its own updater) and updater files: never those.
+asset = "SurvivorsDragonUi.zip"
+
+# Meters and HUDs
+
+[[addon]]
+id = "azeroth-fieldkit"
+name = "Azeroth FieldKit"
+repo = "Maidenquinn/azeroth-fieldkit"
+group = "Meters and HUDs"
+summary = "A helper kit: elite nameplates, boss frames, health warnings, a damage meter, chests on the minimap"
+folders = ["AzerothFieldKit"]
+# Pre-releases only, by its author's choice.
+asset = "AzerothFieldKit-*.zip"
+
+[[addon]]
+id = "azs-spell-meter"
+name = "AZS Spell Meter"
+repo = "kex0/AZSSpellMeter"
+group = "Meters and HUDs"
+summary = "Per-spell damage meter: the game's own numbers, plus kills and procs"
+folders = ["AZSSpellMeter"]
+asset = "AZSSpellMeter-*.zip"
+
+[[addon]]
+id = "local-clock"
+name = "Local Clock"
+repo = "JamieeLee/LocalClock-Addon"
+group = "Meters and HUDs"
+summary = "A clock on screen"
+folders = ["LocalClock"]
+asset = "LocalClock_AzerothSurvivors_*.zip"
+
+[[addon]]
+id = "lucky-odds"
+name = "LuckyOdds"
+repo = "cadoky/LuckyOdds"
+group = "Meters and HUDs"
+summary = "Rarity odds from your luck; caches and guardian lairs on the minimap"
+folders = ["LuckyOdds"]
+asset = "LuckyOdds-v*.zip"
+
+[[addon]]
+id = "move-ui"
+name = "Move UI"
+repo = "JamieeLee/MoveUI"
+group = "Meters and HUDs"
+summary = "Move any part of the interface"
+folders = ["MoveUI"]
+# Renamed between releases: MoveUI.zip, then MoveUI_AzerothSurvivors_build_<version>.zip.
+asset = "MoveUI*.zip"
+
+# Cursors
+
+[[addon]]
+id = "azeroth-cursor"
+name = "Azeroth Cursor"
+repo = "Maidenquinn/AzerothCursor"
+group = "Cursors"
+summary = "A cursor you can't lose: high-contrast ring, halo or crosshair, any colour"
+folders = ["AzerothCursor"]
+asset = "AzerothCursor-*.zip"
+
+[[addon]]
+id = "big-cursor"
+name = "Big Cursor"
+repo = "JamieeLee/BigCursor"
+group = "Cursors"
+summary = "A bigger cursor, in the size you choose"
+folders = ["BigCursor"]
+asset = "BigCursor.zip"
+
+[[addon]]
+id = "cursor-reticle"
+name = "Cursor Reticle"
+repo = "Muffla/CursorReticle"
+group = "Cursors"
+summary = "Never lose your cursor in a fight: rings, your health and a cooldown around it"
+folders = ["CursorReticle"]
+asset = "CursorReticle.zip"
+
+# Planners and journals
+
+[[addon]]
+id = "as-builder"
+name = "ASBuilder"
+repo = "cadoky/ASBuilder"
+group = "Planners and journals"
+summary = "Build planner: plan spells and jewelry, follow it while you play, share by code"
+folders = ["ASBuilder"]
+asset = "ASBuilder-v*.zip"
+
+[[addon]]
+id = "azerloot"
+name = "Azerloot"
+repo = "Kindagrey/Azerloot"
+group = "Planners and journals"
+summary = "Loot and run journal: every boss drop, a build planner, a wishlist"
+folders = ["Azerloot"]
+asset = "Azerloot-*.zip"
+
+[[addon]]
+id = "azeroth-stats"
+name = "Azeroth Stats"
+repo = "Maidenquinn/AzerothStats"
+group = "Planners and journals"
+summary = "Run history and build statistics, kept across sessions"
+folders = ["AzerothStats"]
+# Each release also carries a source-review zip, whose name has no dots before .zip.
+asset = "AzerothStats-*.*.*.zip"

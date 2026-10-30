@@ -1,0 +1,2220 @@
+// Survivor's Satchel: the tray icon, the main window, and the Play card.
+import { AboutSlint, Button, CheckBox, ComboBox, HorizontalBox, LineEdit, Palette, ScrollView, Spinner, StandardTableView, Switch, TabWidget, VerticalBox } from "std-widgets.slint";
+
+// The tray colour, and the shape inside the satchel, is the sync state.
+export enum TrayState { synced, busy, playing, needs-you, offline }
+
+export struct CardLine {
+    text: string,
+    done: bool,
+    warn: bool,
+}
+
+export struct PcTime {
+    name: string,
+    time: string,
+    share: float,
+}
+
+// A line of "Recent on this PC"; `kind` picks its icon: 0 sync, 1 addon, 2 game, 3 playtime,
+// 4 warning, 5 the Satchel itself.
+export struct RecentLine {
+    kind: int,
+    text: string,
+}
+
+// An addon in AddOns. `badge-kind`: 0 verified, 1 added by link, 2 from a file, 3 by hand.
+// `state-kind`: 0 plain, 1 an update, 2 needs a look.
+export struct AddonRow {
+    id: string,
+    initials: string,
+    name: string,
+    badge: string,
+    badge-kind: int,
+    author: string,
+    version: string,
+    released: string,
+    update: string,
+    state: string,
+    state-kind: int,
+    on: bool,
+    switchable: bool,
+    problem: string,
+    problems: string,
+    notes: string,
+    notes-title: string,
+    back-to: string,
+    pinned: bool,
+    can-pin: bool,
+    can-update: bool,
+    has-page: bool,
+    replace-with: string,
+    installing: bool,
+    // About the other PCs; `share-kind`: 0 plain, 1 news, 2 needs a look.
+    share: string,
+    share-kind: int,
+    shared: bool,
+    local-only: bool,
+    settings-per-pc: bool,
+    // Its settings changed here and on this PC: the player picks.
+    ask-pc: string,
+    // Another PC has it; it comes here at the next Play.
+    incoming: bool,
+}
+
+// An addon removed on this PC (the Addons tab's Removed page).
+export struct RemovedRow {
+    id: string,
+    initials: string,
+    name: string,
+    badge: string,
+    badge-kind: int,
+    version: string,
+    when: string,
+    detail: string,
+    can-install: bool,
+    note: string,
+}
+
+// A block of a version's changes: `kind` 0 a paragraph, 1 a heading, 2 a point, 3 a point inside
+// a point.
+export struct ChangelogBlock {
+    kind: int,
+    text: string,
+}
+
+export struct ChangelogEntry {
+    version: string,
+    date: string,
+    blocks: [ChangelogBlock],
+}
+
+// The Settings fields as they are saved: Save lights up only when the form differs.
+export struct SettingsForm {
+    game-dir: string,
+    sync: bool,
+    folder: string,
+    pc-name: string,
+    start-with-windows: bool,
+    desktop-shortcut: bool,
+    notifications: bool,
+    addons-auto: bool,
+    addons-shared: bool,
+    pause-when-away: bool,
+    theme: int,
+    game-shared: bool,
+}
+
+// A verified addon on offer.
+export struct OfferRow {
+    id: string,
+    initials: string,
+    name: string,
+    author: string,
+    summary: string,
+    group: string,
+    version: string,
+    installed: bool,
+    installing: bool,
+    warning: string,
+    notes: string,
+}
+
+// The app's own colours, each in a light and a dark version; `dark` follows the window's theme.
+global Look {
+    in-out property <bool> dark;
+    out property <color> muted: dark ? #9aa1ab : #8a8f98;
+    out property <color> green: dark ? #5ccb8c : #1f8a4c;
+    out property <color> blue: dark ? #78a9f5 : #2361c4;
+    out property <color> gold: dark ? #e0b453 : #a8770c;
+    out property <color> amber: dark ? #f0a650 : #b56d00;
+    out property <color> red: dark ? #f1867e : #b3312a;
+    // Text on the tinted panels: the Play tab's banner, a passing message.
+    out property <color> ink: dark ? #e9edf3 : #1d2433;
+    out property <color> note-paper: dark ? #1e2a3d : #eaf1fc;
+    // Who vouches for an addon: verified, added by link, from a file, by hand.
+    public pure function badge-ink(kind: int) -> color {
+        kind == 0 ? green : kind == 1 ? blue : kind == 2 ? gold : muted
+    }
+    public pure function badge-paper(kind: int) -> color {
+        dark ? (kind == 0 ? #1d3a2a : kind == 1 ? #1e2c46 : kind == 2 ? #3d3220 : #2b2f36)
+            : (kind == 0 ? #e3f3e9 : kind == 1 ? #e6eefb : kind == 2 ? #f8efd9 : #eceef1)
+    }
+    // The Play tab's banner, by the tray's state.
+    public pure function banner(state: TrayState) -> color {
+        state == TrayState.needs-you ? (dark ? #43231f : #fbecea)
+            : state == TrayState.offline ? (dark ? #3d2f17 : #fdf3e1)
+            : state == TrayState.busy ? (dark ? #1e2a3d : #eaf1fc)
+            : state == TrayState.playing ? (dark ? #3a3119 : #fbf4e2)
+            : (dark ? #1b3326 : #e9f6ee)
+    }
+}
+
+export component SatchelTray inherits SystemTrayIcon {
+    in property <TrayState> state: TrayState.synced;
+    in property <string> status: "Starting";
+    in property <bool> sync-on;
+    callback open-tab(int);
+    callback play();
+    callback sync-now();
+    callback quit();
+
+    icon: root.state == TrayState.busy ? @image-url("icons/satchel-blue.svg")
+        : root.state == TrayState.playing ? @image-url("icons/satchel-gold.svg")
+        : root.state == TrayState.needs-you ? @image-url("icons/satchel-red.svg")
+        : root.state == TrayState.offline ? @image-url("icons/satchel-amber.svg")
+        : @image-url("icons/satchel-green.svg");
+    tooltip: "Survivor's Satchel · " + root.status;
+    clicked => { root.open-tab(-1); }
+
+    Menu {
+        MenuItem {
+            title: "Play Azeroth Survivors";
+            activated => { root.play(); }
+        }
+        MenuItem {
+            title: "Sync now";
+            enabled: root.sync-on;
+            activated => { root.sync-now(); }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: "Addons…";
+            activated => { root.open-tab(1); }
+        }
+        MenuItem {
+            title: "Saves…";
+            activated => { root.open-tab(2); }
+        }
+        MenuItem {
+            title: "Playtime…";
+            activated => { root.open-tab(3); }
+        }
+        MenuItem {
+            title: "Settings…";
+            activated => { root.open-tab(4); }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: "Exit";
+            activated => { root.quit(); }
+        }
+    }
+}
+
+// The small card in the corner while Play runs; it grows with its lines.
+export component PlayCard inherits Window {
+    in property <[CardLine]> lines;
+    in property <bool> asking;
+    // The lines' text as it wraps at this width, counted by the app: a wrapped line isn't measured
+    // until the card has been laid out once, and the card is placed before that.
+    in property <int> text-lines: 1;
+    out property <length> wanted-height: min(max(120px, 48px + root.text-lines * 20px + root.lines.length * 6px + (root.asking ? 46px : 0px)), 460px);
+    callback cancel();
+    callback play-anyway();
+    // A newer Satchel beside sync\: its version, and the button that puts it in place.
+    in property <string> update-version;
+    callback update-now();
+    // Dark or light, as Settings' theme says.
+    in property <bool> dark;
+    init => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+        Look.dark = root.dark;
+    }
+    changed dark => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+        Look.dark = root.dark;
+    }
+
+    title: "Survivor's Satchel";
+    no-frame: true;
+    always-on-top: true;
+    width: 380px;
+    height: root.wanted-height;
+    background: Palette.background;
+
+    Rectangle {
+        border-width: 1px;
+        border-color: Palette.border;
+
+        body := VerticalBox {
+            alignment: start;
+            Text {
+                text: "Survivor's Satchel";
+                font-weight: 700;
+            }
+            for line in root.lines: HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: line.done ? "✓" : line.warn ? "!" : "…";
+                    width: 14px;
+                    color: line.warn ? Look.amber : line.done ? Look.green : Palette.foreground;
+                    font-weight: 700;
+                }
+                Text {
+                    text: line.text;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+            if root.asking: HorizontalBox {
+                padding: 0;
+                alignment: end;
+                Button {
+                    text: "Cancel";
+                    clicked => { root.cancel(); }
+                }
+                if root.update-version != "": Button {
+                    text: "Update now";
+                    primary: true;
+                    clicked => { root.update-now(); }
+                }
+                Button {
+                    text: "Play anyway";
+                    primary: root.update-version == "";
+                    clicked => { root.play-anyway(); }
+                }
+            }
+        }
+    }
+}
+
+component Card inherits Rectangle {
+    in property <string> heading;
+    in property <string> main;
+    in property <string> detail;
+    horizontal-stretch: 1;
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 6px;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 2px;
+        Text {
+            text: root.heading;
+            font-size: 11px;
+            color: Look.muted;
+        }
+        Text {
+            text: root.main;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        Text {
+            text: root.detail;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// A pick between two progresses: a card that can be selected.
+component Choice inherits Rectangle {
+    in property <bool> selected;
+    in property <string> heading;
+    in property <string> detail;
+    callback picked();
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Palette.accent-background : Palette.border;
+    border-radius: 6px;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 2px;
+        Text {
+            text: (root.selected ? "● " : "○ ") + root.heading;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.detail;
+            wrap: word-wrap;
+            color: Look.muted;
+        }
+    }
+    TouchArea {
+        clicked => { root.picked(); }
+    }
+}
+
+// A panel over the whole window; it swallows clicks meant for what is underneath.
+component Overlay inherits Rectangle {
+    background: Palette.background;
+    TouchArea { }
+    @children
+}
+
+// A small rounded button that is on or off: the Addons tab's pages and Browse's groups.
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked();
+    height: 26px;
+    border-radius: 13px;
+    border-width: root.active ? 0 : 1px;
+    border-color: Palette.border;
+    background: root.active ? Palette.accent-background : touch.has-hover ? Palette.alternate-background : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.text;
+            font-size: 12px;
+            color: root.active ? Palette.accent-foreground : Palette.foreground;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// The square with an addon's initials, in the colour of who vouches for it.
+component Initials inherits Rectangle {
+    in property <string> text;
+    in property <int> kind;
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
+    background: Look.badge-paper(root.kind);
+
+    Text {
+        text: root.text;
+        font-size: 12px;
+        font-weight: 700;
+        color: Look.badge-ink(root.kind);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// Who vouches for an addon; always shown.
+component Badge inherits Rectangle {
+    in property <string> text;
+    in property <int> kind;
+    border-radius: 4px;
+    background: Look.badge-paper(root.kind);
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+        Text {
+            text: root.text;
+            font-size: 10px;
+            font-weight: 600;
+            color: Look.badge-ink(root.kind);
+            vertical-alignment: center;
+        }
+    }
+}
+
+// An install under way, where its button was; `text` names another wait (a check for updates).
+component Installing inherits HorizontalLayout {
+    in property <string> text: "Installing…";
+    spacing: 6px;
+    alignment: start;
+    // A fixed size overrides the spinner's own 30px minimum.
+    Spinner {
+        indeterminate: true;
+        width: 20px;
+        height: 20px;
+    }
+    Text {
+        text: root.text;
+        vertical-alignment: center;
+        color: Look.muted;
+    }
+}
+
+// One installed addon; a click opens what can be done with it.
+component AddonItem inherits Rectangle {
+    in property <AddonRow> addon;
+    in property <bool> open;
+    in property <bool> busy;
+    callback toggle();
+    callback switched(bool);
+    callback update();
+    callback replace();
+    callback back();
+    callback keep(bool);
+    callback page();
+    callback folder();
+    callback remove();
+    callback local-only(bool);
+    callback settings-per-pc(bool);
+    callback settings-choice(bool);
+    border-width: 1px;
+    border-color: root.open ? Palette.accent-background : Palette.border;
+    border-radius: 6px;
+
+    TouchArea {
+        clicked => { root.toggle(); }
+    }
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout {
+                alignment: start;
+                Initials {
+                    text: root.addon.initials;
+                    kind: root.addon.badge-kind;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 3px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.addon.name;
+                        font-weight: 600;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Badge {
+                            text: root.addon.badge;
+                            kind: root.addon.badge-kind;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: (root.addon.author != "" ? root.addon.author + " · " : "") + root.addon.version
+                            + (root.addon.released != "" ? " · " + root.addon.released : "");
+                        font-size: 12px;
+                        color: Look.muted;
+                        overflow: elide;
+                    }
+                    if root.addon.update != "": Text {
+                        text: "→ " + root.addon.update;
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: Look.green;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                if root.addon.state != "": Text {
+                    text: root.addon.state;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    color: root.addon.state-kind == 1 ? Look.green : root.addon.state-kind == 2 ? Look.amber : Look.muted;
+                }
+                if root.addon.share != "": Text {
+                    text: root.addon.share;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    color: root.addon.share-kind == 1 ? Look.green : root.addon.share-kind == 2 ? Look.amber : Look.muted;
+                }
+                if root.addon.problem != "" && !root.open: Text {
+                    text: "⚠ " + root.addon.problem;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    color: Look.amber;
+                }
+            }
+            if !root.addon.incoming: VerticalLayout {
+                alignment: start;
+                Switch {
+                    checked: root.addon.on;
+                    enabled: root.addon.switchable && !root.busy;
+                    toggled => { root.switched(self.checked); }
+                }
+            }
+        }
+        if root.open: VerticalLayout {
+            spacing: 6px;
+            if root.addon.problems != "": Text {
+                text: root.addon.problems;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: Look.amber;
+            }
+            if root.addon.notes != "": Text {
+                text: root.addon.notes-title;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            if root.addon.notes != "": Text {
+                text: root.addon.notes;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+            if root.addon.ask-pc != "": HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                Button {
+                    text: "Keep this PC's";
+                    enabled: !root.busy;
+                    clicked => { root.settings-choice(true); }
+                }
+                Button {
+                    text: "Use " + root.addon.ask-pc + "'s";
+                    enabled: !root.busy;
+                    clicked => { root.settings-choice(false); }
+                }
+            }
+            if root.addon.incoming && root.addon.has-page: HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: "GitHub page";
+                    clicked => { root.page(); }
+                }
+            }
+            if !root.addon.incoming: HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                if root.addon.installing: Installing {}
+                if root.addon.can-update && !root.addon.installing: Button {
+                    text: "Update now";
+                    primary: true;
+                    enabled: !root.busy;
+                    clicked => { root.update(); }
+                }
+                if root.addon.replace-with != "" && !root.addon.installing: Button {
+                    text: "Replace with " + root.addon.replace-with;
+                    enabled: !root.busy;
+                    clicked => { root.replace(); }
+                }
+                if root.addon.back-to != "": Button {
+                    text: "Go back to " + root.addon.back-to;
+                    enabled: !root.busy;
+                    clicked => { root.back(); }
+                }
+                if root.addon.has-page: Button {
+                    text: "GitHub page";
+                    clicked => { root.page(); }
+                }
+                Button {
+                    text: "Folder";
+                    clicked => { root.folder(); }
+                }
+                Button {
+                    text: "Remove…";
+                    enabled: !root.busy;
+                    clicked => { root.remove(); }
+                }
+            }
+            if root.addon.can-pin: CheckBox {
+                text: "Keep this version: no updates until I untick this";
+                checked: root.addon.pinned;
+                toggled => { root.keep(self.checked); }
+            }
+            if root.addon.shared: CheckBox {
+                text: "Only on this PC: not shared with my other PCs";
+                checked: root.addon.local-only;
+                toggled => { root.local-only(self.checked); }
+            }
+            if root.addon.shared && !root.addon.local-only: CheckBox {
+                text: "Settings per PC: each PC keeps its own (on every PC)";
+                checked: root.addon.settings-per-pc;
+                toggled => { root.settings-per-pc(self.checked); }
+            }
+        }
+    }
+}
+
+// One verified addon in Browse; a click shows what's new in it.
+component OfferItem inherits Rectangle {
+    in property <OfferRow> offer;
+    in property <bool> open;
+    in property <bool> busy;
+    callback toggle();
+    callback install();
+    callback page();
+    border-width: 1px;
+    border-color: root.open ? Palette.accent-background : Palette.border;
+    border-radius: 6px;
+
+    TouchArea {
+        clicked => { root.toggle(); }
+    }
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout {
+                alignment: start;
+                Initials {
+                    text: root.offer.initials;
+                    kind: 0;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 3px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.offer.name;
+                        font-weight: 600;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Badge {
+                            text: "Verified";
+                            kind: 0;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                Text {
+                    text: root.offer.author + " · " + root.offer.summary + " · " + root.offer.version;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    color: Look.muted;
+                }
+                if root.offer.warning != "": Text {
+                    text: "⚠ " + root.offer.warning;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    color: Look.amber;
+                }
+            }
+            VerticalLayout {
+                alignment: start;
+                if root.offer.installed: Text {
+                    text: "Installed";
+                    font-size: 12px;
+                    color: Look.green;
+                }
+                if !root.offer.installed && root.offer.installing: Installing {}
+                if !root.offer.installed && !root.offer.installing: Button {
+                    text: "Install";
+                    enabled: !root.busy;
+                    clicked => { root.install(); }
+                }
+            }
+        }
+        if root.open: VerticalLayout {
+            spacing: 6px;
+            if root.offer.notes != "": Text {
+                text: "What's new in " + root.offer.version;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            if root.offer.notes != "": Text {
+                text: root.offer.notes;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: "View on GitHub";
+                    clicked => { root.page(); }
+                }
+            }
+        }
+    }
+}
+
+// A label over a value, for what a lookup found.
+// Text that does something when clicked.
+// A heading in Settings' one scroll: General, Sync, Addons, Game, About.
+component GroupHeading inherits VerticalLayout {
+    in property <string> text;
+    padding-top: 6px;
+    spacing: 4px;
+    Text {
+        text: root.text;
+        font-size: 15px;
+        font-weight: 700;
+    }
+    Rectangle {
+        height: 1px;
+        background: Palette.border;
+    }
+}
+
+// One group of Settings' scroll, its heading and fields together; the groups alternate their
+// background, so each is easy to find.
+component Section inherits Rectangle {
+    in property <bool> alternate;
+    border-radius: 6px;
+    background: root.alternate ? Palette.alternate-background : Palette.background;
+    VerticalLayout {
+        padding: 10px;
+        padding-top: 4px;
+        spacing: 8px;
+        @children
+    }
+}
+
+component LinkText inherits Rectangle {
+    in property <string> text;
+    in property <color> ink: Look.muted;
+    in property <length> font-size: 11px;
+    callback clicked();
+    HorizontalLayout {
+        Text {
+            text: root.text;
+            font-size: root.font-size;
+            color: touch.has-hover ? Palette.foreground : root.ink;
+            wrap: word-wrap;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// When the game isn't on this PC, or the Satchel can't find it: the way to it.
+component NoGame inherits VerticalBox {
+    callback find();
+    callback choose();
+    callback get-game();
+    alignment: center;
+    Text {
+        text: "Azeroth Survivors isn't here";
+        font-size: 20px;
+        font-weight: 700;
+        horizontal-alignment: center;
+    }
+    Text {
+        text: "The Satchel can't find the game on this PC. If it's installed, let the Satchel look for it, or choose its folder. If it isn't, it comes from the game's website.";
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        color: Look.muted;
+    }
+    HorizontalBox {
+        alignment: center;
+        Button {
+            text: "Find it";
+            primary: true;
+            clicked => { root.find(); }
+        }
+        Button {
+            text: "Choose its folder";
+            clicked => { root.choose(); }
+        }
+        Button {
+            text: "Get the game";
+            clicked => { root.get-game(); }
+        }
+    }
+}
+
+// An addon removed on this PC, and the way back.
+component RemovedItem inherits Rectangle {
+    in property <RemovedRow> removed;
+    in property <bool> busy;
+    callback install();
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 6px;
+
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: start;
+            Initials {
+                text: root.removed.initials;
+                kind: root.removed.badge-kind;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 3px;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.removed.name;
+                    font-weight: 600;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Badge {
+                        text: root.removed.badge;
+                        kind: root.removed.badge-kind;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Text {
+                text: root.removed.version + " · " + root.removed.when;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: Look.muted;
+            }
+            Text {
+                text: root.removed.note != "" ? root.removed.note : root.removed.detail;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: root.removed.note != "" ? Look.amber : Look.muted;
+            }
+        }
+        if root.removed.can-install: VerticalLayout {
+            alignment: center;
+            Button {
+                text: "Install again";
+                enabled: !root.busy;
+                clicked => { root.install(); }
+            }
+        }
+    }
+}
+
+// One version in What's new; a click opens what changed in it.
+component ChangelogItem inherits Rectangle {
+    in property <ChangelogEntry> entry;
+    in property <bool> current;
+    in property <bool> open;
+    callback toggle();
+    border-width: 1px;
+    border-color: root.open ? Palette.accent-background : Palette.border;
+    border-radius: 6px;
+
+    TouchArea {
+        clicked => { root.toggle(); }
+    }
+    VerticalLayout {
+        padding: 10px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: (root.open ? "▾ " : "▸ ") + root.entry.version;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            if root.current: VerticalLayout {
+                alignment: center;
+                Badge {
+                    text: "This version";
+                    kind: 0;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: root.entry.date;
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+            }
+        }
+        if root.open: VerticalLayout {
+            spacing: 4px;
+            for block in root.entry.blocks: HorizontalLayout {
+                padding-left: block.kind == 3 ? 30px : block.kind == 2 ? 12px : 0px;
+                padding-top: block.kind == 1 ? 6px : 0px;
+                spacing: 6px;
+                if block.kind >= 2: Text {
+                    text: block.kind == 3 ? "–" : "•";
+                    color: Look.muted;
+                }
+                Text {
+                    text: block.text;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                    font-weight: block.kind == 1 ? 600 : 400;
+                }
+            }
+        }
+    }
+}
+
+component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 1px;
+    Text {
+        text: root.label;
+        font-size: 11px;
+        color: Look.muted;
+    }
+    Text {
+        text: root.value;
+        wrap: word-wrap;
+    }
+}
+
+export component MainWindow inherits Window {
+    // The Play tab.
+    in property <TrayState> state;
+    in property <string> banner;
+    in property <bool> busy;
+    in property <bool> sync-on;
+    in property <string> here-title;
+    in property <string> here-main;
+    in property <string> here-detail;
+    in property <string> other-title;
+    in property <string> other-main;
+    in property <string> other-detail;
+    in property <[RecentLine]> recent;
+    callback play();
+    callback sync-now();
+    callback open-folder();
+
+    // The Addons tab: 0 Installed, 1 Browse, 2 Add, 3 Removed.
+    in-out property <int> addons-page: 0;
+    in property <[AddonRow]> addon-rows;
+    in property <int> addons-count;
+    in property <string> addons-header;
+    in property <string> addons-share;
+    in property <bool> can-update-all;
+    in property <string> addons-footer;
+    in property <string> addons-notice;
+    in property <string> addons-message;
+    in-out property <string> addon-open;
+    callback addon-switch(string, bool);
+    callback addon-update(string);
+    callback addon-back(string);
+    callback addon-keep(string, bool);
+    callback addon-remove(string, bool);
+    callback addon-page(string);
+    callback addon-folder(string);
+    callback addon-local-only(string, bool);
+    callback addon-settings-per-pc(string, bool);
+    callback addon-settings-choice(string, bool);
+    callback addons-check();
+    callback addons-update-all();
+    callback addons-open-folder();
+    // Browse: the rows shown are filtered by the search and the group (0: all).
+    in property <[OfferRow]> offer-rows;
+    in property <[string]> browse-groups;
+    in property <string> browse-note;
+    in-out property <string> browse-search;
+    in-out property <int> browse-group: 0;
+    in-out property <string> offer-open;
+    callback browse-install(string);
+    callback browse-filter();
+    // Add: 0 nothing yet, 1 looking, 2 found, 3 failed.
+    in-out property <string> link-text;
+    in property <int> link-state;
+    in property <string> link-message;
+    in property <string> link-owner;
+    in property <string> link-release;
+    in property <string> link-goes;
+    in property <string> link-note;
+    in property <bool> link-warn;
+    in property <bool> link-installing;
+    callback link-lookup(string);
+    callback link-install();
+    callback link-clear();
+    callback import-zip();
+    // "Remove…" asks first.
+    in-out property <string> remove-id;
+    in-out property <string> remove-name;
+    in-out property <bool> remove-settings;
+
+    // The Saves tab.
+    in property <[[StandardListViewItem]]> save-rows;
+    in property <string> saves-note;
+    in-out property <int> save-row: -1;
+    callback show-in-folder(int);
+    callback bring-back(int);
+
+    // The Playtime tab.
+    in property <string> today;
+    in property <string> week;
+    in property <string> all-time;
+    in property <[PcTime]> pc-times;
+    in property <[string]> sessions;
+
+    // The Settings tab (and the first start, which shows the same fields).
+    in-out property <string> game-dir;
+    in property <string> game-status;
+    in-out property <bool> sync-switch;
+    in-out property <string> sync-folder;
+    in property <string> folder-status;
+    in-out property <string> pc-name;
+    // Why the name typed wasn't saved (another PC syncing there has it); empty otherwise.
+    in-out property <string> name-status;
+    in-out property <bool> start-with-windows;
+    in-out property <bool> desktop-shortcut;
+    in-out property <bool> notifications;
+    in-out property <bool> addons-auto;
+    in-out property <bool> addons-shared;
+    in-out property <bool> pause-when-away;
+    in property <string> settings-path;
+    callback detect-game();
+    callback save-settings();
+    callback default-settings();
+    // 0 System, 1 Light, 2 Dark.
+    in-out property <int> theme;
+    in-out property <bool> game-shared;
+    // Where the game's own settings stand with the other PCs; `game-line-kind` 0 plain, 1 news,
+    // 2 needs a look. `game-ask-pc`: they changed here and there, the player picks.
+    in property <string> game-line;
+    in property <int> game-line-kind;
+    in property <string> game-ask-pc;
+    callback game-settings-choice(bool);
+    // This PC's own game settings from before it joined, kept on the NAS ("Use them instead"),
+    // and the last answer about the game's settings.
+    in property <string> game-own;
+    in property <string> game-note;
+    callback game-settings-own();
+    // A newer Satchel: the Play tab's line, the version Update now puts in place (empty: none
+    // beside sync\), and whether nothing syncs until then.
+    in property <string> update-text;
+    in property <string> update-version;
+    in property <bool> update-gated;
+    callback update-now();
+    // About's Check for updates, and what it found (empty before a check). `checking`: from the
+    // click until the answer, "Checking…" stands where the button was.
+    callback check-updates();
+    in-out property <string> check-result;
+    in property <bool> checking;
+    in property <SettingsForm> saved-form;
+    property <bool> settings-changed: root.game-dir != root.saved-form.game-dir || root.sync-switch != root.saved-form.sync
+        || root.sync-folder != root.saved-form.folder || root.pc-name != root.saved-form.pc-name
+        || root.start-with-windows != root.saved-form.start-with-windows || root.desktop-shortcut != root.saved-form.desktop-shortcut
+        || root.notifications != root.saved-form.notifications || root.addons-auto != root.saved-form.addons-auto
+        || root.addons-shared != root.saved-form.addons-shared || root.pause-when-away != root.saved-form.pause-when-away
+        || root.theme != root.saved-form.theme || root.game-shared != root.saved-form.game-shared;
+
+    // About the Satchel itself, and What's new (every version's changes).
+    in property <string> app-version;
+    in property <string> app-released;
+    in property <string> app-build;
+    in property <string> repo-url;
+    // Report a problem: the repository's bug report form with this version filled in (there
+    // whenever `repo-url` is).
+    in property <string> issue-url;
+    in property <[ChangelogEntry]> changelog;
+    // The Play tab's last line; `version-new`: it says "Updated to …".
+    in property <string> version-line;
+    in property <bool> version-new;
+    in-out property <bool> whats-new-open;
+    in-out property <string> changelog-open;
+    callback whats-new-seen();
+    callback open-url(string);
+    function open-whats-new() {
+        root.changelog-open = root.app-version;
+        root.whats-new-open = true;
+        root.whats-new-seen();
+    }
+
+    // The game isn't in its folder: Play, Addons, Saves and Playtime say so.
+    in property <bool> game-found: true;
+    callback find-game();
+    callback open-game-site();
+
+    // The Addons tab's Removed page.
+    in property <[RemovedRow]> removed-rows;
+    callback install-again(string);
+
+    // Dark or light, as Settings' theme says.
+    in property <bool> dark;
+    init => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+        Look.dark = root.dark;
+    }
+    changed dark => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+        Look.dark = root.dark;
+    }
+
+    // Play, Addons, Saves, Playtime, Settings.
+    in-out property <int> tab: 0;
+
+    // "Needs you": two PCs moved on separately.
+    in property <bool> needs-you;
+    in property <string> needs-here;
+    in property <string> needs-other;
+    in property <string> needs-other-pc;
+    callback keep-here();
+    callback use-other();
+    callback decide-later();
+
+    // First start.
+    in property <bool> setup;
+    in property <bool> setup-pick;
+    in property <string> setup-here;
+    in property <string> setup-other;
+    in-out property <int> setup-choice: 0;
+    callback finish-setup();
+
+    title: "Survivor's Satchel";
+    icon: @image-url("icons/satchel.svg");
+    preferred-width: 600px;
+    preferred-height: 660px;
+    min-width: 540px;
+    min-height: 600px;
+
+    TabWidget {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        current-index <=> root.tab;
+
+        Tab {
+            title: "Play";
+            VerticalBox {
+                Rectangle {
+                    border-radius: 6px;
+                    background: Look.banner(root.state);
+                    HorizontalLayout {
+                        padding: 10px;
+                        Text {
+                            text: root.banner;
+                            wrap: word-wrap;
+                            color: Look.ink;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.update-text != "": HorizontalLayout {
+                    spacing: 10px;
+                    Text {
+                        text: root.update-text;
+                        color: root.update-gated ? Look.amber : Look.blue;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    if root.update-version != "": Button {
+                        text: "Update now";
+                        enabled: !root.busy;
+                        clicked => { root.update-now(); }
+                    }
+                }
+                HorizontalBox {
+                    padding: 0;
+                    Card {
+                        heading: root.here-title;
+                        main: root.here-main;
+                        detail: root.here-detail;
+                    }
+                    Card {
+                        heading: root.other-title;
+                        main: root.other-main;
+                        detail: root.other-detail;
+                    }
+                }
+                HorizontalBox {
+                    padding: 0;
+                    alignment: start;
+                    Button {
+                        text: "Play Azeroth Survivors";
+                        primary: true;
+                        enabled: !root.busy;
+                        clicked => { root.play(); }
+                    }
+                    if root.sync-on: Button {
+                        text: "Sync now";
+                        enabled: !root.busy;
+                        clicked => { root.sync-now(); }
+                    }
+                    if root.sync-on: Button {
+                        text: "Open the network folder";
+                        clicked => { root.open-folder(); }
+                    }
+                }
+                Text {
+                    text: "Recent on this PC";
+                    font-weight: 600;
+                }
+                for line in root.recent: HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 14px;
+                            height: 14px;
+                            source: line.kind == 1 ? @image-url("icons/kind-addon.svg")
+                                : line.kind == 2 ? @image-url("icons/kind-game.svg")
+                                : line.kind == 3 ? @image-url("icons/kind-playtime.svg")
+                                : line.kind == 4 ? @image-url("icons/kind-warning.svg")
+                                : line.kind == 5 ? @image-url("icons/kind-satchel.svg")
+                                : @image-url("icons/kind-sync.svg");
+                            colorize: line.kind == 4 ? Look.amber : line.kind == 1 ? Look.blue : line.kind == 2 ? Look.gold : Look.muted;
+                        }
+                    }
+                    Text {
+                        text: line.text;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                // The Satchel's own version; a click opens What's new.
+                HorizontalLayout {
+                    Rectangle { horizontal-stretch: 1; }
+                    LinkText {
+                        text: root.version-line;
+                        ink: root.version-new ? Look.blue : Look.muted;
+                        clicked => { root.open-whats-new(); }
+                    }
+                }
+            }
+            if !root.game-found: Overlay {
+                NoGame {
+                    find => { root.find-game(); }
+                    choose => { root.tab = 4; }
+                    get-game => { root.open-game-site(); }
+                }
+            }
+        }
+
+        Tab {
+            title: "Addons";
+            VerticalBox {
+                HorizontalLayout {
+                    spacing: 6px;
+                    Chip {
+                        text: "Installed · " + root.addons-count;
+                        active: root.addons-page == 0;
+                        clicked => { root.addons-page = 0; }
+                    }
+                    Chip {
+                        text: "Browse";
+                        active: root.addons-page == 1;
+                        clicked => { root.addons-page = 1; }
+                    }
+                    Chip {
+                        text: "Add";
+                        active: root.addons-page == 2;
+                        clicked => { root.addons-page = 2; }
+                    }
+                    Chip {
+                        text: root.removed-rows.length > 0 ? "Removed · " + root.removed-rows.length : "Removed";
+                        active: root.addons-page == 3;
+                        clicked => { root.addons-page = 3; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                if root.addons-message != "": Rectangle {
+                    border-radius: 6px;
+                    background: Look.note-paper;
+                    HorizontalLayout {
+                        padding: 8px;
+                        Text {
+                            text: root.addons-message;
+                            wrap: word-wrap;
+                            color: Look.ink;
+                        }
+                    }
+                }
+                if root.addons-notice != "": Text {
+                    text: root.addons-notice;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    color: Look.muted;
+                }
+
+                if root.addons-page == 0: VerticalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: root.addons-header;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            color: root.can-update-all ? Look.green : Palette.foreground;
+                        }
+                        if root.can-update-all: Button {
+                            text: "Update all";
+                            enabled: !root.busy;
+                            clicked => { root.addons-update-all(); }
+                        }
+                    }
+                    if root.addons-share != "": Text {
+                        text: root.addons-share;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        color: Look.muted;
+                    }
+                    // The viewport is as tall as the whole list, so the rows keep their height and scroll.
+                    installed-scroll := ScrollView {
+                        vertical-stretch: 1;
+                        content-height: installed-list.preferred-height;
+                        installed-list := VerticalLayout {
+                            width: installed-scroll.visible-width;
+                            height: self.preferred-height;
+                            alignment: start;
+                            spacing: 6px;
+                            for row in root.addon-rows: AddonItem {
+                                addon: row;
+                                open: root.addon-open == row.id;
+                                busy: root.busy;
+                                toggle => { root.addon-open = root.addon-open == row.id ? "" : row.id; }
+                                switched(on) => { root.addon-switch(row.id, on); }
+                                update => { root.addon-update(row.id); }
+                                replace => { root.browse-install(row.id); }
+                                back => { root.addon-back(row.id); }
+                                keep(on) => { root.addon-keep(row.id, on); }
+                                page => { root.addon-page(row.id); }
+                                folder => { root.addon-folder(row.id); }
+                                local-only(on) => { root.addon-local-only(row.id, on); }
+                                settings-per-pc(on) => { root.addon-settings-per-pc(row.id, on); }
+                                settings-choice(keep) => { root.addon-settings-choice(row.id, keep); }
+                                remove => {
+                                    root.remove-settings = false;
+                                    root.remove-name = row.name;
+                                    root.remove-id = row.id;
+                                }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: root.addons-footer;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            color: Look.muted;
+                        }
+                        Button {
+                            text: "Check now";
+                            clicked => { root.addons-check(); }
+                        }
+                        Button {
+                            text: "Open AddOns folder";
+                            clicked => { root.addons-open-folder(); }
+                        }
+                    }
+                }
+
+                if root.addons-page == 1: VerticalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    LineEdit {
+                        placeholder-text: "Search verified addons";
+                        text <=> root.browse-search;
+                        edited => { root.browse-filter(); }
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Chip {
+                            text: "All";
+                            active: root.browse-group == 0;
+                            clicked => {
+                                root.browse-group = 0;
+                                root.browse-filter();
+                            }
+                        }
+                        for group[i] in root.browse-groups: Chip {
+                            text: group;
+                            active: root.browse-group == i + 1;
+                            clicked => {
+                                root.browse-group = i + 1;
+                                root.browse-filter();
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    offer-scroll := ScrollView {
+                        vertical-stretch: 1;
+                        content-height: offer-list.preferred-height;
+                        offer-list := VerticalLayout {
+                            width: offer-scroll.visible-width;
+                            height: self.preferred-height;
+                            alignment: start;
+                            spacing: 6px;
+                            for offer in root.offer-rows: OfferItem {
+                                offer: offer;
+                                open: root.offer-open == offer.id;
+                                busy: root.busy;
+                                toggle => { root.offer-open = root.offer-open == offer.id ? "" : offer.id; }
+                                install => { root.browse-install(offer.id); }
+                                page => { root.addon-page(offer.id); }
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.browse-note;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                        color: Look.muted;
+                    }
+                }
+
+                if root.addons-page == 2: VerticalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    Text {
+                        text: "A GitHub link, or owner/name";
+                        font-weight: 600;
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        LineEdit {
+                            text <=> root.link-text;
+                            placeholder-text: "github.com/owner/addon";
+                            horizontal-stretch: 1;
+                            accepted(text) => { root.link-lookup(text); }
+                        }
+                        Button {
+                            text: "Look up";
+                            enabled: root.link-text != "" && root.link-state != 1;
+                            clicked => { root.link-lookup(root.link-text); }
+                        }
+                    }
+                    if root.link-state == 1: Text {
+                        text: root.link-message;
+                        color: Look.muted;
+                    }
+                    if root.link-state == 3: Text {
+                        text: root.link-message;
+                        wrap: word-wrap;
+                        color: Look.red;
+                    }
+                    if root.link-state == 2: Rectangle {
+                        border-width: root.link-warn ? 2px : 1px;
+                        border-color: root.link-warn ? Look.red : Palette.border;
+                        border-radius: 6px;
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 8px;
+                            Field {
+                                label: "Owner";
+                                value: root.link-owner;
+                            }
+                            Field {
+                                label: "Latest release";
+                                value: root.link-release;
+                            }
+                            Field {
+                                label: "Goes into AddOns";
+                                value: root.link-goes;
+                            }
+                            Text {
+                                text: root.link-note;
+                                wrap: word-wrap;
+                                font-weight: root.link-warn ? 600 : 400;
+                                color: root.link-warn ? Look.red : Look.muted;
+                            }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    Text {
+                        text: "Or a zip file, as friends share them on Discord. Addons are text, pictures, fonts and sounds; anything else in a zip is left out.";
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        color: Look.muted;
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Button {
+                            text: "Import a zip file…";
+                            enabled: !root.busy;
+                            clicked => { root.import-zip(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        if (root.link-state == 2 || root.link-state == 3) && !root.link-installing: Button {
+                            text: "Cancel";
+                            clicked => { root.link-clear(); }
+                        }
+                        if root.link-installing: Installing {}
+                        if !root.link-installing: Button {
+                            text: "Install";
+                            primary: true;
+                            enabled: root.link-state == 2 && !root.busy;
+                            clicked => { root.link-install(); }
+                        }
+                    }
+                }
+
+                if root.addons-page == 3: VerticalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 1;
+                    Text {
+                        text: root.removed-rows.length == 0
+                            ? "Nothing removed on this PC yet. Addons you remove show here, with the way back."
+                            : "Removed on this PC, newest first. Their folders are in the Recycle Bin; Install again brings back the version each had.";
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        color: Look.muted;
+                    }
+                    removed-scroll := ScrollView {
+                        vertical-stretch: 1;
+                        content-height: removed-list.preferred-height;
+                        removed-list := VerticalLayout {
+                            width: removed-scroll.visible-width;
+                            height: self.preferred-height;
+                            alignment: start;
+                            spacing: 6px;
+                            for row in root.removed-rows: RemovedItem {
+                                removed: row;
+                                busy: root.busy;
+                                install => { root.install-again(row.id); }
+                            }
+                        }
+                    }
+                }
+            }
+            if !root.game-found: Overlay {
+                NoGame {
+                    find => { root.find-game(); }
+                    choose => { root.tab = 4; }
+                    get-game => { root.open-game-site(); }
+                }
+            }
+        }
+
+        Tab {
+            title: "Saves";
+            VerticalBox {
+                Text {
+                    text: root.saves-note;
+                    wrap: word-wrap;
+                    color: Look.muted;
+                }
+                StandardTableView {
+                    vertical-stretch: 1;
+                    columns: [
+                        { title: "#", width: 44px },
+                        { title: "Saved", width: 130px },
+                        { title: "PC", width: 116px },
+                        { title: "Size", width: 76px },
+                        { title: "", horizontal-stretch: 1 }
+                    ];
+                    rows: root.save-rows;
+                    current-row <=> root.save-row;
+                }
+                HorizontalBox {
+                    padding: 0;
+                    alignment: end;
+                    Button {
+                        text: "Show in folder";
+                        enabled: root.save-row >= 0;
+                        clicked => { root.show-in-folder(root.save-row); }
+                    }
+                    Button {
+                        text: "Bring this one in";
+                        enabled: root.save-row >= 0 && !root.busy;
+                        clicked => { root.bring-back(root.save-row); }
+                    }
+                }
+            }
+            if !root.game-found: Overlay {
+                NoGame {
+                    find => { root.find-game(); }
+                    choose => { root.tab = 4; }
+                    get-game => { root.open-game-site(); }
+                }
+            }
+        }
+
+        Tab {
+            title: "Playtime";
+            VerticalBox {
+                HorizontalBox {
+                    padding: 0;
+                    Card {
+                        heading: "Today";
+                        main: root.today;
+                    }
+                    Card {
+                        heading: "This week";
+                        main: root.week;
+                    }
+                    Card {
+                        heading: "All time";
+                        main: root.all-time;
+                    }
+                }
+                Text {
+                    text: "This week, per PC";
+                    font-weight: 600;
+                }
+                for row in root.pc-times: HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: row.name;
+                        width: 100px;
+                        overflow: elide;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Rectangle {
+                            height: 14px;
+                            border-radius: 3px;
+                            background: Palette.alternate-background;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * row.share;
+                                height: parent.height;
+                                border-radius: 3px;
+                                background: Look.blue;
+                            }
+                        }
+                    }
+                    Text {
+                        text: row.time;
+                        width: 80px;
+                        horizontal-alignment: right;
+                    }
+                }
+                Text {
+                    text: "Last sessions";
+                    font-weight: 600;
+                }
+                for line in root.sessions: Text {
+                    text: line;
+                    overflow: elide;
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+            if !root.game-found: Overlay {
+                NoGame {
+                    find => { root.find-game(); }
+                    choose => { root.tab = 4; }
+                    get-game => { root.open-game-site(); }
+                }
+            }
+        }
+
+        Tab {
+            title: "Settings";
+            VerticalBox {
+                // The fields scroll; Default and Save stay at the foot.
+                settings-scroll := ScrollView {
+                    vertical-stretch: 1;
+                    content-height: settings-list.preferred-height;
+                    settings-list := VerticalLayout {
+                        width: settings-scroll.visible-width - 14px;
+                        height: self.preferred-height;
+                        alignment: start;
+                        spacing: 8px;
+                        Section {
+                            GroupHeading { text: "General"; }
+                            Text {
+                                text: "Game folder";
+                                font-weight: 600;
+                            }
+                            HorizontalBox {
+                                padding: 0;
+                                LineEdit {
+                                    text <=> root.game-dir;
+                                    horizontal-stretch: 1;
+                                }
+                                Button {
+                                    text: "Find it";
+                                    clicked => { root.detect-game(); }
+                                }
+                            }
+                            Text {
+                                text: root.game-status;
+                                color: Look.muted;
+                            }
+                            Text {
+                                text: "This PC's name";
+                                font-weight: 600;
+                            }
+                            LineEdit {
+                                text <=> root.pc-name;
+                            }
+                            if root.name-status != "": Text {
+                                text: root.name-status;
+                                color: Look.muted;
+                                wrap: word-wrap;
+                            }
+                            CheckBox {
+                                text: "Start with Windows, in the tray";
+                                checked <=> root.start-with-windows;
+                            }
+                            CheckBox {
+                                text: "Desktop shortcut \"Play Azeroth Survivors\"";
+                                checked <=> root.desktop-shortcut;
+                            }
+                            CheckBox {
+                                text: "Windows notifications";
+                                checked <=> root.notifications;
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "Theme";
+                                    vertical-alignment: center;
+                                }
+                                ComboBox {
+                                    model: ["System", "Light", "Dark"];
+                                    current-index <=> root.theme;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+                        }
+                        Section {
+                            alternate: true;
+                            GroupHeading { text: "Sync"; }
+                            CheckBox {
+                                text: "Sync my progress across PCs";
+                                checked <=> root.sync-switch;
+                            }
+                            if root.sync-switch: VerticalLayout {
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: 16px;
+                                    Text {
+                                        text: "◉ Local network folder";
+                                    }
+                                    Text {
+                                        text: "○ Cloud (maybe later)";
+                                        color: Look.muted;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                                LineEdit {
+                                    text <=> root.sync-folder;
+                                    placeholder-text: "Network folder, e.g. \\\\server\\share\\Azeroth Survivors Saves";
+                                }
+                                Text {
+                                    text: root.folder-status;
+                                    color: Look.muted;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            if root.sync-switch: CheckBox {
+                                text: "The game's own settings on every PC";
+                                checked <=> root.game-shared;
+                            }
+                            if root.sync-switch && root.game-shared: Text {
+                                text: "Interface options, key bindings, macros, chat, camera, where windows sit, and the HUD switches. Graphics stay on each PC.";
+                                font-size: 11px;
+                                color: Look.muted;
+                                wrap: word-wrap;
+                            }
+                            if root.sync-switch && root.game-shared && root.game-line != "": Text {
+                                text: root.game-line;
+                                font-size: 11px;
+                                color: root.game-line-kind == 2 ? Look.amber : root.game-line-kind == 1 ? Look.blue : Look.muted;
+                                wrap: word-wrap;
+                            }
+                            if root.sync-switch && root.game-shared && root.game-ask-pc != "": HorizontalBox {
+                                padding: 0;
+                                alignment: start;
+                                Button {
+                                    text: "Keep this PC's";
+                                    clicked => { root.game-settings-choice(true); }
+                                }
+                                Button {
+                                    text: "Use " + root.game-ask-pc + "'s";
+                                    clicked => { root.game-settings-choice(false); }
+                                }
+                            }
+                            if root.sync-switch && root.game-shared && root.game-own != "": HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: root.game-own;
+                                    font-size: 11px;
+                                    color: Look.muted;
+                                    wrap: word-wrap;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                Button {
+                                    text: "Use them instead";
+                                    clicked => { root.game-settings-own(); }
+                                }
+                            }
+                            if root.game-note != "": Text {
+                                text: root.game-note;
+                                font-size: 11px;
+                                color: Look.blue;
+                                wrap: word-wrap;
+                            }
+                        }
+                        Section {
+                            GroupHeading { text: "Addons"; }
+                            CheckBox {
+                                text: "Verified addons update by themselves before Play";
+                                checked <=> root.addons-auto;
+                            }
+                            if root.sync-switch: CheckBox {
+                                text: "The same addons and their settings on every PC";
+                                checked <=> root.addons-shared;
+                            }
+                        }
+                        Section {
+                            alternate: true;
+                            GroupHeading { text: "Game"; }
+                            CheckBox {
+                                text: "Pause the game when I switch away (experimental)";
+                                checked <=> root.pause-when-away;
+                            }
+                            if root.pause-when-away: Text {
+                                text: "When the game stops being the window in front (Alt-Tab, the Windows key, a click elsewhere), the Satchel presses Esc in it. If a menu is already open, that Esc closes it.";
+                                font-size: 11px;
+                                color: Look.muted;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: "Saved in " + root.settings-path;
+                                font-size: 11px;
+                                color: Look.muted;
+                                wrap: word-wrap;
+                            }
+                        }
+                        Section {
+                            GroupHeading { text: "About"; }
+                            Rectangle {
+                                border-width: 1px;
+                                border-color: Palette.border;
+                                border-radius: 6px;
+                                HorizontalLayout {
+                                    padding: 12px;
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        Image {
+                                            source: @image-url("icons/satchel.svg");
+                                            width: 48px;
+                                            height: 48px;
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Survivor's Satchel";
+                                            font-weight: 600;
+                                        }
+                                        Text {
+                                            text: root.app-version;
+                                            font-size: 24px;
+                                            font-weight: 700;
+                                        }
+                                        Text {
+                                            text: (root.app-released != "" ? root.app-released + " · " : "") + root.app-build;
+                                            font-size: 11px;
+                                            color: Look.muted;
+                                            wrap: word-wrap;
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            alignment: start;
+                                            Button {
+                                                text: "What's new";
+                                                clicked => { root.open-whats-new(); }
+                                            }
+                                            // "Checking…" in its place until the answer: a second
+                                            // click can't ask again.
+                                            if !root.checking: Button {
+                                                text: "Check for updates";
+                                                clicked => { root.check-updates(); }
+                                            }
+                                            if root.checking: Installing {
+                                                text: "Checking…";
+                                            }
+                                            if root.update-version != "": Button {
+                                                text: "Update to " + root.update-version;
+                                                primary: true;
+                                                enabled: !root.busy;
+                                                clicked => { root.update-now(); }
+                                            }
+                                        }
+                                        // Hidden while a check runs (the last result would
+                                        // mislead) until its answer.
+                                        if root.check-result != "" && !root.checking: Text {
+                                            text: root.check-result;
+                                            font-size: 11px;
+                                            color: Look.muted;
+                                            wrap: word-wrap;
+                                        }
+                                        // Report a problem opens the bug report form with this
+                                        // version filled in.
+                                        if root.repo-url != "": HorizontalLayout {
+                                            spacing: 12px;
+                                            alignment: start;
+                                            // The link's line, centred beside the button.
+                                            VerticalLayout {
+                                                alignment: center;
+                                                LinkText {
+                                                    text: "Source and issues on GitHub";
+                                                    ink: Look.blue;
+                                                    font-size: 12px;
+                                                    clicked => { root.open-url(root.repo-url); }
+                                                }
+                                            }
+                                            Button {
+                                                text: "Report a problem";
+                                                clicked => { root.open-url(root.issue-url); }
+                                            }
+                                        }
+                                        // Slint's licence asks for this in an About screen until the
+                                        // README carries its badge; the logo scales with the width.
+                                        // In a row of its own: a fixed width straight in this column
+                                        // would cap the column's width, and wrap the lines above.
+                                        HorizontalLayout {
+                                            AboutSlint {
+                                                width: 180px;
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalBox {
+                    padding: 0;
+                    alignment: end;
+                    Button {
+                        text: "Default";
+                        clicked => { root.default-settings(); }
+                    }
+                    Button {
+                        text: "Save";
+                        primary: root.settings-changed;
+                        enabled: root.settings-changed;
+                        clicked => { root.save-settings(); }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.whats-new-open: Overlay {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        VerticalBox {
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: "What's new";
+                    font-size: 20px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                Button {
+                    text: "Close";
+                    clicked => { root.whats-new-open = false; }
+                }
+            }
+            Text {
+                text: "Survivor's Satchel " + root.app-version + (root.app-released != "" ? ", " + root.app-released : "") + ". What changed in each version, newest first.";
+                font-size: 12px;
+                wrap: word-wrap;
+                color: Look.muted;
+            }
+            changelog-scroll := ScrollView {
+                vertical-stretch: 1;
+                content-height: changelog-list.preferred-height;
+                changelog-list := VerticalLayout {
+                    width: changelog-scroll.visible-width - 14px;
+                    height: self.preferred-height;
+                    alignment: start;
+                    spacing: 6px;
+                    for entry in root.changelog: ChangelogItem {
+                        entry: entry;
+                        current: entry.version == root.app-version;
+                        open: root.changelog-open == entry.version;
+                        toggle => { root.changelog-open = root.changelog-open == entry.version ? "" : entry.version; }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.remove-id != "": Overlay {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        VerticalBox {
+            alignment: start;
+            Text {
+                text: "Remove " + root.remove-name + "?";
+                font-size: 20px;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+            Text {
+                text: "Its folder goes to the Recycle Bin, so you can still get it back from there.";
+                wrap: word-wrap;
+            }
+            CheckBox {
+                text: "Also remove its settings (where its windows sit, what it shows)";
+                checked <=> root.remove-settings;
+            }
+            Text {
+                text: "A copy of its settings stays in the Satchel's backups either way.";
+                font-size: 12px;
+                wrap: word-wrap;
+                color: Look.muted;
+            }
+            HorizontalBox {
+                padding: 0;
+                alignment: end;
+                Button {
+                    text: "Cancel";
+                    clicked => { root.remove-id = ""; }
+                }
+                Button {
+                    text: "Remove";
+                    primary: true;
+                    clicked => {
+                        root.addon-remove(root.remove-id, !root.remove-settings);
+                        root.remove-id = "";
+                    }
+                }
+            }
+        }
+    }
+
+    if root.needs-you: Overlay {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        VerticalBox {
+            alignment: start;
+            Text {
+                text: "Needs you";
+                font-size: 20px;
+                font-weight: 700;
+                color: Look.red;
+            }
+            Text {
+                text: "Two PCs moved on separately";
+                font-weight: 600;
+            }
+            Text {
+                text: "Your progress changed here and on " + root.needs-other-pc + " since this PC last synced. Pick the one to continue with. The other one is kept as a version.";
+                wrap: word-wrap;
+            }
+            HorizontalBox {
+                padding: 0;
+                Card {
+                    heading: "This PC";
+                    main: "Keep this PC's";
+                    detail: root.needs-here;
+                }
+                Card {
+                    heading: "Network folder · from " + root.needs-other-pc;
+                    main: "Use " + root.needs-other-pc + "'s";
+                    detail: root.needs-other;
+                }
+            }
+            HorizontalBox {
+                padding: 0;
+                Button {
+                    text: "Keep this PC's";
+                    horizontal-stretch: 1;
+                    clicked => { root.keep-here(); }
+                }
+                Button {
+                    text: "Use " + root.needs-other-pc + "'s";
+                    horizontal-stretch: 1;
+                    clicked => { root.use-other(); }
+                }
+            }
+            HorizontalBox {
+                padding: 0;
+                alignment: end;
+                Button {
+                    text: "Decide later";
+                    clicked => { root.decide-later(); }
+                }
+            }
+        }
+    }
+
+    if root.setup: Overlay {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        VerticalBox {
+            alignment: start;
+            Text {
+                text: "Welcome to Survivor's Satchel";
+                font-size: 20px;
+                font-weight: 700;
+            }
+            Text {
+                text: "1 · The game";
+                font-weight: 600;
+            }
+            HorizontalBox {
+                padding: 0;
+                LineEdit {
+                    text <=> root.game-dir;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Find it";
+                    clicked => { root.detect-game(); }
+                }
+            }
+            Text {
+                text: root.game-status;
+                color: Look.muted;
+            }
+            Text {
+                text: "2 · Do you play on more than one PC?";
+                font-weight: 600;
+            }
+            CheckBox {
+                text: "Yes: sync my progress across PCs";
+                checked <=> root.sync-switch;
+            }
+            if root.sync-switch: VerticalLayout {
+                spacing: 4px;
+                LineEdit {
+                    text <=> root.sync-folder;
+                    placeholder-text: "Network folder, e.g. \\\\server\\share\\Azeroth Survivors Saves";
+                }
+                if root.folder-status != "": Text {
+                    text: root.folder-status;
+                    color: Look.muted;
+                    wrap: word-wrap;
+                }
+            }
+            Text {
+                text: "3 · This PC";
+                font-weight: 600;
+            }
+            LineEdit {
+                text <=> root.pc-name;
+            }
+            if root.setup-pick && root.sync-switch: VerticalLayout {
+                spacing: 6px;
+                Text {
+                    text: "Start from which progress? Whichever you pick, the other one is kept.";
+                    wrap: word-wrap;
+                }
+                Choice {
+                    selected: root.setup-choice == 0;
+                    heading: "This PC's";
+                    detail: root.setup-here;
+                    picked => { root.setup-choice = 0; }
+                }
+                Choice {
+                    selected: root.setup-choice == 1;
+                    heading: "The newest in the network folder";
+                    detail: root.setup-other;
+                    picked => { root.setup-choice = 1; }
+                }
+            }
+            HorizontalBox {
+                padding: 0;
+                alignment: end;
+                Button {
+                    text: "Finish";
+                    primary: true;
+                    clicked => { root.finish-setup(); }
+                }
+            }
+        }
+    }
+}

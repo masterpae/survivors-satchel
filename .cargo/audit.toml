@@ -1,0 +1,16 @@
+# cargo-audit (the `audit` job in .github/workflows/check.yml): advisories that don't reach the
+# Satchel, each with its reason. Re-read at every dependency change; Dependabot proposes the
+# versions that close them.
+[advisories]
+ignore = [
+    # zip 8.6.0 (RUSTSEC-2026-0367, -0368, -0369): all three are in `ZipArchive::extract` and
+    # `ZipStreamReader::extract`, which the Satchel never calls. It reads every entry itself:
+    # `package.rs` refuses symbolic-link entries and anything but addon file types, `share.rs`
+    # takes only settings files by name, and both write plain files from the bytes they read, so
+    # no link is ever created and no permission bits are ever applied; and the exe runs on
+    # Windows, which has no Unix permission bits. zip 9 closes them and comes with its own review
+    # of the reading code.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]

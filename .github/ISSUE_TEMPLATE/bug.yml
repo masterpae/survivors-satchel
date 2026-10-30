@@ -1,0 +1,44 @@
+name: Something went wrong
+description: The Satchel did something wrong, or didn't do what it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thank you for telling us. What helps most is the Satchel's log from the day it happened:
+        the last field says where to find it.
+
+  - type: input
+    id: version
+    attributes:
+      label: Survivor's Satchel version
+      placeholder: "0.6.0 (Settings → About)"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: false
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: The log
+      description: >-
+        Open `%APPDATA%\SurvivorsSatchel\logs\satchel-<date>.log` from the day it happened (there
+        is one a day; the last 14 are kept), copy all of it and paste it here. Issues are public,
+        and the log names your PCs and your folders: replace anything you'd rather not show.
+      render: text
+    validations:
+      required: false

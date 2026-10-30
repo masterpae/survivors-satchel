@@ -1,0 +1,7 @@
+/target
+/dist
+/.build-cache
+# A build's personal defaults (sync on, the NAS folder) never go into the repo
+SurvivorsSatchel.defaults.toml
+# Assistant working notes never go into the repo
+/.claude/

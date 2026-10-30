@@ -1,0 +1,17 @@
+# Once a week: newer versions of the crates in Cargo.lock and of the actions the workflows use, as
+# pull requests. A version is offered only once it is two weeks old.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14

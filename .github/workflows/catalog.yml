@@ -1,0 +1,68 @@
+# Once a day: the verified addons' releases read from GitHub into catalog/catalog.json, committed
+# when an addon changed. The next release carries the new catalog in its exe.
+#
+# Two jobs, so nothing that is compiled or downloaded ever runs next to a token that can write the
+# repository: `read` builds and runs the catalog tool with read access only (the token just lifts
+# GitHub's limit on API calls); `commit` runs only git.
+name: Catalog
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: catalog
+
+jobs:
+  read:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # The tool exits 3 when it wrote the catalog but an addon couldn't be read: that addon keeps
+      # what the catalog knew, and the run's summary names it. Any other failure fails the run.
+      - name: Read the addons' releases
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SATCHEL_LOCKED: "1"
+        run: sh build/build.sh catalog || [ $? -eq 3 ]
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: catalog
+          path: catalog/catalog.json
+          retention-days: 3
+
+  commit:
+    needs: read
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: catalog
+          path: catalog
+
+      - name: Commit when an addon changed
+        run: |
+          if git diff --quiet -- catalog/catalog.json; then
+            echo "The catalog is unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Catalog: the addons' newest releases" -- catalog/catalog.json
+          for try in 1 2 3; do
+            git pull --rebase && git push && exit 0
+            sleep 10
+          done
+          echo "::error::The catalog couldn't be pushed"
+          exit 1
