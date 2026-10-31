@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "generated": "2026-10-31T10:16:15.363812527Z",
+  "generated": "2026-10-31T10:54:01.461611747Z",
   "addons": [
     {
       "id": "aether-hud",
@@ -230,164 +230,6 @@
             "BlackwellUI": "f74ff6b73d427701820c13b7ccc59e2d940277247e9ab98a4041190f85b1f0ea"
           },
           "notes": "### BlackwellUI v2.1.0-azs for Azeroth Survivors (WoW 1.12.1)\n\n#### 🚀 Highlights & Features\n- **Zero-Clutter Purge:** Permanently hides Blizzard action bars, bag frames, and micro menus for maximum survival visibility.\n- **Centered Cooldown Manager:** 36x36px ability matrix with dark cooldown sweeps, active rank badges, full spell tooltips on hover, and dynamic weapon icon detection.\n- **Target Debuff Aura Bars:** 6 stacked aura bars above the TargetFrame with square spell icons, spell names, remaining durations, and centered ticking damage values.\n- **Character Frame Redesign:** Complete overhaul of the 'C' character info window with 3D model frame, item quality border highlights, zero redundant bottom tabs, and the Azeroth Survivors Run Stats panel seamlessly docked to the right edge.\n- **Live Damage Meter:** Done / Taken damage meter with ability icons, DPS calculation, and the interactive **[R] Reset Button** (Left-Click: session reset to 0 / Right-Click: restore full run data).\n- **Cyberpunk Nameplates:** 120x10px statusbars, 1px contrast borders, neon reaction coloring, and dynamic accent borders for the active target.\n- **Elites & Bosses Radar:** Real-time boss/guardian/elite tracker with remaining HP, percentages, and direct click-targeting.\n- **Telemetry DataBar:** Bottom strip with XP progress, Level, Kills, Gold, **Next Chest Cost**, Lives, Rerolls, and real-time FPS.\n\n#### 🛠 Compatibility & Architecture\n- 100% strict Lua 5.0 and WoW Vanilla 1.12.1 engine compliance.\n- Idempotent border and backdrop caching to prevent texture memory leaks.\n- Defensively guarded against BugSack / BugGrabber exceptions."
-        }
-      ],
-      "doesnt_mix_with": [],
-      "notes": []
-    },
-    {
-      "id": "bordo-ui",
-      "name": "BordoUI",
-      "repo": "threenox/BordoUI",
-      "author": "threenox",
-      "summary": "A full interface: unit frames, chest radar, boss timeline, damage stats, death recap",
-      "group": "Full interfaces",
-      "folders": [
-        "BordoUI"
-      ],
-      "asset": {
-        "kind": "source"
-      },
-      "latest": {
-        "tag": "v2.8.15",
-        "version": "2.8.15",
-        "published": "2026-10-30T03:37:39Z",
-        "prerelease": false,
-        "file": "BordoUI-v2.8.15.zip",
-        "url": "https://codeload.github.com/threenox/BordoUI/zip/bd8d6bb0dd1cdb02fe26b18ef91c4206a2abd752",
-        "sha256": "208605e8d28fb9817783d3d9b07fb9da8015fb0d172be78d2b3b057d33281a10",
-        "size": 1630949,
-        "interface": 11200,
-        "folders": {
-          "BordoUI": "84cceede84d76bb92d236b75b4e05834419ec86ff7b08a22e2b0f5db43546751"
-        }
-      },
-      "earlier": [
-        {
-          "tag": "v2.8.14",
-          "version": "2.8.14",
-          "published": "2026-10-30T03:01:57Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.14.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/9176ab4b179e4c51e4b3e3d09508c43d5a629f20",
-          "sha256": "d35aa333ef725f7ef9e81fd5e544c4403c5d8f7bec47642b5b8246fd996d4d5e",
-          "size": 1629869,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "ba68c024cd186dc621ef6b5610d19d8f0999da071824ad5ad1d1e0153300aeee"
-          }
-        },
-        {
-          "tag": "v2.8.13",
-          "version": "2.8.13",
-          "published": "2026-10-30T02:45:51Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.13.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/61de8360399f695c7652ee9eebec9ce54505c7b2",
-          "sha256": "3b2afc8e15d6f4b57650ef1122e62c36d4aed7db7d658ae1d8aafd3e4b2a48fd",
-          "size": 1628917,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "4119addad144a86e86edbafe230c685528f14bc3cfbd8c7b7b0b066f82f37213"
-          }
-        },
-        {
-          "tag": "v2.8.12",
-          "version": "2.8.12",
-          "published": "2026-10-30T02:41:25Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.12.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/f2dfd2448f60bdd26f39e56896aded715cacc118",
-          "sha256": "53cc72b998be0a344495a4e563df065362a26ecc6dcde9d2fb18a27847645845",
-          "size": 1628934,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "13244fdc3a41f2d5b61d4901b141be38cdd70fc364c8377e9b6c95f96d8704a9"
-          }
-        },
-        {
-          "tag": "v2.8.11",
-          "version": "2.8.11",
-          "published": "2026-10-30T02:28:18Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.11.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/8c2ee4a12b67f844965d2d01c0d7b1882f37302b",
-          "sha256": "9505262c46ab04c00b940063a7e68ebaf4dd8406324e8255c22b8f2497d79bd9",
-          "size": 1628806,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "af25e4e2f5c9894863219e00a0e7ac27892a8dfdeb7f81f91abf94da5c75f3bf"
-          }
-        },
-        {
-          "tag": "v2.8.10",
-          "version": "2.8.10",
-          "published": "2026-10-30T02:24:23Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.10.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/1137107f1539c88626c80602b4bc32496943f22e",
-          "sha256": "a960d947af432a9ca54d571fe5fbb9dfca1aa0f6584158bb3f653d3e8e139ea5",
-          "size": 1628560,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "00a8435c9641856e2adaeac2eaec16d23711b470fb40a55634311f7b1aa6dbdd"
-          }
-        },
-        {
-          "tag": "v2.8.9",
-          "version": "2.8.9",
-          "published": "2026-10-30T02:10:46Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.9.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/d3020cc85bfa5138bbea9af596853498bdc5ad6d",
-          "sha256": "7dad887998aa1c75f2f525e6dfb68646d1d77327c737b779a86ab89a52588ec5",
-          "size": 1628186,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "e7a7ad47b662223f867dcc199de45ee6b6d50aaadf2383dcce565d1c01829219"
-          }
-        },
-        {
-          "tag": "v2.8.8",
-          "version": "2.8.8",
-          "published": "2026-10-30T01:52:19Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.8.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/3729443d344b86fb10e5392e6ee5d44068ac197d",
-          "sha256": "863ce31335eb7e8abf4ee8498f64a986ba4fc948fadb44295f3dc934cd227a22",
-          "size": 1627802,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "1ada42a027a63b2644fa0f4f8ea25e5a9217b4c6b22a138eaaf928009e350cf1"
-          }
-        },
-        {
-          "tag": "v2.8.7",
-          "version": "2.8.7",
-          "published": "2026-10-30T00:46:50Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.7.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/54c2c3091522bb88fd8e3c0a2111a52b82a2a3be",
-          "sha256": "ff748cd8a1fa6430da9458d676c93729e8ba95fff2b93450a60ddd328e8db8c8",
-          "size": 1627263,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "8593f81e2209465fb50a916a67c63c18634415ca09d1375df2c0f0186d2348e7"
-          }
-        },
-        {
-          "tag": "v2.8.6",
-          "version": "2.8.6",
-          "published": "2026-10-27T11:37:06Z",
-          "prerelease": false,
-          "file": "BordoUI-v2.8.6.zip",
-          "url": "https://codeload.github.com/threenox/BordoUI/zip/2030b8c58c6510b91c9835b02d22b416e7329e39",
-          "sha256": "341f3e1b741275a12a89a13cd68ae9c283192032aee756044c5f6ec729889138",
-          "size": 1489423,
-          "interface": 11200,
-          "folders": {
-            "BordoUI": "4e2d213f857e036e81cb3deddfe59279ff0ee89105488a9bef733ed373d50f81"
-          }
         }
       ],
       "doesnt_mix_with": [],
@@ -1912,6 +1754,115 @@
       "notes": []
     },
     {
+      "id": "survivor-ui-classic",
+      "name": "SurvivorUI Classic",
+      "repo": "morderous/survivorui-classic",
+      "author": "morderous",
+      "summary": "Survivor UI in the game's own look: everything movable, a run tracker, boss bars, a damage meter",
+      "group": "Full interfaces",
+      "folders": [
+        "SurvivorUIClassic"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "SurvivorUIClassic-*.zip"
+      },
+      "latest": {
+        "tag": "v0.2.5",
+        "version": "0.2.5",
+        "published": "2026-10-31T04:18:41Z",
+        "prerelease": false,
+        "file": "SurvivorUIClassic-0.2.5.zip",
+        "url": "https://github.com/morderous/survivorui-classic/releases/download/v0.2.5/SurvivorUIClassic-0.2.5.zip",
+        "sha256": "f9f95698d6090d889c0c919fc1877dc15ad2219d0ae20493394ebb173399d1b1",
+        "size": 328634,
+        "interface": 11200,
+        "folders": {
+          "SurvivorUIClassic": "6cbd343ac30746c298f5e007584469ac109c5caa8f884e313d01391dfa0b01d1"
+        },
+        "notes": "**A very classy new character panel.** The character page is rebuilt from the ground up, and the rest of the interface gets a long list of small comforts.\n\n**The character panel**\n- **One panel for everything:** a wider window in the look of the other panels, the hero in the middle, the item slots at both sides. The game's Run Stats box is folded in, so every number lives in one place. The Character, Skills and Honor tabs and the ammo slot are gone.\n- **Turn your hero:** hold the mouse on the hero and pull. This works on the game's own page too.\n- **Main stats:** Damage in green, Crit Dmg and Crit in orange, since those two work as a pair. Hover one for its formula, read from the game's code, with your own numbers in it: what your level, gear and the rest add, your average hit, and what your damage, crits and haste give together.\n- **Luck:** your odds of a legendary (orange), epic (purple) or rare (blue) on Cards (spell cards, rings and trinkets) and on Neck (amulets). Hover it for the whole roll: each rarity's weight and share, what amulets, hoards and bosses add, and your odds of a legendary among a level-up's 3 cards.\n- **Four small panels** under the hero, by kind: Bonus, Utility, Defense and Offense, with the game's own numbers and tooltips. Haste shows its formula on its tooltip, and Armor now reads Dmg Reduction, first in Defense.\n- **Your name in your class's color,** a shaman's blue, in the damage meter too, and **a new ring round the portrait,** our own art, sharp at any size.\n- **The character page in one panel**, on the options' General tab, brings the game's own page back.\n\n**Combat**\n…"
+      },
+      "earlier": [
+        {
+          "tag": "v0.2.4",
+          "version": "0.2.4",
+          "published": "2026-10-31T00:48:38Z",
+          "prerelease": false,
+          "file": "SurvivorUIClassic-0.2.4.zip",
+          "url": "https://github.com/morderous/survivorui-classic/releases/download/v0.2.4/SurvivorUIClassic-0.2.4.zip",
+          "sha256": "8f49a645592d6cd8773b4082e4fff4da9424effa067c283859b975106590a3bc",
+          "size": 272643,
+          "interface": 11200,
+          "folders": {
+            "SurvivorUIClassic": "34050a34b83a37aa876b2e181f40b43fe9a56779e1eccf094910f0f716f3d15b"
+          },
+          "notes": "SurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Changes\n\n- **Combat text off:** Show the combat text, on the options' Combat text tab, turns it all off at once: the numbers and words over the enemies and everything over your hero. It keeps from one game to the next.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below, unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto Update when ready**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.4.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game."
+        },
+        {
+          "tag": "v0.2.3",
+          "version": "0.2.3",
+          "published": "2026-10-30T12:05:56Z",
+          "prerelease": false,
+          "file": "SurvivorUIClassic-0.2.3.zip",
+          "url": "https://github.com/morderous/survivorui-classic/releases/download/v0.2.3/SurvivorUIClassic-0.2.3.zip",
+          "sha256": "e9385a7d857a7b5c0412b27faf1a94f02f3599bb4917ac0d20e125668b3d5c37",
+          "size": 272231,
+          "interface": 11200,
+          "folders": {
+            "SurvivorUIClassic": "0c935ea84ca8641c3f60325b8b15d18223c9c5382ce9a4962753320657805c2d"
+          },
+          "notes": "SurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Changes\n\n- **Restart game:** with the Survivor UI launcher open (1.7.1 or newer), Quit game in the Change UI panel becomes Restart game: the game closes and the launcher opens it again by itself. Without the launcher it stays Quit game.\n- **Nothing through the level's cards:** the action bar, the summons and the talent cooldowns fade while the cards are up, as the game could draw an icon of theirs over a card (seen with Survivor UI).\n- **Change UI:** a button under the options' tabs, there on every tab, in place of Switch to Survivor UI on the General tab, opens the panel that picks the interface. With Survivor UI turned off in the game's Options, AddOns tab the button still shows, and the panel says where to turn it on.\n- **The chat's place through a change of interface:** the game keeps one place and size for the chat, so Survivor UI's stayed on after coming back. SurvivorUI Classic now keeps its own and puts them back as it starts; with none kept yet and the chat where Survivor UI left it, the chat goes back to the game's first place.\n- **Reset on the damage meter:** the arrow beside the fold button starts Damage Done and DPS over from that moment, each spell's damage, damage a second and share counted from there, as Survivor UI's Reset. The Healing, Boss Damage and Party pages stay the game's. A new run starts the meter over by itself.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below, unzip it, open `SurvivorInstaller.exe`, and in the **Addons** tab pick **SurvivorUI Classic** and click **Install** (installed from there already: **Update all**).\n\n**By hand:** unzip `SurvivorUIClassic-0.2.3.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game."
+        },
+        {
+          "tag": "v0.2.2",
+          "version": "0.2.2",
+          "published": "2026-10-29T21:21:05Z",
+          "prerelease": false,
+          "file": "SurvivorUIClassic-0.2.2.zip",
+          "url": "https://github.com/morderous/survivorui-classic/releases/download/v0.2.2/SurvivorUIClassic-0.2.2.zip",
+          "sha256": "4304ad059de274c50078e106c425a9ee67922c0e302e679c766eb3f83ce3271c",
+          "size": 269976,
+          "interface": 11200,
+          "folders": {
+            "SurvivorUIClassic": "ffa99d3a3a8ec97b1e681aca2266f9db18210e7bf6600ee2e93e0ac6612dbe0f"
+          },
+          "notes": "SurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Changes\n\n- **The minimap's pins in the browser** (reported on Discord for Survivor UI by kemot, Fulger and Floowi): the cache bags and the lairs' skulls were missing in the game played in a browser (Chrome, Brave) and in the macOS port, which read no TGA. Each picture now comes as a BLP too, the game's own format, which every version of the game reads first. In the Windows game nothing changes: the same pixels.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below, unzip it, open `SurvivorInstaller.exe`, and in the **Addons** tab pick **SurvivorUI Classic** and click **Install** (installed from there already: **Update all**).\n\n**By hand:** unzip `SurvivorUIClassic-0.2.2.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game."
+        },
+        {
+          "tag": "v0.2.1",
+          "version": "0.2.1",
+          "published": "2026-10-29T19:18:26Z",
+          "prerelease": false,
+          "file": "SurvivorUIClassic-0.2.1.zip",
+          "url": "https://github.com/morderous/survivorui-classic/releases/download/v0.2.1/SurvivorUIClassic-0.2.1.zip",
+          "sha256": "ee4ddd52e4fd1a0d23ab632ac91250079939fe7f2cd8259a31dd42fb81759cc8",
+          "size": 261133,
+          "interface": 11200,
+          "folders": {
+            "SurvivorUIClassic": "eca6cc98899102cb335013c816c98f7999436830a870be1372870bedaf00b1bf"
+          },
+          "notes": "SurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Changes\n\n- **The chat clear of the talent cooldowns on a 5:4 screen** (1280x1024): there the chat's long lines reached under the talents' row at the action bar's left end, so the chat is made narrower to end before the bar's art. On 4:3 and wider nothing changes, and the chat gets its own width back on a wider screen and as the game closes, so it is never saved narrowed. A chat moved in Move frames is left as it is.\n- **The launcher in every release**: `SurvivorUI-Installer.zip`, the Survivor UI launcher, which installs and updates SurvivorUI Classic from its Addons tab.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below, unzip it, open `SurvivorInstaller.exe`, and in the **Addons** tab pick **SurvivorUI Classic** and click **Install**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.1.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game."
+        },
+        {
+          "tag": "v0.2.0",
+          "version": "0.2.0",
+          "published": "2026-10-29T18:44:58Z",
+          "prerelease": false,
+          "file": "SurvivorUIClassic-0.2.0.zip",
+          "url": "https://github.com/morderous/survivorui-classic/releases/download/v0.2.0/SurvivorUIClassic-0.2.0.zip",
+          "sha256": "0a62aa653b547596eaa9c27b22eb92d1c67fbcb07289e68d3809998b5ed40995",
+          "size": 259530,
+          "interface": 11200,
+          "folders": {
+            "SurvivorUIClassic": "f3fc97b85c0f4b8fe17189ea59b39a708ef28ebe2b7c46295acb748304e7a8ea"
+          },
+          "notes": "SurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui), by the same author: the game's own interface with a few things more, in the game's own look. It works on its own: neither addon needs the other. With both installed, a panel asks which one runs (Survivor UI 3.0.44 or newer steps aside by itself).\n\n**Install:** download `SurvivorUIClassic-0.2.0.zip` below and unzip it into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`. Restart the game.\n\n![In an endless run](https://raw.githubusercontent.com/morderous/survivorui-classic/main/screenshots/1-endless.webp)\n\n## Changes\n\n- **Options:** a window in the game's look, with a tab for each piece: its size, what it shows, and Reset. Tabs: General, Action bar, Unit frames, Minimap, Run tracker, Boss bars, Build list, Jewelry and Damage meter.\n- **Run tracker:** replaces the run frame, after a Mythic+ timer, with the bosses' checklist and the guardians, elites, kills, gold and next cache. The game's kills and gold line is put away.\n- **A column under the minimap:** the run tracker, build list, jewelry and damage meter, one under the other, all 230 wide, made to fit the screen.\n- **One look:** every piece a panel with a dark ground, a border and a gold title over a gold rule.\n- **Boss bars:** the game's own look, moved and targeted; the lair guardians and elites too.\n- **Damage meter:** flat bars with room between them.\n- **Damage meter:** new, in place of the game's.\n- **Combat text:** the damage you deal and the damage you take in Barlow, each at 30 to 100% (the options' Combat text tab); the damage you deal from the next time the game opens (the game reads its font once, as it loads). With Survivor UI standing aside, the game's numbers are turned back on (Survivor UI turns them off for its own).\n- **Cooldown numbers:** on the action buttons, down to 0.1 second, the last two seconds in red.\n…"
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": []
+    },
+    {
       "id": "survivors-dragon-ui",
       "name": "SurvivorsDragonUi",
       "repo": "migwynkriid13/SurvivorsDragonUi",
@@ -3245,6 +3196,69 @@
             "MoveUI": "411114c65709a7f499cbe86b3bdf62826705ee054a0858ad76358252614b3586"
           },
           "notes": "Move UI Initial Release."
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": []
+    },
+    {
+      "id": "move-anything",
+      "name": "MoveAnything!",
+      "repo": "kodfod/AZSMoveAnything",
+      "author": "kodfod",
+      "summary": "Move, scale and hide any frame of the interface, other addons' frames too",
+      "group": "Meters and HUDs",
+      "folders": [
+        "MoveAnything"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "AZSMoveAnything-*.zip"
+      },
+      "latest": {
+        "tag": "0.2.1",
+        "version": "0.2.0",
+        "published": "2026-10-30T10:22:11Z",
+        "prerelease": false,
+        "file": "AZSMoveAnything-0.2.1.zip",
+        "url": "https://github.com/kodfod/AZSMoveAnything/releases/download/0.2.1/AZSMoveAnything-0.2.1.zip",
+        "sha256": "1b65af55d9dbd1b47e9e63dbbb22f52ee955d8a303db322f9d925a712c16a3bc",
+        "size": 954248,
+        "interface": 11200,
+        "folders": {
+          "MoveAnything": "9ea17cffce77b5f44f9da9d3900914ba63de5f7b2a74ae993fb34980fb202636"
+        },
+        "notes": "Hot fix to text being truncated when scaling windows due to rounding errors."
+      },
+      "earlier": [
+        {
+          "tag": "0.2.0",
+          "version": "0.2.0",
+          "published": "2026-10-29T11:17:57Z",
+          "prerelease": false,
+          "file": "AZSMoveAnything-0.2.0.zip",
+          "url": "https://github.com/kodfod/AZSMoveAnything/releases/download/0.2.0/AZSMoveAnything-0.2.0.zip",
+          "sha256": "9a9e0f9622c5f4513d6402806e6361fc14841132a8e7d04bcc38aeeeea2c0998",
+          "size": 954310,
+          "interface": 11200,
+          "folders": {
+            "MoveAnything": "8964654cca9fa9708a4da90ccfe7db879cff07de51cbdaf0c2e83c3a7b246b8e"
+          },
+          "notes": "## What's new\r\n\r\n### Languages\r\n- MoveAnything! now speaks 14 languages: English, Polish, Czech, German, Brazilian Portuguese, Spanish, French, Romanian, Turkish, Russian, Ukrainian, Simplified Chinese, Japanese and Korean.\r\n- Push the Language button, left of Pick Frame, to change the language. The change shows at once and is saved.\r\n- Or type `/move lang` and a code: `auto`, `en`, `pl`, `cs`, `de`, `pt`, `es`, `fr`, `ro`, `tr`, `ru`, `uk`, `zh`, `ja` or `ko`.\r\n- Automatic finds the game's language once at startup.\r\n- The addon brings its own fonts, so all the languages show correctly.\r\n- Your own words in `Custom.lua` still work. A line with wrong codes is skipped, and the translation shows instead.\r\n\r\n### Fixes\r\n- The Player frame no longer jumps to the right when you start to move it. You can now put frames against the edge of the screen again.\r\n- The whole interface can no longer be hidden or moved by mistake. `UIParent`, `WorldFrame`, the game menu, the game options and MoveAnything's own windows are protected in commands and in saved layouts.\r\n- When you reset a frame, changes that other addons made to that frame stay.\r\n- The window is bigger and fits smaller screens.\r\n\r\n## Install or update\r\n1. Download `AZSMoveAnything-0.2.0.zip`.\r\n2. Delete your old `MoveAnything` folder in `benilla-config/AddOns/`, then put the new `MoveAnything` folder there. It has a new `media` folder with the fonts.\r\n3. Your saved layouts are kept.\r\n\r\n## Thanks\r\nThanks to Maidenhead for the translations, the fonts and the other fixes.\r\n\r\nTranslations by native speakers are welcome. See `docs/CONTRIBUTING.md`."
+        },
+        {
+          "tag": "Beta",
+          "version": "0.1.0",
+          "published": "2026-10-29T09:08:57Z",
+          "prerelease": false,
+          "file": "AZSMoveAnything-0.1.0.zip",
+          "url": "https://github.com/kodfod/AZSMoveAnything/releases/download/Beta/AZSMoveAnything-0.1.0.zip",
+          "sha256": "a531e1d60865cdc765c431848cba14644e951901bf18c76c30754eac8361d614",
+          "size": 26490,
+          "interface": 11200,
+          "folders": {
+            "MoveAnything": "a1c9a594df0b83df610d74d71077bd97d86049d714776c55dd41f4f3a21e3803"
+          }
         }
       ],
       "doesnt_mix_with": [],

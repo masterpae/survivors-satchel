@@ -153,6 +153,10 @@ pub(super) fn zip_ready(cache: &Path, ready: &BTreeMap<(String, String), String>
     path.is_file().then_some((path, sha))
 }
 
+/// The badge of a verified addon the built-in list no longer carries: its post left the verified
+/// channel, so the Verified badge would claim what the list no longer says.
+pub(super) const UNLISTED_BADGE: (&str, i32) = ("No longer listed", 1);
+
 fn badge_text(badge: Option<Badge>) -> (&'static str, i32) {
     match badge {
         Some(Badge::Verified) => ("Verified", 0),
@@ -872,7 +876,11 @@ impl Worker {
             .filter(|g| self.addons.store.get(&g.record.id).is_none())
             .map(|g| {
                 let record = &g.record;
-                let (badge, badge_kind) = badge_text(Some(record.badge));
+                let (badge, badge_kind) = if record.badge == Badge::Verified && self.addons.catalog.get(&record.id).is_none() {
+                    UNLISTED_BADGE
+                } else {
+                    badge_text(Some(record.badge))
+                };
                 let when = match &g.from {
                     Some(pc) => format!("Removed {}, as on {pc}", when(g.at)),
                     None => format!("Removed {}", when(g.at)),
@@ -1049,7 +1057,11 @@ impl Worker {
             .lines
             .iter()
             .map(|line| {
-                let (badge, badge_kind) = badge_text(line.badge);
+                let (badge, badge_kind) = match line.standing {
+                    // Its badge said the game's devs had verified it; the list no longer says so.
+                    Standing::Unlisted => UNLISTED_BADGE,
+                    _ => badge_text(line.badge),
+                };
                 let record = a.store.get(&line.id);
                 let (share, share_kind, ask_pc) = self.share_line(&line.id);
                 // Its switches show once addons go to every PC (an addon installed by hand stays here).
@@ -1082,6 +1094,7 @@ impl Worker {
                         None => (String::new(), String::new(), 0),
                     },
                     Standing::Elsewhere => (String::new(), "DragonUI's own updater (avrt.dll beside the game) keeps it current".into(), 0),
+                    Standing::Unlisted => (String::new(), "No longer in the verified list: the Satchel doesn't update it".into(), 2),
                 };
                 if let Standing::Update { to, .. } = &line.standing
                     && !downloaded(to)
@@ -1144,6 +1157,8 @@ impl Worker {
         let by_itself = updates.iter().filter(|l| matches!(l.standing, Standing::Update { by_itself: true, .. })).count();
         // One kept at an older version while a newer is out isn't news, but it isn't up to date.
         let kept = a.lines.iter().filter(|l| matches!(l.standing, Standing::Kept { newer: Some(_) })).count();
+        // One the verified list dropped isn't up to date either: nothing checks it any more.
+        let unlisted = a.lines.iter().filter(|l| l.standing == Standing::Unlisted).count();
         let except: Vec<String> = [
             match kept {
                 0 => None,
@@ -1154,6 +1169,11 @@ impl Worker {
                 0 => None,
                 1 => Some("1 turned-off addon with a newer version".to_string()),
                 n => Some(format!("{n} turned-off addons with newer versions")),
+            },
+            match unlisted {
+                0 => None,
+                1 => Some("1 addon no longer in the verified list".to_string()),
+                n => Some(format!("{n} addons no longer in the verified list")),
             },
         ]
         .into_iter()
@@ -1179,6 +1199,10 @@ impl Worker {
                 0 => {}
                 1 => header.push_str(" · 1 turned-off addon has one too"),
                 n => header.push_str(&format!(" · {n} turned-off addons have one too")),
+            }
+            match unlisted {
+                0 => {}
+                n => header.push_str(&format!(" · {n} no longer in the verified list")),
             }
         }
         let looked = if a.looking {

@@ -25,9 +25,14 @@ pub struct Offer {
 }
 
 impl Offer {
-    /// Where it is, for the Play tab's line: "beside sync\" or "downloaded from GitHub".
-    pub fn place(&self) -> &'static str {
-        if self.from_github { "downloaded from GitHub" } else { "beside sync\\" }
+    /// "0.6.2 is ready, downloaded from GitHub" or "0.6.2 is ready beside sync\": the words every
+    /// update line uses for the offer, the comma included.
+    pub fn ready(&self) -> String {
+        if self.from_github {
+            format!("{} is ready, downloaded from GitHub", self.version)
+        } else {
+            format!("{} is ready beside sync\\", self.version)
+        }
     }
 }
 

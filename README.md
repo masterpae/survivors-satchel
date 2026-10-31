@@ -95,8 +95,8 @@ The repository holds:
   on GitHub (`catalog.json`, built into the exe);
 - `tools/`: the catalog tool and the screen preview.
 
-Every version's changes are in [CHANGELOG.md](CHANGELOG.md); the app shows the same file under
-Settings → About → What's new.
+Every release's changes since the first public one, 0.6.0, are in [CHANGELOG.md](CHANGELOG.md); the
+app shows the same file under Settings → About → What's new.
 
 ## Problems and ideas
 

@@ -1202,6 +1202,7 @@ impl Worker {
                 let entry = list.get(id)?;
                 let release = entry.release.as_ref()?;
                 let (badge, badge_kind) = match entry.badge {
+                    Badge::Verified if self.addons.catalog.get(id).is_none() => super::addons::UNLISTED_BADGE,
                     Badge::Verified => ("Verified", 0),
                     Badge::Added => ("Added by you", 1),
                     Badge::File => ("From a file", 2),

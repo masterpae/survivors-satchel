@@ -2028,7 +2028,7 @@ impl Worker {
         let text = if self.check_pending {
             "Checking GitHub…".to_string()
         } else if let Some(offer) = self.offer() {
-            format!("Checked: {} is ready {}", offer.version, offer.place())
+            format!("Checked: {}", offer.ready())
         } else if asks_github {
             "Checked: GitHub couldn't be asked".into()
         } else if !sync_on {
@@ -2062,8 +2062,7 @@ impl Worker {
         // The answer Check for updates waits for; a newer Satchel beside sync\ is named over it.
         if std::mem::take(&mut self.check_pending) {
             let text = match (self.offer(), failed) {
-                (Some(offer), _) if offer.from_github => format!("Checked: {} is ready, downloaded from GitHub", offer.version),
-                (Some(offer), _) => format!("Checked: {} is ready {}", offer.version, offer.place()),
+                (Some(offer), _) => format!("Checked: {}", offer.ready()),
                 // No answer says so itself ("GitHub didn't answer (…)"); else a release was refused
                 // (no checksum, a wrong one, another version inside).
                 (None, Some(e)) if e.starts_with(net::NO_ANSWER) => format!("Checked: {e}"),
@@ -2080,7 +2079,7 @@ impl Worker {
     fn update_line(&self) -> UpdateLine {
         match (&self.gated, self.offer()) {
             (gated, Some(offer)) => UpdateLine {
-                text: format!("Survivor's Satchel {} is ready {}.", offer.version, offer.place()),
+                text: format!("Survivor's Satchel {}.", offer.ready()),
                 version: offer.version.clone(),
                 gated: gated.is_some(),
             },

@@ -29,6 +29,9 @@ pub enum Standing {
     ByHand,
     /// Another updater keeps it current (DragonUI's `avrt.dll`).
     Elsewhere,
+    /// A verified addon the built-in list no longer carries (its post left the verified channel):
+    /// it stays as it is, and nothing updates it.
+    Unlisted,
 }
 
 /// One row of the Installed list.
@@ -283,10 +286,15 @@ pub fn lines(inputs: &Inputs) -> Vec<Line> {
             State::Changed => Standing::Changed,
             State::Gone => Standing::Gone,
         };
+        // A verified addon the list dropped gets no catalog releases and no look on GitHub: the row
+        // says so instead of passing for verified and up to date. A lost folder says more.
+        let standing =
+            if record.badge == Badge::Verified && entry.is_none() && standing != Standing::Gone { Standing::Unlisted } else { standing };
         let mut problems = folder_problems(&folders, entry);
         match &standing {
             Standing::Changed => problems.push("its files changed since the Satchel installed it, so it isn't updated by itself".into()),
             Standing::Gone => problems.push("its folder is gone from AddOns".into()),
+            Standing::Unlisted => problems.push("it left the verified list, so the Satchel doesn't update it".into()),
             _ => {}
         }
         let notes = match &standing {
@@ -597,6 +605,19 @@ mod tests {
         assert_eq!(line.notes.as_deref(), Some("notes v2"), "what's new: the update's notes");
         assert!(line.on && line.switchable);
         assert_eq!(at_play(&lines).len(), 1);
+    }
+
+    #[test]
+    fn a_verified_addon_the_list_dropped_is_unlisted_and_not_updated() {
+        let mut w = world();
+        w.catalog.addons.retain(|e| e.id != "a");
+        let lines = w.lines();
+        assert_eq!(lines[0].standing, Standing::Unlisted);
+        assert_eq!(lines[0].badge, Some(Badge::Verified), "the record keeps its badge; the row says why");
+        assert!(lines[0].problems.iter().any(|p| p.contains("left the verified list")));
+        assert!(at_play(&lines).is_empty(), "nothing updates it");
+        w.prints.clear();
+        assert_eq!(w.lines()[0].standing, Standing::Gone, "a lost folder says more");
     }
 
     #[test]

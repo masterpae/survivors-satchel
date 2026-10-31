@@ -12,7 +12,9 @@
 #   doesnt_mix_with     folders its author asks you to turn off
 #   notes               shown before installing
 #
-# Every repo here is the one its post in the verified channel links to (checked 29 Oct 2026).
+# Each addon here has its post in the verified channel, and its repo is that post's author's own
+# (read 29 and 31 Oct 2026). An addon whose post leaves the channel leaves this list (31 Oct 2026:
+# BordoUI).
 
 # Full interfaces
 
@@ -35,15 +37,6 @@ folders = ["BlackwellUI"]
 asset = "BlackwellUI.zip"
 
 [[addon]]
-id = "bordo-ui"
-name = "BordoUI"
-repo = "threenox/BordoUI"
-group = "Full interfaces"
-summary = "A full interface: unit frames, chest radar, boss timeline, damage stats, death recap"
-folders = ["BordoUI"]
-by_tag = true
-
-[[addon]]
 id = "keijin-ui"
 name = "KeijinUI"
 repo = "KeijinDE/KeijinUI_modern-as-ui"
@@ -62,6 +55,17 @@ summary = "A simple interface, with Survivor Plates"
 folders = ["SurvivorUI", "SurvivorPlates"]
 # The same release carries SurvivorUI-Installer.zip, a program: never that one.
 asset = "SurvivorUI-v*.zip"
+
+[[addon]]
+id = "survivor-ui-classic"
+name = "SurvivorUI Classic"
+repo = "morderous/survivorui-classic"
+group = "Full interfaces"
+summary = "Survivor UI in the game's own look: everything movable, a run tracker, boss bars, a damage meter"
+folders = ["SurvivorUIClassic"]
+# Its author: it can sit beside Survivor UI, only one runs, and a button in its options switches.
+# The same release carries SurvivorUI-Installer.zip, a program, and SHA256SUMS.txt: never those.
+asset = "SurvivorUIClassic-*.zip"
 
 [[addon]]
 id = "survivors-dragon-ui"
@@ -121,6 +125,15 @@ summary = "Move any part of the interface"
 folders = ["MoveUI"]
 # Renamed between releases: MoveUI.zip, then MoveUI_AzerothSurvivors_build_<version>.zip.
 asset = "MoveUI*.zip"
+
+[[addon]]
+id = "move-anything"
+name = "MoveAnything!"
+repo = "kodfod/AZSMoveAnything"
+group = "Meters and HUDs"
+summary = "Move, scale and hide any frame of the interface, other addons' frames too"
+folders = ["MoveAnything"]
+asset = "AZSMoveAnything-*.zip"
 
 # Cursors
 
