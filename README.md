@@ -1,11 +1,47 @@
 # Survivor's Satchel
 
-A small Windows launcher for [Azeroth Survivors](https://wow.aethus.pl). It keeps your progress,
-the game's settings and your addons the same on every PC you play on, through a folder on your own
-network; it counts your playtime; and it installs and updates addons from a list of verified ones.
+> [!WARNING]
+> **Early development: not meant for general use yet.** Features and screens still change from one
+> release to the next. If you try it anyway, keep your own copy of your saves.
 
-[![#MadeWithSlint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-light.svg#gh-light-mode-only)](https://slint.dev)
-[![#MadeWithSlint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-dark.svg#gh-dark-mode-only)](https://slint.dev)
+**Your Azeroth Survivors addons and progress, managed for you and the same on every PC you play on.**
+
+Survivor's Satchel is a small Windows app you start [Azeroth Survivors](https://wow.aethus.pl) from.
+It installs your addons from trusted lists and keeps them up to date. If you play on more than one
+PC, it carries your progress, the game's settings and your addons from one PC to the next, through
+a folder on your own home network: no account, no cloud. On a single PC it is simply an addon
+manager with playtime and backups.
+
+## At a glance
+
+- 🧩 **Addons without the hassle.** Browse the addons verified in the game's Discord and the ones
+  on SurvivorsForge, install with one click, and let them update by themselves before you play.
+  Go back a version, keep one where it is, turn one off, or remove it to the Recycle Bin.
+- 🛡️ **Checked before they install.** Downloads from the lists must match their published
+  checksums, and SurvivorsForge's scans are followed: a blocked version never installs, and a
+  flagged or unscanned one waits for your OK.
+- 🖥️ **The same game on every PC.** Your progress, the game's own settings (key bindings,
+  interface, where windows sit) and your addons with their settings follow you. Graphics stay on
+  each PC.
+- 💾 **Nothing gets lost.** A backup before every change. Two PCs that played at the same time
+  both keep their progress, and you choose. After a crash, the next PC carries on from the last
+  checkpoint.
+- ⏱️ **Playtime** per PC: today, this week and in all.
+- 🔄 **Updates itself** in one click, only from the signed releases published here.
+
+## Roadmap
+
+| | Version | What it brings |
+|:-:|---|---|
+| ✅ | 0.6 | First public release |
+| ✅ | 0.7.0 | Updates signed by the maintainer |
+| ✅ | 0.7.1 | SurvivorsForge's addons and trust levels, Browse as cards |
+| 🔜 | 0.7.2 | Two more ways to browse (a list and a two-pane catalog), addon icons and screenshots, going back to any older version |
+| | 0.8 | The game's patch notes inside the app |
+| | 0.9 | A design pass over every screen, a first-start guide, and a clearer page here |
+| | 1.0 | A code-signed exe Windows can recognize, an option to archive old save versions, and a month of real use without surprises |
+
+Later, maybe: syncing through a cloud service, beside the network folder.
 
 > Survivor's Satchel is a community project. It is not made by, endorsed by or affiliated with
 > Aethus (the maker of Azeroth Survivors) or Blizzard Entertainment. It changes files the game
@@ -131,6 +167,9 @@ opens a new issue with the Satchel's version already filled in.
 - Addon descriptions, more addons and trust levels come from SurvivorsForge
   ([repository](https://github.com/Rezondes/SurvivorsForge), [website](https://forge.rezondes.net)),
   when its switch in Settings is on.
+
+[![#MadeWithSlint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-light.svg#gh-light-mode-only)](https://slint.dev)
+[![#MadeWithSlint](https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-dark.svg#gh-dark-mode-only)](https://slint.dev)
 
 ## License
 
