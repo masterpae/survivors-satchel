@@ -29,9 +29,11 @@ network; it counts your playtime; and it installs and updates addons from a list
   other addon comes in by its GitHub link or as a zip, and is marked as not reviewed.
 - **The game updating itself** is noticed: a restart of the game is still one session.
 - **Playtime** per PC, today, this week and in all.
-- **Updates itself**: a newer release here, or a newer Satchel in the network folder, is one click
-  away (Update now). A release build looks here on start and every few hours, and checks the
-  download against the checksum GitHub published for it.
+- **Updates itself**: a newer release here is one click away (Update now). A release build looks
+  here on start and every few hours, and checks the download against the checksum GitHub
+  published for it and against the maintainer's signature (see
+  [Checking a download](#checking-a-download)). Updates come only from here, never from the
+  network folder.
 
 The Satchel connects only to GitHub, to read releases and download addons, and to the network
 folder you chose. It sends nothing about you anywhere.
@@ -53,6 +55,18 @@ Windows 10 or 11, 64-bit.
 
 The exe needs no file beside it: the Satchel keeps its settings in
 `%APPDATA%\SurvivorsSatchel\settings.toml` (Settings shows the path).
+
+## Checking a download
+
+From 0.7.0 every release carries `SurvivorsSatchel.exe.minisig`, a
+[minisign](https://github.com/jedisct1/minisign) signature over the exe, made with the maintainer's
+key, which never touches GitHub. The Satchel checks it before it takes an update. To check a
+download yourself, with both files in one folder:
+
+    minisign -Vm SurvivorsSatchel.exe -P RWT8U8YLPwCbLp80L/d7d2g3uRL8SXo+SSH5qaoxx5KZE1bmnLfIvRKw
+
+Its last line shows the release's version as the trusted comment, `SurvivorsSatchel 0.7.0` for
+this one.
 
 ## How sync decides
 

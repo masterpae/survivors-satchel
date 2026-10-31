@@ -1,78 +1,37 @@
-//! The Satchel updating itself, from the exe beside `sync\` (where a family's builds are put) or
-//! from its GitHub release once the repository is public (downloaded by the network thread): the
-//! new exe is copied beside the running one and checked, the running one moves aside, the new one
-//! takes its name and starts, and this one quits. The new one waits for it to close, then clears
-//! the copy that moved aside.
+//! The Satchel updating itself from its GitHub release, which the network thread downloads,
+//! checks against the checksum GitHub published and verifies with the release keys (`signing`):
+//! the new exe is copied beside the running one and checked again, the running one moves aside,
+//! the new one takes its name and starts, and this one quits. The new one waits for it to close,
+//! then clears the copy that moved aside. Updates come only from GitHub: since 0.7.0 nothing is
+//! taken from the network folder.
 
 use crate::win;
-use satchel_core::{fsx, gate, log};
+use satchel_core::{fsx, log, signing};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-/// The exe's name in the shared folder, beside `sync\`.
-pub const SHARED_EXE: &str = "SurvivorsSatchel.exe";
+/// The exe's name among a release's files.
+pub const RELEASE_EXE: &str = "SurvivorsSatchel.exe";
 
-/// A newer Satchel found beside `sync\`, or downloaded from its GitHub release.
+/// A newer Satchel from its GitHub release, in this PC's update folder: checked against the
+/// checksum GitHub published for it and the version it calls itself, its signature verified.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Offer {
     pub version: String,
     pub source: PathBuf,
-    pub from_github: bool,
     /// The checksum GitHub published for it: the copy is checked against it again at Update now.
-    pub sha256: Option<String>,
+    pub sha256: String,
+    /// Its signature, beside it: verified at download and again over the copy at Update now.
+    pub signature: PathBuf,
 }
 
 impl Offer {
-    /// "0.6.2 is ready, downloaded from GitHub" or "0.6.2 is ready beside sync\": the words every
-    /// update line uses for the offer, the comma included.
+    /// "0.7.1 is ready, downloaded from GitHub": the words every update line uses for the offer,
+    /// the comma included.
     pub fn ready(&self) -> String {
-        if self.from_github {
-            format!("{} is ready, downloaded from GitHub", self.version)
-        } else {
-            format!("{} is ready beside sync\\", self.version)
-        }
-    }
-}
-
-/// The exe beside `sync\` as last seen (size, time, version): its version is read again only
-/// when the file changes.
-#[derive(Default)]
-pub struct Watch {
-    seen: Option<(u64, SystemTime, Option<String>)>,
-}
-
-impl Watch {
-    /// A Satchel newer than `this` in the shared `folder`, if there is one.
-    pub fn look(&mut self, folder: &Path, this: &str) -> Option<Offer> {
-        let source = folder.join(SHARED_EXE);
-        let meta = fs::metadata(&source).ok()?;
-        let (len, at) = (meta.len(), meta.modified().ok()?);
-        let version = match &self.seen {
-            Some((l, t, version)) if (*l, *t) == (len, at) => version.clone(),
-            _ => {
-                // A read that failed (the share busy, the file being replaced) is tried again
-                // at the next look.
-                let version = win::exe_version(&source);
-                if version.is_some() {
-                    self.seen = Some((len, at, version.clone()));
-                }
-                version
-            }
-        };
-        let version = version?;
-        gate::is_newer(&version, this).then_some(Offer { version, source, from_github: false, sha256: None })
-    }
-}
-
-/// The newer of two offers; GitHub's when they're the same version: it's already on this PC,
-/// and checked against its published checksum.
-pub fn newer<'a>(shared: Option<&'a Offer>, github: Option<&'a Offer>) -> Option<&'a Offer> {
-    match (shared, github) {
-        (Some(s), Some(g)) if gate::is_newer(&s.version, &g.version) => Some(s),
-        (_, Some(g)) => Some(g),
-        (s, None) => s,
+        format!("{} is ready, downloaded from GitHub", self.version)
     }
 }
 
@@ -93,11 +52,15 @@ pub fn install(offer: &Offer, then_play: bool) -> io::Result<()> {
     let (incoming, aside) = (beside(&me, ".new"), beside(&me, ".old"));
     let size = fs::metadata(&offer.source)?.len();
     fs::copy(&offer.source, &incoming)?;
-    if let Some(expected) = &offer.sha256
-        && fs::read(&incoming).map(|bytes| fsx::fingerprint(&bytes)).ok().as_ref() != Some(expected)
-    {
+    let copied_sha256 = fs::read(&incoming).map(|bytes| fsx::fingerprint(&bytes)).ok();
+    if copied_sha256.as_deref() != Some(offer.sha256.as_str()) {
         let _ = fs::remove_file(&incoming);
         return Err(io::Error::other("the copy isn't the exe GitHub published (its checksum differs)"));
+    }
+    // The signature is checked again over the copy, so what runs is what was signed.
+    if let Err(why) = check_signature(&incoming, &offer.signature, &offer.version) {
+        let _ = fs::remove_file(&incoming);
+        return Err(io::Error::other(format!("the copy was refused: {why}")));
     }
     let copied = win::exe_version(&incoming);
     let copied_size = fs::metadata(&incoming).map(|m| m.len()).unwrap_or(0);
@@ -130,6 +93,19 @@ pub fn install(offer: &Offer, then_play: bool) -> io::Result<()> {
         std::thread::sleep(Duration::from_millis(200));
     }
     Ok(())
+}
+
+/// The signature at `signature` verified over the exe at `exe`, release `version`: the key's id.
+fn check_signature(exe: &Path, signature: &Path, version: &str) -> Result<&'static str, String> {
+    let len = fs::metadata(signature).map_err(|e| format!("its signature: {e}"))?.len();
+    if len > signing::SIGNATURE_MAX {
+        return Err("its signature file is too big to be one".into());
+    }
+    let text = fs::read_to_string(signature).map_err(|e| format!("its signature: {e}"))?;
+    let bytes = fs::read(exe).map_err(|e| format!("the copy: {e}"))?;
+    let key = signing::verify(&bytes, &text, version)?;
+    log!("Satchel {version}'s copy verified with the release key {key}");
+    Ok(key)
 }
 
 /// This Satchel back where it was, the new one aside as `.new`: the error to show.

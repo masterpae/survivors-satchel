@@ -212,7 +212,7 @@ export component PlayCard inherits Window {
     out property <length> wanted-height: min(max(120px, 48px + root.text-lines * 20px + root.lines.length * 6px + (root.asking ? 46px : 0px)), 460px);
     callback cancel();
     callback play-anyway();
-    // A newer Satchel beside sync\: its version, and the button that puts it in place.
+    // A newer Satchel downloaded from GitHub: its version, and the button that puts it in place.
     in property <string> update-version;
     callback update-now();
     // Dark or light, as Settings' theme says.
@@ -1061,7 +1061,7 @@ export component MainWindow inherits Window {
     in property <string> game-note;
     callback game-settings-own();
     // A newer Satchel: the Play tab's line, the version Update now puts in place (empty: none
-    // beside sync\), and whether nothing syncs until then.
+    // downloaded yet), and whether nothing syncs until then.
     in property <string> update-text;
     in property <string> update-version;
     in property <bool> update-gated;

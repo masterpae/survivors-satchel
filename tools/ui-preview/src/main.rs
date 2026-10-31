@@ -555,12 +555,12 @@ fn main() {
     ui.set_whats_new_open(false);
     ui.set_dark(false);
 
-    // 0.4.1: a newer Satchel beside sync\ (Update now), the version check, Settings in groups.
+    // A newer Satchel downloaded from GitHub (Update now), the version check, Settings in groups.
     ui.set_tab(0);
     ui.set_app_version("0.4.1".into());
     ui.set_app_build("Built from 0a1b2c3".into());
     ui.set_version_line("Survivor's Satchel 0.4.1 · released today".into());
-    ui.set_update_text("Survivor's Satchel 0.4.2 is ready beside sync\\.".into());
+    ui.set_update_text("Survivor's Satchel 0.4.2 is ready, downloaded from GitHub.".into());
     ui.set_update_version("0.4.2".into());
     snap(&main, size, &out.join("25-play-update-ready.ppm"));
     ui.set_update_text("Nothing syncs until this Satchel is updated: another PC uses 0.4.2.".into());
@@ -666,7 +666,7 @@ fn main() {
     ]));
     card.set_dark(true);
     snap(&card_window, card_size(&card), &out.join("24-dark-play-card.ppm"));
-    // 0.4.1: another PC uses a newer Satchel; Play asks, and offers the one beside sync\.
+    // Another PC uses a newer Satchel; Play asks, and offers the one downloaded from GitHub.
     card.set_dark(false);
     card.set_lines(card_lines(&[(
         "Another PC uses Survivor's Satchel 0.4.2 and this one is 0.4.1, so nothing syncs until it's updated. Playing now plays this PC's progress, synced after the update. Update now puts 0.4.2 here and plays.",

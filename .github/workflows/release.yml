@@ -1,6 +1,9 @@
-# A version tag (v0.5.0) builds the Windows exe and publishes it as that version's release. The
-# release's notes are the version's section of CHANGELOG.md, the same text the app shows under
-# Settings → About → What's new. A tag with a suffix (v0.6.0-rc.1) makes a pre-release.
+# A version tag (v0.7.0) builds the Windows exe and attaches it to a draft of that version's
+# release, which no Satchel sees. The maintainer checks the draft's exe, signs it with the release
+# key on their own PC (the key never comes near GitHub), adds SurvivorsSatchel.exe.minisig to the
+# draft and publishes it: Satchels from 0.7.0 on take only a signed update. The release's notes are
+# the version's section of CHANGELOG.md, the same text the app shows under Settings → About →
+# What's new. A tag with a suffix (v0.6.0-rc.1) makes a pre-release.
 #
 # Two jobs: `build` compiles and tests with read access only; `publish` runs no repository code
 # and only creates the release from what `build` left.
@@ -81,6 +84,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(cat dist/version)
-          set -- --repo "$GITHUB_REPOSITORY" --title "Survivor's Satchel $version" --notes-file notes.md
+          set -- --repo "$GITHUB_REPOSITORY" --draft --title "Survivor's Satchel $version" --notes-file notes.md
           case "$version" in *-*) set -- "$@" --prerelease ;; esac
           gh release create "$GITHUB_REF_NAME" dist/SurvivorsSatchel.exe "$@"

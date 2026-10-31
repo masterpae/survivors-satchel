@@ -9,6 +9,11 @@ publish = false
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std", "serde"] }
+# Checks the signature on the Satchel's own updates (signing.rs): minisign's format, no
+# dependencies, its own Ed25519 and BLAKE2b. Pinned. Read in its source, 0.3.0 (25 Sep 2026):
+# `PublicKey::verify` refuses a signature made with another key id and, with allow_legacy false,
+# one that isn't prehashed; the trusted comment is covered by the second, global signature.
+minisign-verify = "=0.3.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"

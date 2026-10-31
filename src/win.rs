@@ -430,7 +430,7 @@ pub fn launch_game(game_dir: &Path) -> io::Result<()> {
 /// The flag a Satchel started by an update gets, with the id of the process it replaces.
 pub const AFTER_UPDATE: &str = "--after-update";
 
-/// The version an exe carries in its version resource ("0.4.1"), e.g. the one beside `sync\`;
+/// The version an exe carries in its version resource ("0.4.1"), e.g. a downloaded update's;
 /// `None` when it has none or can't be read.
 pub fn exe_version(path: &Path) -> Option<String> {
     let name = wide(path.as_os_str());

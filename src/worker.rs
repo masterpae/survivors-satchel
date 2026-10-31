@@ -12,7 +12,7 @@ use crate::win;
 use chrono::{DateTime, Datelike, Local, Utc};
 use satchel_core::activity::{self, Kind};
 use satchel_core::decide::Decision;
-use satchel_core::engine::{BroughtIn, Engine, Outlook, REACH_WAIT, Shown, SyncError};
+use satchel_core::engine::{BroughtIn, Engine, Outlook, Shown, SyncError};
 use satchel_core::fsx::fingerprint;
 use satchel_core::gate;
 use satchel_core::log;
@@ -86,9 +86,9 @@ pub enum Command {
     GameSettingsChoice(bool),
     /// "Use them instead": this PC's own game settings from before it joined.
     GameSettingsOwn,
-    /// The newer Satchel beside `sync\` replaces this one.
+    /// The newer Satchel downloaded from GitHub replaces this one.
     UpdateNow,
-    /// About's Check for updates: the exe beside `sync\` now and, in a release build, GitHub now.
+    /// About's Check for updates: GitHub now, in a build that knows its repository.
     CheckUpdates,
     /// What's new was opened: "Updated to …" goes.
     WhatsNewSeen,
@@ -156,14 +156,11 @@ pub struct Worker {
     // Play.
     pending_play: bool,
     play_anyway: bool,
-    // A newer Satchel: the exe beside `sync\` as last seen, and the one it offers; the version
-    // another PC used when that keeps this one out of the shared files (`gate`).
     /// This PC's own in-use marker from an earlier run has been dealt with (or there was none).
     leftover_done: bool,
-    update_watch: update::Watch,
-    /// A newer Satchel beside `sync\`.
-    update_offer: Option<update::Offer>,
-    /// A newer Satchel from its GitHub release, downloaded and checked.
+    /// A newer Satchel from its GitHub release: downloaded, checked against its checksum and the
+    /// version it calls itself, its signature verified. The only update there is: since 0.7.0
+    /// nothing is taken from the network folder.
     github_offer: Option<update::Offer>,
     satchel_looked: Option<Instant>,
     satchel_failed: bool,
@@ -191,6 +188,16 @@ pub struct Worker {
     last_view: Option<View>,
     addons: addons::AddonsState,
     share: share::ShareState,
+}
+
+/// How a Satchel that a newer one keeps out gets the new one while none is on offer: from GitHub,
+/// the only place updates come from.
+fn update_hint() -> &'static str {
+    if about::REPOSITORY.is_empty() {
+        "Get the new Satchel from its GitHub releases to update this one."
+    } else {
+        "Update now shows here once the new Satchel has downloaded from GitHub."
+    }
 }
 
 fn due(last: Option<Instant>, every: Duration) -> bool {
@@ -326,8 +333,6 @@ impl Worker {
             pending_play: false,
             play_anyway: false,
             leftover_done: false,
-            update_watch: update::Watch::default(),
-            update_offer: None,
             github_offer: None,
             satchel_looked: None,
             satchel_failed: false,
@@ -879,8 +884,7 @@ impl Worker {
                 if !std::mem::take(&mut self.play_anyway) {
                     let update = match self.offer() {
                         Some(offer) => format!(" Update now puts {} here and plays.", offer.version),
-                        None if !about::REPOSITORY.is_empty() => " Update now shows here once the new Satchel has downloaded.".into(),
-                        None => " Copy the new SurvivorsSatchel.exe to this PC to update it.".into(),
+                        None => format!(" {}", update_hint()),
                     };
                     self.card_ask(format!(
                         "Another PC uses Survivor's Satchel {newer} and this one is {}, so nothing syncs until it's updated. Playing now plays this PC's progress, synced after the update.{update}",
@@ -1627,16 +1631,9 @@ impl Worker {
                 }
                 Err(e) => self.problem = Some(format!("The network folder can't be read: {e}")),
             }
-            // The exe beside sync\ is looked at only while the NAS answers.
-            if !self.offline
-                && let Some(shared) = self.engine.shared()
-            {
-                self.update_offer = self.update_watch.look(&shared.folder, about::VERSION);
-            }
         } else {
             self.outlook = None;
             self.gated = None;
-            self.update_offer = None;
         }
         self.build_lists();
     }
@@ -1963,8 +1960,8 @@ impl Worker {
         self.share_look();
     }
 
-    /// Update now: the Satchel beside `sync\` takes this one's place and starts (playing, when
-    /// asked from Play), and this one closes.
+    /// Update now: the Satchel downloaded from GitHub takes this one's place and starts (playing,
+    /// when asked from Play), and this one closes.
     fn update_now(&mut self) {
         if self.game_dir().is_some_and(|d| self.scanner.game_running(&d)) {
             self.say("Close the game first: the Satchel updates while the game is closed.".into());
@@ -1992,32 +1989,19 @@ impl Worker {
             Err(e) => {
                 self.busy = None;
                 log!("the update to {} failed: {e}", offer.version);
-                let by_hand = match about::repository_url() {
-                    Some(url) if offer.from_github => format!("downloaded from {url}/releases"),
-                    _ => "copied from beside sync\\ by hand".into(),
-                };
-                self.say(format!("The Satchel didn't update ({e}). It goes on as it was; the new one can also be {by_hand}."));
+                let by_hand = about::repository_url().map(|url| format!("; the new one can also be downloaded from {url}/releases")).unwrap_or_default();
+                self.say(format!("The Satchel didn't update ({e}). It goes on as it was{by_hand}."));
             }
         }
     }
 
-    /// About's Check for updates: the exe beside `sync\` is read again at once (its size and time
-    /// as last seen are forgotten) and, in a build that knows its repository, GitHub is asked now
-    /// instead of at the next look, whose answer finishes the check (`satchel_answer`). What was
+    /// About's Check for updates: in a build that knows its repository, GitHub is asked now
+    /// instead of at the next look, and its answer finishes the check (`satchel_answer`). What was
     /// found shows under the button and in the banner.
     fn check_updates(&mut self) {
         // Counted first: whatever happens below, the next view ends the window's own "Checking…"
         // (a check that asks GitHub goes on showing it until the answer).
         self.checks += 1;
-        self.update_watch = update::Watch::default();
-        let shared = self.engine.shared();
-        let sync_on = shared.is_some();
-        let answers = shared.as_ref().is_some_and(|s| s.reachable_within(REACH_WAIT));
-        if let Some(shared) = shared.filter(|_| answers) {
-            // It answered just now: an `offline` left by an earlier look must not hide the exe.
-            self.offline = false;
-            self.update_offer = self.update_watch.look(&shared.folder, about::VERSION);
-        }
         // Pending only once the question is on its way to the network thread: a hand-off that
         // failed would otherwise keep "Checking…" up until the Satchel restarts.
         let asks_github = !about::REPOSITORY.is_empty();
@@ -2031,20 +2015,16 @@ impl Worker {
             format!("Checked: {}", offer.ready())
         } else if asks_github {
             "Checked: GitHub couldn't be asked".into()
-        } else if !sync_on {
-            "Checked: nothing to compare with — sync is off, and this build doesn't look on GitHub".into()
-        } else if !answers {
-            "Checked: the network folder doesn't answer".into()
         } else {
-            format!("Checked: you have the newest version ({})", about::VERSION)
+            "Checked: this build doesn't look on GitHub for updates".into()
         };
         self.check_result = Some(text.clone());
         self.say(text);
     }
 
-    /// The newer Satchel on offer: beside `sync\` (while the NAS answers) or from GitHub.
+    /// The newer Satchel on offer: downloaded from GitHub, checked and verified.
     fn offer(&self) -> Option<&update::Offer> {
-        update::newer(self.update_offer.as_ref().filter(|_| !self.offline), self.github_offer.as_ref())
+        self.github_offer.as_ref()
     }
 
     pub(crate) fn satchel_answer(&mut self, result: Result<Option<update::Offer>, String>) {
@@ -2056,15 +2036,20 @@ impl Worker {
             }
             Err(e) => {
                 log!("the Satchel's GitHub release not taken: {e}");
+                // An offer stays only while its files do: a refused release takes everything
+                // downloaded with it.
+                if self.github_offer.as_ref().is_some_and(|o| !o.source.is_file() || !o.signature.is_file()) {
+                    self.github_offer = None;
+                }
                 Some(e)
             }
         };
-        // The answer Check for updates waits for; a newer Satchel beside sync\ is named over it.
+        // The answer Check for updates waits for.
         if std::mem::take(&mut self.check_pending) {
             let text = match (self.offer(), failed) {
                 (Some(offer), _) => format!("Checked: {}", offer.ready()),
                 // No answer says so itself ("GitHub didn't answer (…)"); else a release was refused
-                // (no checksum, a wrong one, another version inside).
+                // (no checksum, a wrong one, another version inside, no signature or a wrong one).
                 (None, Some(e)) if e.starts_with(net::NO_ANSWER) => format!("Checked: {e}"),
                 (None, Some(e)) => format!("Checked: nothing could be taken from GitHub ({e})"),
                 (None, None) => format!("Checked: you have the newest version ({})", about::VERSION),
@@ -2083,7 +2068,7 @@ impl Worker {
                 version: offer.version.clone(),
                 gated: gated.is_some(),
             },
-            (Some(_), None) => UpdateLine { text: "Copy the new SurvivorsSatchel.exe to this PC to update it.".into(), version: String::new(), gated: true },
+            (Some(_), None) => UpdateLine { text: update_hint().into(), version: String::new(), gated: true },
             (None, None) => UpdateLine::default(),
         }
     }

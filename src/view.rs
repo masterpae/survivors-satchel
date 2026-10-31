@@ -88,13 +88,13 @@ pub struct GameSettingsLine {
     pub note: String,
 }
 
-/// A newer Satchel: beside `sync\` (Update now), or used by another PC, which keeps this one
-/// out of the shared files until it's updated.
+/// A newer Satchel: downloaded from GitHub (Update now), or used by another PC, which keeps this
+/// one out of the shared files until it's updated.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UpdateLine {
     /// The Play tab's line; empty when nothing is newer.
     pub text: String,
-    /// The version Update now puts in place; empty when there's none beside `sync\`.
+    /// The version Update now puts in place; empty when none has been downloaded.
     pub version: String,
     /// Nothing syncs here until this Satchel is updated.
     pub gated: bool,

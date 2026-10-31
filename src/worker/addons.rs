@@ -328,8 +328,8 @@ impl Worker {
     }
 
     /// In a build that knows its repository: the Satchel's newest GitHub release, on start and
-    /// every few hours (sooner after a failed look). A newer one is downloaded and checked, then
-    /// offered like the one beside `sync\`. When a newer Satchel keeps this one out and nothing
+    /// every few hours (sooner after a failed look). A newer one is downloaded, checked and its
+    /// signature verified, then offered (Update now). When a newer Satchel keeps this one out and nothing
     /// offers it yet, that very release is looked for, every few minutes. True when a look was
     /// handed to the network thread just now.
     pub(super) fn satchel_look(&mut self) -> bool {

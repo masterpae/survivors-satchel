@@ -17,7 +17,7 @@ use satchel_core::addons::catalog::Release;
 use satchel_core::addons::github::{self, Pick, RestRelease, RestRepo, RestTag};
 use satchel_core::addons::overview::{Watch, plain};
 use satchel_core::addons::package;
-use satchel_core::{fsx, gate, log};
+use satchel_core::{fsx, gate, log, signing};
 use serde::de::DeserializeOwned;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -116,13 +116,31 @@ fn run(jobs: Receiver<Job>, cache: &Path, commands: &Sender<Command>) {
     }
 }
 
-/// Only `keep` stays among the downloaded Satchels; none when it's `None`.
-fn keep_only(dir: &Path, keep: Option<&Path>) {
+/// Only the files in `keep` stay among the downloaded Satchels (an exe and its signature); none
+/// when it's empty.
+fn keep_only(dir: &Path, keep: &[&Path]) {
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        if keep != Some(entry.path().as_path()) {
-            let _ = std::fs::remove_file(entry.path());
+        let path = entry.path();
+        if !keep.contains(&path.as_path()) {
+            let _ = std::fs::remove_file(path);
         }
     }
+}
+
+/// A release's signature, `bytes` as downloaded from `file`, over the exe at `exe`: checked against
+/// the checksum GitHub published for it, verified with the release keys and written beside the
+/// exe. Its path, or why it was refused.
+fn accept_signature(file: &github::PageFile, bytes: Vec<u8>, tag: &str, version: &str, exe: &Path) -> Result<PathBuf, String> {
+    if file.sha256.as_deref().is_some_and(|expected| fsx::fingerprint(&bytes) != expected) {
+        return Err(format!("the signature of {tag} downloaded isn't the one published (its checksum differs)"));
+    }
+    let text = String::from_utf8(bytes).map_err(|_| format!("the signature of {tag} isn't text"))?;
+    let exe_bytes = std::fs::read(exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+    let key = signing::verify(&exe_bytes, &text, version).map_err(|why| format!("{version} was refused: {why}"))?;
+    log!("Satchel {version}'s signature verified with the release key {key}");
+    let path = exe.with_file_name(format!("{}.minisig", exe.file_name().unwrap_or_default().to_string_lossy()));
+    fsx::write_atomic(&path, text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
 }
 
 /// Runs a job: one that panics answers with an error, and the thread lives on for the next.
@@ -216,10 +234,15 @@ impl Net {
 
     /// The bytes behind `url`, refused past the size cap.
     fn download(&self, url: &str) -> Result<Vec<u8>, String> {
+        self.download_limited(url, MAX_FILE)
+    }
+
+    /// A file of at most `limit` bytes, counted as they stream in.
+    fn download_limited(&self, url: &str, limit: u64) -> Result<Vec<u8>, String> {
         let mut response =
             self.agent.get(url).config().timeout_global(Some(FILE_TIME)).build().call().map_err(|e| no_answer(url, e))?;
         match response.status().as_u16() {
-            200 => response.body_mut().with_config().limit(MAX_FILE).read_to_vec().map_err(|e| no_answer(url, e)),
+            200 => response.body_mut().with_config().limit(limit).read_to_vec().map_err(|e| no_answer(url, e)),
             status => Err(format!("GitHub answered {status}")),
         }
     }
@@ -244,15 +267,16 @@ impl Net {
 
     /// The Satchel's newest stable release in `repo` (or `want`'s release, a pre-release too),
     /// when it's newer than this one: its exe, downloaded into `dir` (once), checked against the
-    /// checksum GitHub published for it and against the version it calls itself. A release
-    /// without that checksum isn't offered: an exe is never run unchecked.
+    /// checksum GitHub published for it and against the version it calls itself, and its signature
+    /// verified with the release keys (`signing`). A release without that checksum or signature
+    /// isn't offered: an exe is never run unchecked.
     fn satchel(&self, repo: &str, dir: &Path, want: Option<&str>) -> Result<Option<Offer>, String> {
         let (tag, version) = match want {
             Some(version) => (format!("v{version}"), version.to_string()),
             None => {
                 let Some(location) = self.location(&format!("https://github.com/{repo}/releases/latest"))? else {
                     log!("the Satchel's GitHub releases: none published yet");
-                    keep_only(dir, None);
+                    keep_only(dir, &[]);
                     return Ok(None);
                 };
                 let Some(tag) = github::latest_tag(repo, &location) else {
@@ -267,16 +291,22 @@ impl Net {
             }
         };
         if !gate::is_newer(&version, env!("CARGO_PKG_VERSION")) {
-            keep_only(dir, None);
+            keep_only(dir, &[]);
             return Ok(None);
         }
         let page = self.text(&format!("https://github.com/{repo}/releases/expanded_assets/{}", segment(&tag)))?;
         let files = github::page_files(repo, &page);
         let file = files
             .iter()
-            .find(|f| f.name.eq_ignore_ascii_case(update::SHARED_EXE))
-            .ok_or_else(|| format!("its release {tag} has no {}", update::SHARED_EXE))?;
+            .find(|f| f.name.eq_ignore_ascii_case(update::RELEASE_EXE))
+            .ok_or_else(|| format!("its release {tag} has no {}", update::RELEASE_EXE))?;
         let expected = file.sha256.as_deref().ok_or_else(|| format!("GitHub published no checksum for the exe of {tag}"))?;
+        // From 0.7.0 every release carries the maintainer's signature over the exe. A release
+        // without one isn't offered, and its exe isn't even downloaded.
+        let signed = files
+            .iter()
+            .find(|f| f.name.eq_ignore_ascii_case(signing::SIGNATURE_NAME))
+            .ok_or_else(|| format!("its release {tag} carries no signature"))?;
         let path = dir.join(format!("SurvivorsSatchel-{}.exe", segment(&version)));
         let held = fsx::read_optional(&path).ok().flatten().is_some_and(|bytes| fsx::fingerprint(&bytes) == expected);
         if !held {
@@ -291,11 +321,21 @@ impl Net {
         // An exe calling itself another version would be refused at every Update now.
         let calls_itself = win::exe_version(&path);
         if calls_itself.as_deref() != Some(version.as_str()) {
-            keep_only(dir, None);
+            keep_only(dir, &[]);
             return Err(format!("the exe of {tag} calls itself {}, not {version}", calls_itself.as_deref().unwrap_or("nothing")));
         }
-        keep_only(dir, Some(&path));
-        Ok(Some(Offer { version, source: path, from_github: true, sha256: Some(expected.to_string()) }))
+        // A signature that doesn't download refuses nothing: what an earlier look verified stays.
+        // One that doesn't verify takes everything downloaded with it.
+        let bytes = self.download_limited(&signed.url, signing::SIGNATURE_MAX)?;
+        let signature = match accept_signature(signed, bytes, &tag, &version, &path) {
+            Ok(signature) => signature,
+            Err(e) => {
+                keep_only(dir, &[]);
+                return Err(e);
+            }
+        };
+        keep_only(dir, &[path.as_path(), signature.as_path()]);
+        Ok(Some(Offer { version, source: path, sha256: expected.to_string(), signature }))
     }
 
     /// Downloads into the cache, checked against the published checksum when there is one.

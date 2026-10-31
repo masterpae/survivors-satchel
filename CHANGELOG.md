@@ -3,6 +3,27 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.7.0 (2026-10-31)
+
+Signed updates, and from GitHub only.
+
+### Added
+- Every release from this one on carries `SurvivorsSatchel.exe.minisig`, a minisign signature
+  over the exe made with the maintainer's key, which never touches GitHub. The Satchel now takes
+  an update only when that signature checks out and names the release's version. A release
+  without one, or with a wrong one, is refused, and nothing downloaded is kept.
+- The README gives the public key and the command to check a download by hand.
+
+### Changed
+- A release starts as a draft and goes public only once its exe is checked and signed, so no
+  Satchel sees a release before it is complete. Satchels before 0.7.0 take this one by its
+  checksum, as before.
+
+### Removed
+- Updates from the network folder: a newer `SurvivorsSatchel.exe` placed beside `sync\` is no
+  longer offered or installed. Updates come only from the Satchel's GitHub releases, signed. The
+  network folder still carries progress, addons and settings.
+
 ## 0.6.2 (2026-10-31)
 
 The built-in addon list brought in line with the game's verified-addons channel, and a missing
