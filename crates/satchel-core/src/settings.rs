@@ -62,11 +62,14 @@ pub struct AddonSettings {
     pub update_by_themselves: bool,
     /// With sync on: the same addons and settings on every PC.
     pub shared: bool,
+    /// SurvivorsForge: more addons, descriptions and trust levels from its registry. Off, nothing
+    /// is asked of it and the cache stays unused.
+    pub forge: bool,
 }
 
 impl Default for AddonSettings {
     fn default() -> Self {
-        AddonSettings { update_by_themselves: true, shared: true }
+        AddonSettings { update_by_themselves: true, shared: true, forge: true }
     }
 }
 
@@ -207,6 +210,16 @@ mod tests {
         let text = toml::to_string_pretty(&dark).unwrap();
         assert!(text.contains("theme = \"dark\""), "{text}");
         assert_eq!(toml::from_str::<Settings>(&text).unwrap(), dark);
+    }
+
+    #[test]
+    fn settings_from_0_7_0_have_survivorsforge_on() {
+        let settings: Settings = toml::from_str("pc_name = 'PC 1'\n[addons]\nupdate_by_themselves = true\nshared = true\n").unwrap();
+        assert!(settings.addons.forge);
+        let off = Settings { addons: AddonSettings { forge: false, ..settings.addons.clone() }, ..settings };
+        let text = toml::to_string_pretty(&off).unwrap();
+        assert!(text.contains("forge = false"), "{text}");
+        assert_eq!(toml::from_str::<Settings>(&text).unwrap(), off);
     }
 
     #[test]

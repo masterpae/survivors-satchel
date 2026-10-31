@@ -294,10 +294,23 @@ fn main() {
         });
     }
     window.on_addon_update(install_with_id(&window, &tx, Command::AddonUpdate));
+    window.on_addon_update_anyway(install_with_id(&window, &tx, Command::AddonUpdateAnyway));
     window.on_addon_back(with_id(&tx, Command::AddonBack));
     window.on_addon_page(with_id(&tx, Command::AddonPage));
     window.on_addon_folder(with_id(&tx, Command::AddonFolder));
     window.on_browse_install(install_with_id(&window, &tx, Command::BrowseInstall));
+    window.on_browse_install_anyway(install_with_id(&window, &tx, Command::BrowseInstallAnyway));
+    // Browse's panel: the window shows it at once; the worker sends SurvivorsForge's part.
+    window.on_browse_open(with_id(&tx, Command::BrowseOpen));
+    window.on_browse_close(sender(&tx, || Command::BrowseClose));
+    window.on_forge_show_scan(with_id(&tx, Command::ForgeShowScan));
+    // SurvivorsForge's links in Settings and About: the worker opens only those it knows.
+    {
+        let tx = tx.clone();
+        window.on_open_link(move |url| {
+            let _ = tx.send(Command::OpenLink(url.into()));
+        });
+    }
     window.on_link_lookup(with_id(&tx, Command::LinkLookup));
     {
         let weak = window.as_weak();

@@ -2,6 +2,7 @@
 //! Everything slow (the network share above all) happens here, never on the UI thread.
 
 mod addons;
+mod forge;
 mod share;
 
 use crate::net::{self, Answer};
@@ -57,12 +58,15 @@ pub enum Command {
     DefaultSettings,
     DetectGame(Form),
     FinishSetup(Form, i32),
-    // Addons: ids are a record's, a catalog entry's, or `folder:<name>`.
+    // Addons: ids are a record's, a catalog entry's, SurvivorsForge's own (`forge:<slug>`), or
+    // `folder:<name>`.
     AddonsCheck,
     AddonsUpdateAll,
     AddonsOpenFolder,
     AddonSwitch(String, bool),
     AddonUpdate(String),
+    /// Update anyway: the player's OK for an update SurvivorsForge asks about first.
+    AddonUpdateAnyway(String),
     AddonBack(String),
     AddonKeep(String, bool),
     AddonRemove(String, bool),
@@ -74,8 +78,20 @@ pub enum Command {
     AddonSettingsPerPc(String, bool),
     /// After an addon's settings changed here and on another PC: `true` keeps this PC's.
     AddonSettingsChoice(String, bool),
-    /// Installs a verified addon, or replaces a copy installed by hand (`folder:<name>`).
+    /// Installs an addon from Browse (our list's, or SurvivorsForge's own), or replaces a copy
+    /// installed by hand (`folder:<name>`).
     BrowseInstall(String),
+    /// Install anyway: the player's OK for an addon SurvivorsForge asks about first.
+    BrowseInstallAnyway(String),
+    /// Browse opened an addon's panel (again, perhaps): its SurvivorsForge details and versions.
+    BrowseOpen(String),
+    /// The panel closed.
+    BrowseClose,
+    /// The panel's "Show what it found": the findings of the version it shows.
+    ForgeShowScan(String),
+    /// A link in Settings or About: SurvivorsForge's repository or website, or a GitHub
+    /// repository's page; nothing else is opened.
+    OpenLink(String),
     LinkLookup(String),
     LinkInstall,
     LinkClear,
@@ -188,6 +204,7 @@ pub struct Worker {
     last_view: Option<View>,
     addons: addons::AddonsState,
     share: share::ShareState,
+    forge: forge::ForgeState,
 }
 
 /// How a Satchel that a newer one keeps out gets the new one while none is on offer: from GitHub,
@@ -301,9 +318,11 @@ impl Worker {
             memory.game_own_kept = own;
         }
         let net = net::start(engine.local.addon_cache(), commands);
+        let forge = forge::ForgeState::new(engine.local.forge_dir());
         Worker {
             addons: addons::AddonsState::new(store, net),
             share: share::ShareState::new(memory),
+            forge,
             engine,
             ui,
             tracker: Tracker::default(),
@@ -404,11 +423,14 @@ impl Worker {
         if let Err(e) = self.engine.flush_playtime() {
             log!("waiting playtime not sent: {e}");
         }
+        // SurvivorsForge's answers kept on this PC, before the first lists are made from them.
+        self.forge_load();
         self.refresh();
         self.push_form();
         self.addons_scan();
         self.addons_prune_cache();
         self.addons_look();
+        self.forge_look();
         self.share_look();
         self.satchel_look();
     }
@@ -416,7 +438,14 @@ impl Worker {
     fn handle(&mut self, command: Command) {
         // The window shows an install as under way the moment it's asked for: a view always
         // follows one, even when nothing else changed (a refusal said a second time, say).
-        if matches!(command, Command::BrowseInstall(_) | Command::AddonUpdate(_) | Command::LinkInstall) {
+        if matches!(
+            command,
+            Command::BrowseInstall(_)
+                | Command::BrowseInstallAnyway(_)
+                | Command::AddonUpdate(_)
+                | Command::AddonUpdateAnyway(_)
+                | Command::LinkInstall
+        ) {
             self.last_view = None;
         }
         // What changed here goes to the other PCs at once.
@@ -425,10 +454,12 @@ impl Worker {
             Command::AddonsUpdateAll
                 | Command::AddonSwitch(..)
                 | Command::AddonUpdate(_)
+                | Command::AddonUpdateAnyway(_)
                 | Command::AddonBack(_)
                 | Command::AddonKeep(..)
                 | Command::AddonRemove(..)
                 | Command::BrowseInstall(_)
+                | Command::BrowseInstallAnyway(_)
                 | Command::LinkInstall
                 | Command::ImportZip(_)
                 | Command::InstallAgain(_)
@@ -465,6 +496,8 @@ impl Worker {
                     self.refresh();
                     self.push_form();
                     self.addons_scan();
+                    // SurvivorsForge switched on: asked at once when it's due. Off, nothing is.
+                    self.forge_look();
                 }
             }
             Command::DefaultSettings => {
@@ -476,6 +509,7 @@ impl Worker {
                 view.form.notifications = defaults.notifications;
                 view.form.addons_auto = defaults.addons.update_by_themselves;
                 view.form.addons_shared = defaults.addons.shared;
+                view.form.addons_forge = defaults.addons.forge;
                 view.form.pause_when_away = defaults.pause_when_away;
                 view.form.theme = theme_index(defaults.theme);
                 view.form.game_shared = defaults.game.shared;
@@ -496,6 +530,7 @@ impl Worker {
             Command::AddonsOpenFolder => self.addons_open_folder(),
             Command::AddonSwitch(id, on) => self.addon_switch(&id, on),
             Command::AddonUpdate(id) => self.addon_update(&id),
+            Command::AddonUpdateAnyway(id) => self.addon_update_anyway(&id),
             Command::AddonBack(id) => self.addon_back(&id),
             Command::AddonKeep(id, keep) => self.addon_keep(&id, keep),
             Command::AddonRemove(id, keep_settings) => self.addon_remove(&id, keep_settings),
@@ -505,6 +540,11 @@ impl Worker {
             Command::AddonSettingsPerPc(id, on) => self.addon_settings_per_pc(&id, on),
             Command::AddonSettingsChoice(id, keep_here) => self.addon_settings_choice(&id, keep_here),
             Command::BrowseInstall(id) => self.browse_install(&id),
+            Command::BrowseInstallAnyway(id) => self.browse_install_anyway(&id),
+            Command::BrowseOpen(id) => self.browse_open(&id),
+            Command::BrowseClose => self.browse_close(),
+            Command::ForgeShowScan(id) => self.forge_show_scan(&id),
+            Command::OpenLink(url) => self.open_link(&url),
             Command::LinkLookup(text) => self.link_lookup(text),
             Command::LinkInstall => self.link_install(),
             Command::LinkClear => self.link_clear(),
@@ -568,6 +608,10 @@ impl Worker {
                 self.satchel_look();
             }
         }
+        // SurvivorsForge's registry keeps its cadence during a session too: one small request per
+        // 30 minutes, usually a 304. What goes in after a session is then judged on a fresh answer,
+        // and "isn't answering" never just means nobody asked.
+        self.forge_look();
     }
 
     fn on_event(&mut self, event: Event) {
@@ -1276,6 +1320,7 @@ impl Worker {
         settings.notifications = form.notifications;
         settings.addons.update_by_themselves = form.addons_auto;
         settings.addons.shared = form.addons_shared;
+        settings.addons.forge = form.addons_forge;
         settings.pause_when_away = form.pause_when_away;
         settings.theme = match form.theme {
             1 => Theme::Light,
@@ -1371,6 +1416,7 @@ impl Worker {
             notifications: settings.notifications,
             addons_auto: settings.addons.update_by_themselves,
             addons_shared: settings.addons.shared,
+            addons_forge: settings.addons.forge,
             pause_when_away: settings.pause_when_away,
             theme: theme_index(settings.theme),
             game_shared: settings.game.shared,

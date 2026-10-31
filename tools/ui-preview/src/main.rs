@@ -56,13 +56,14 @@ fn recent(values: &[(i32, &str)]) -> ModelRc<RecentLine> {
 
 /// An installed addon's row, from its main fields.
 fn addon(name: &str, kind: i32, author: &str, version: &str, update: &str, state: (&str, i32), problem: &str) -> AddonRow {
-    let badge = ["Verified", "Added by you", "From a file", "Installed by hand"][kind as usize];
+    let badge = ["Discord Verified", "Added by you", "From a file", "Installed by hand"][kind as usize];
     AddonRow {
         id: name.into(),
         initials: satchel_core::addons::overview::initials(name).into(),
         name: name.into(),
         badge: badge.into(),
         badge_kind: kind,
+        badges: badge_rows(&[]),
         author: author.into(),
         version: version.into(),
         released: if kind < 2 { "released 6 days ago".into() } else { SharedString::new() },
@@ -89,6 +90,8 @@ fn addon(name: &str, kind: i32, author: &str, version: &str, update: &str, state
         settings_per_pc: false,
         ask_pc: SharedString::new(),
         incoming: false,
+        reason: SharedString::new(),
+        reason_kind: 0,
     }
 }
 
@@ -97,36 +100,176 @@ fn shared(row: AddonRow, share: &str, kind: i32) -> AddonRow {
     AddonRow { share: share.into(), share_kind: kind, shared: true, ..row }
 }
 
-/// Browse, from the catalog this build carries; LuckyOdds and AZS Spell Meter count as installed.
-fn offers() -> (Vec<OfferRow>, Vec<SharedString>) {
+fn badge_rows(values: &[(&str, i32)]) -> ModelRc<BadgeRow> {
+    ModelRc::new(VecModel::from(values.iter().map(|(t, kind)| BadgeRow { text: (*t).into(), kind: *kind }).collect::<Vec<_>>()))
+}
+
+/// What SurvivorsForge said of the 12 addons on both lists on 31 Oct (the registry: the latest
+/// version's trust, the category).
+const FORGE_JOINED: [(&str, &str, &str); 12] = [
+    ("aether-hud", "verified", "Unit Frames"),
+    ("as-builder", "verified", "Miscellaneous"),
+    ("azerloot", "verified", "Miscellaneous"),
+    ("azeroth-fieldkit", "verified", "Combat"),
+    ("azeroth-stats", "verified", "Miscellaneous"),
+    ("azs-spell-meter", "verified", "Combat"),
+    ("blackwell-ui", "verified", "Combat"),
+    ("keijin-ui", "verified", "Unit Frames"),
+    ("lucky-odds", "verified", "Miscellaneous"),
+    ("survivor-ui", "scanned", "Unit Frames"),
+    ("survivors-dragon-ui", "verified", "Unit Frames"),
+    ("survivor-ui-classic", "scanned", "Unit Frames"),
+];
+
+/// A Browse card and what the filters and sorts read from it (the app's `OfferLine`, in short).
+#[derive(Clone)]
+struct Offer {
+    row: OfferRow,
+    tags: Vec<String>,
+    /// 0 our list only, 1 both, 2 SurvivorsForge only.
+    origin: i32,
+}
+
+/// "today", "yesterday", "3 days ago": a publish date beside its version.
+fn days_ago(days: i64) -> String {
+    match days {
+        ..=0 => "today".into(),
+        1 => "yesterday".into(),
+        days => format!("{days} days ago"),
+    }
+}
+
+/// Browse: our list from the catalog this build carries, joined with what SurvivorsForge said on
+/// 31 Oct, plus three addons only on SurvivorsForge. LuckyOdds, AZS Spell Meter and
+/// SurvivorsDragonUi count as installed. BordoUI shows as it would had no admin approved its
+/// flagged scan (it waits for the player's OK); the rest is as read that day.
+fn offers() -> Vec<Offer> {
     use satchel_core::addons::catalog::Catalog;
+    use satchel_core::addons::overview::initials;
     let catalog = Catalog::builtin();
-    let mut groups: Vec<SharedString> = Vec::new();
-    let rows = catalog
+    // Dates as on the day the catalog was made, so the images don't drift.
+    let today = catalog.generated.date_naive();
+    let mut offers: Vec<Offer> = catalog
         .addons
         .iter()
         .map(|e| {
-            if !groups.iter().any(|g| g.as_str() == e.group) {
-                groups.push(e.group.as_str().into());
+            let forge = FORGE_JOINED.iter().find(|(id, _, _)| *id == e.id);
+            let mut badges = vec![("Discord Verified".to_string(), 0)];
+            let mut tags = vec![e.group.clone()];
+            if let Some((_, trust, category)) = forge {
+                badges.push((format!("SurvivorsForge · {trust}"), 4));
+                tags.push((*category).to_string());
             }
+            let badges: Vec<(&str, i32)> = badges.iter().map(|(t, k)| (t.as_str(), *k)).collect();
             let installed = ["lucky-odds", "azs-spell-meter", "survivors-dragon-ui"].contains(&e.id.as_str());
             let warning = if e.id == "keijin-ui" { "doesn't mix with SurvivorsDragonUi, which you have" } else { "" };
-            OfferRow {
-                id: e.id.as_str().into(),
-                initials: satchel_core::addons::overview::initials(&e.name).into(),
-                name: e.name.as_str().into(),
-                author: e.author.as_str().into(),
-                summary: e.summary.as_str().into(),
-                group: e.group.as_str().into(),
-                version: e.latest.shown_version().into(),
-                installed,
-                installing: false,
-                warning: warning.into(),
-                notes: e.latest.notes.clone().unwrap_or_default().chars().take(500).collect::<String>().into(),
+            // SurvivorsForge's five LuckyOdds versions, 31 Oct: 230 + 761 + 2,853 + 2,870 + 1,668.
+            let downloads = if e.id == "lucky-odds" { "8,382 downloads" } else { "" };
+            Offer {
+                row: OfferRow {
+                    id: e.id.as_str().into(),
+                    initials: initials(&e.name).into(),
+                    initials_kind: 0,
+                    name: e.name.as_str().into(),
+                    author: e.author.as_str().into(),
+                    downloads: downloads.into(),
+                    summary: e.summary.as_str().into(),
+                    badges: badge_rows(&badges),
+                    version: e.latest.shown_version().into(),
+                    date: days_ago((today - e.latest.published.date_naive()).num_days()).into(),
+                    action: if installed { 3 } else { 0 },
+                    reason: SharedString::new(),
+                    warning: warning.into(),
+                },
+                tags,
+                origin: if forge.is_some() { 1 } else { 0 },
             }
         })
         .collect();
-    (rows, groups)
+    let only_forge = [
+        ("forge:totemmanager", "TotemManager", "BippyMiester", "Live totem cards for Azeroth Survivors: fill status, DPS and an upgrade verdict.", "v1.1.1", "Shaman", ("SurvivorsForge · scanned", 4), ""),
+        (
+            "forge:vulchans-combat-text",
+            "Vulchan's Combat Text",
+            "Vulchan",
+            "This is just an addon for Azeroth Survivors to condense the floating combat text into a much more manageable form. No longer are we blind to the game.",
+            "v0.3.4",
+            "Combat",
+            ("SurvivorsForge · scanned", 4),
+            "",
+        ),
+        ("forge:bordoui", "BordoUI", "threenox", "", "v2.8.15", "Combat", ("SurvivorsForge · flagged", 5), "SurvivorsForge's scan found 1 warning in this version"),
+    ];
+    for (id, name, author, summary, version, category, badge, reason) in only_forge {
+        offers.push(Offer {
+            row: OfferRow {
+                id: id.into(),
+                initials: initials(name).into(),
+                initials_kind: 4,
+                name: name.into(),
+                author: author.into(),
+                downloads: SharedString::new(),
+                summary: summary.into(),
+                badges: badge_rows(&[badge]),
+                version: version.into(),
+                // No date until its versions are fetched (a player opens it).
+                date: SharedString::new(),
+                action: if reason.is_empty() { 0 } else { 1 },
+                reason: reason.into(),
+                warning: SharedString::new(),
+            },
+            tags: vec![category.to_string()],
+            origin: 2,
+        });
+    }
+    offers.sort_by_key(|o| o.row.name.trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase());
+    offers
+}
+
+/// The tag chips line by line, as the app makes them (`view::tag_lines`).
+fn tag_lines(offers: &[Offer], on: &[&str]) -> ModelRc<ModelRc<TagRow>> {
+    let mut tags: Vec<String> = offers.iter().flat_map(|o| o.tags.iter().cloned()).collect();
+    tags.sort_by_key(|t| t.to_lowercase());
+    tags.dedup();
+    let mut lines: Vec<Vec<String>> = Vec::new();
+    let mut used = 0;
+    for tag in tags {
+        let width = tag.chars().count() * 7 + 24;
+        match lines.last_mut() {
+            Some(line) if used + width <= 470 => {
+                line.push(tag);
+                used += width;
+            }
+            _ => {
+                used = width;
+                lines.push(vec![tag]);
+            }
+        }
+    }
+    ModelRc::new(VecModel::from(
+        lines
+            .iter()
+            .map(|line| {
+                ModelRc::new(VecModel::from(line.iter().map(|t| TagRow { text: t.as_str().into(), on: on.contains(&t.as_str()) }).collect::<Vec<_>>()))
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+/// Browse as the app fills it: the cards (those with any of the tags `on`, none: all), the tag
+/// chips, the counts and the Legend's tag line.
+fn set_browse(ui: &MainWindow, offers: &[Offer], on: &[&str]) {
+    let shown: Vec<OfferRow> = offers.iter().filter(|o| on.is_empty() || o.tags.iter().any(|t| on.contains(&t.as_str()))).map(|o| o.row.clone()).collect();
+    ui.set_offer_rows(ModelRc::new(VecModel::from(shown)));
+    ui.set_browse_tags(tag_lines(offers, on));
+    ui.set_browse_tags_on(on.len() as i32);
+    let mut tags: Vec<String> = offers.iter().flat_map(|o| o.tags.iter().cloned()).collect();
+    tags.sort_by_key(|t| t.to_lowercase());
+    tags.dedup();
+    ui.set_browse_tag_line(tags.join(" · ").into());
+    ui.set_browse_count_all(offers.len() as i32);
+    ui.set_browse_count_ours(offers.iter().filter(|o| o.origin != 2).count() as i32);
+    ui.set_browse_count_forge(offers.iter().filter(|o| o.origin != 0).count() as i32);
 }
 
 fn strings(values: &[&str]) -> ModelRc<SharedString> {
@@ -214,10 +357,15 @@ fn fill(ui: &MainWindow) {
     ui.set_addons_header("4 updates · 3 go in when you press Play, 1 asks first".into());
     ui.set_can_update_all(true);
     ui.set_addons_footer("3 addons matched their GitHub releases exactly: AZS Spell Meter 1.32, LuckyOdds 0.6.0, SurvivorsDragonUi 3.2.57. New releases checked 12 minutes ago.".into());
-    let (offers, groups) = offers();
-    ui.set_offer_rows(ModelRc::new(VecModel::from(offers)));
-    ui.set_browse_groups(ModelRc::new(VecModel::from(groups)));
-    ui.set_browse_note("17 verified addons · the catalog of today 21:27 · each pinned to its author's GitHub".into());
+    set_browse(ui, &offers(), &[]);
+    ui.set_browse_note("18 Discord Verified · 15 on SurvivorsForge · the catalog of today 10:54".into());
+    // 0.7.1: SurvivorsForge on (as saved: the other fields stay unsaved, so Save stays lit as before).
+    ui.set_discord_checked("31 Oct 2026".into());
+    ui.set_forge_repo_url(satchel_core::addons::forge::REPO.into());
+    ui.set_forge_site_url(satchel_core::addons::forge::SITE.into());
+    ui.set_addons_forge(true);
+    ui.set_saved_form(SettingsForm { addons_forge: true, ..Default::default() });
+    ui.set_forge_answer("Last answer 14:40".into());
     ui.set_link_text("github.com/Hearts47/RunPace".into());
     ui.set_link_state(2);
     ui.set_link_owner("Hearts47 · 1 star · last change today 09:12".into());
@@ -300,13 +448,16 @@ fn main() {
     ui.set_addon_open("".into());
     ui.set_addons_page(1);
     snap(&main, size, &out.join("05c-addons-browse.ppm"));
-    ui.set_offer_open("lucky-odds".into());
-    ui.set_browse_group(2);
-    snap(&main, size, &out.join("05d-addons-browse-group.ppm"));
+    // 0.7.1: the filters unfolded, one tag on.
+    ui.set_browse_filters_open(true);
+    set_browse(&ui, &offers(), &["Combat"]);
+    snap(&main, size, &out.join("05d-addons-browse-filters.ppm"));
+    ui.set_browse_filters_open(false);
+    set_browse(&ui, &offers(), &[]);
     ui.set_addons_page(2);
     snap(&main, size, &out.join("05e-addons-add.ppm"));
     ui.set_link_warn(true);
-    ui.set_link_note("AZS Spell Meter is a verified addon by kex0. This one is by someone-else: a copy or a look-alike, not the verified one.".into());
+    ui.set_link_note("AZS Spell Meter is a Discord Verified addon by kex0. This one is by someone-else: a copy or a look-alike, not the Discord Verified one.".into());
     snap(&main, size, &out.join("05f-addons-add-lookalike.ppm"));
     ui.set_addons_page(0);
     ui.set_remove_name("RunPace".into());
@@ -327,16 +478,15 @@ fn main() {
     ui.set_addon_rows(ModelRc::new(VecModel::from(updating)));
     ui.set_addon_open("LuckyOdds".into());
     snap(&main, size, &out.join("05i-addons-updating.ppm"));
-    let offers: Vec<OfferRow> = ui.get_offer_rows().iter().collect();
-    let mut installing = offers.clone();
-    if let Some(offer) = installing.iter_mut().find(|o| !o.installed) {
-        offer.installing = true;
+    let cards: Vec<OfferRow> = ui.get_offer_rows().iter().collect();
+    let mut installing = cards.clone();
+    if let Some(offer) = installing.iter_mut().find(|o| o.action == 0) {
+        offer.action = 2;
     }
     ui.set_offer_rows(ModelRc::new(VecModel::from(installing)));
-    ui.set_offer_open("".into());
     ui.set_addons_page(1);
     snap(&main, size, &out.join("05j-addons-browse-installing.ppm"));
-    ui.set_offer_rows(ModelRc::new(VecModel::from(offers)));
+    ui.set_offer_rows(ModelRc::new(VecModel::from(cards)));
     ui.set_addons_page(2);
     ui.set_link_warn(false);
     ui.set_link_note("Not reviewed by the game's devs. Addon code can't reach your PC, and it asks before each update.".into());
@@ -468,6 +618,7 @@ fn main() {
         notifications: ui.get_notifications(),
         addons_auto: ui.get_addons_auto(),
         addons_shared: ui.get_addons_shared(),
+        addons_forge: ui.get_addons_forge(),
         pause_when_away: ui.get_pause_when_away(),
         theme: ui.get_theme(),
         game_shared: ui.get_game_shared(),
@@ -510,7 +661,7 @@ fn main() {
     ui.set_addons_page(3);
     snap(&main, size, &out.join("20-addons-removed-empty.ppm"));
     ui.set_removed_rows(ModelRc::new(VecModel::from(vec![
-        removed("Azeroth Cursor", 0, "Verified", "1.0.0", "Removed today 10:24", "Its settings stayed in the game's folder", ""),
+        removed("Azeroth Cursor", 0, "Discord Verified", "1.0.0", "Removed today 10:24", "Its settings stayed in the game's folder", ""),
         removed("Big Cursor", 1, "Added by you", "0.3.4", "Removed yesterday 23:10, as on PC 2", "Its settings went with it; they come back with it", ""),
         removed("Old Meter", 2, "From a file", "2.1", "Removed 27 Oct 18:02", "Its settings stayed in the game's folder", "It came from a zip file: import the zip again"),
     ])));
@@ -527,7 +678,7 @@ fn main() {
     ui.set_app_version("0.5.1".into());
     ui.set_check_result("Checked: you have the newest version (0.5.1)".into());
     // Tall enough for every field, About at the foot.
-    snap(&main, PhysicalSize::new(580, 1360), &out.join("21b-settings-whole-game-question.ppm"));
+    snap(&main, PhysicalSize::new(580, 1800), &out.join("21b-settings-whole-game-question.ppm"));
     ui.set_app_version("0.4.0".into());
     ui.set_check_result("".into());
     ui.set_game_ask_pc("".into());
@@ -572,9 +723,9 @@ fn main() {
     ui.set_game_own("This PC's own, from before it joined, are kept as version 31".into());
     ui.set_game_note("The game's settings came from Laptop".into());
     // Tall enough for every group, the About card at the foot.
-    snap(&main, PhysicalSize::new(580, 1500), &out.join("26b-settings-whole.ppm"));
+    snap(&main, PhysicalSize::new(580, 1950), &out.join("26b-settings-whole.ppm"));
     ui.set_dark(true);
-    snap(&main, PhysicalSize::new(580, 1500), &out.join("26c-dark-settings-whole.ppm"));
+    snap(&main, PhysicalSize::new(580, 1950), &out.join("26c-dark-settings-whole.ppm"));
     ui.set_dark(false);
     ui.set_game_own("".into());
     ui.set_game_note("".into());
@@ -600,7 +751,7 @@ fn main() {
         let result = if checking { "Checking GitHub…" } else { "Checked: you have the newest version (0.6.0)" };
         ui.set_check_result(result.into());
         // Tall enough for every group, the About card at the foot.
-        snap(&main, PhysicalSize::new(580, 1500), &out.join(format!("{name}.ppm")));
+        snap(&main, PhysicalSize::new(580, 1950), &out.join(format!("{name}.ppm")));
     }
     ui.set_dark(false);
     ui.set_checking(false);
@@ -608,6 +759,179 @@ fn main() {
     ui.set_repo_url("".into());
     ui.set_issue_url("".into());
     ui.set_app_version("0.4.1".into());
+
+    // 0.7.1: SurvivorsForge in the Addons tab. Browse as cards (two columns, three from about
+    // 900 px), the filters, the Legend, the panel for three kinds of addon, Installed rows that
+    // wait for the player's OK or never update, Sources in Settings and About's block; each in
+    // both themes.
+    let both = |name: &str, size: PhysicalSize| {
+        for dark in [false, true] {
+            ui.set_dark(dark);
+            let file = if dark { name.replacen('-', "-dark-", 1) } else { name.to_string() };
+            snap(&main, size, &out.join(format!("{file}.ppm")));
+        }
+        ui.set_dark(false);
+    };
+    let all = offers();
+    ui.set_tab(1);
+    ui.set_addons_page(1);
+    set_browse(&ui, &all, &[]);
+    both("29-browse-cards", size);
+    ui.set_browse_filters_open(true);
+    set_browse(&ui, &all, &["Miscellaneous", "Shaman"]);
+    ui.set_browse_origin(2);
+    both("29b-browse-filters", size);
+    ui.set_browse_filters_open(false);
+    ui.set_browse_origin(0);
+    set_browse(&ui, &all, &[]);
+    ui.set_legend_pinned(true);
+    both("29c-browse-legend", size);
+    ui.set_legend_pinned(false);
+
+    // The panel: our addon with SurvivorsForge's data, one only on SurvivorsForge that asks first,
+    // and one of our six SurvivorsForge doesn't list.
+    let catalog = satchel_core::addons::catalog::Catalog::builtin();
+    let notes = |id: &str| {
+        catalog.get(id).and_then(|e| e.latest.notes.as_deref()).map(|n| satchel_core::addons::overview::plain_notes(n, 700)).unwrap_or_default()
+    };
+    let open = |id: &str, panel: PanelRow| {
+        if let Some(offer) = all.iter().find(|o| o.row.id.as_str() == id) {
+            ui.set_panel_offer(offer.row.clone());
+        }
+        ui.set_browse_panel_id(id.into());
+        ui.set_panel(panel);
+    };
+    // SurvivorsForge's LuckyOdds of 31 Oct: its summary and description, five versions' downloads.
+    let bars: Vec<BarRow> = [("v0.8.0", "1,668", 1668.0), ("v0.7.0", "2,870", 2870.0), ("v0.6.0", "2,853", 2853.0), ("v0.5.0", "761", 761.0), ("v0.4.0", "230", 230.0)]
+        .iter()
+        .map(|(label, count, n)| BarRow { label: (*label).into(), count: (*count).into(), share: n / 2870.0 })
+        .collect();
+    open(
+        "lucky-odds",
+        PanelRow {
+            id: "lucky-odds".into(),
+            verified_author: true,
+            about: "Your odds for Rare, Epic and Legendary cards from luck, plus caches and guardian lairs on the minimap.".into(),
+            about_more: "See what your Luck actually does. LuckyOdds shows the rarity odds for level-up cards and amulets based on your current Luck, and marks Battleground Caches and guardian lairs on your minimap.".into(),
+            notes_title: "What's new in 0.8.0".into(),
+            notes: notes("lucky-odds").into(),
+            bars: ModelRc::new(VecModel::from(bars)),
+            scan: "verified: an admin approved this file".into(),
+            folders: "Folder: LuckyOdds".into(),
+            action: 3,
+            ..Default::default()
+        },
+    );
+    both("30-browse-panel-both-lists", size);
+    // BordoUI v2.8.15's scan of 30 Oct, as it would ask had no admin approved the file.
+    open(
+        "forge:bordoui",
+        PanelRow {
+            id: "forge:bordoui".into(),
+            verified_author: true,
+            scan: "flagged: 1 warning, 75 info".into(),
+            findings: strings(&["lua.api_override · BordoUI/ThemeUI.lua, line 2627: Replaces the game function ChatEdit_SendText"]),
+            action: 1,
+            reason: "SurvivorsForge's scan found 1 warning in this version".into(),
+            ..Default::default()
+        },
+    );
+    both("30b-browse-panel-asks-first", size);
+    open(
+        "big-cursor",
+        PanelRow {
+            id: "big-cursor".into(),
+            about: "A bigger cursor, in the size you choose".into(),
+            notes_title: "What's new in 0.3.4".into(),
+            notes: notes("big-cursor").into(),
+            folders: "Folder: BigCursor".into(),
+            action: 0,
+            ..Default::default()
+        },
+    );
+    both("30c-browse-panel-our-list-only", size);
+    // A wide window: three columns, the cards beside the panel; then the panel still loading.
+    open("lucky-odds", PanelRow { id: "lucky-odds".into(), loading: true, ..Default::default() });
+    snap(&main, PhysicalSize::new(960, 640), &out.join("30d-browse-wide-panel-loading.ppm"));
+    ui.set_browse_panel_id("".into());
+    snap(&main, PhysicalSize::new(960, 640), &out.join("30e-browse-wide.ppm"));
+
+    // SurvivorsForge silent for an hour: its addons and its badges that let things in step aside.
+    let offline: Vec<Offer> = all
+        .iter()
+        .filter(|o| o.origin != 2)
+        .map(|o| {
+            let badges: Vec<BadgeRow> = o.row.badges.iter().filter(|b| b.kind != 4).collect();
+            Offer { row: OfferRow { badges: ModelRc::new(VecModel::from(badges)), ..o.row.clone() }, ..o.clone() }
+        })
+        .collect();
+    set_browse(&ui, &offline, &[]);
+    ui.set_forge_status("SurvivorsForge isn't answering · last answer 14:40".into());
+    ui.set_forge_offline(true);
+    both("31-browse-offline", size);
+    ui.set_forge_status("".into());
+    ui.set_forge_offline(false);
+    set_browse(&ui, &all, &[]);
+
+    // Installed rows: an update that waits for the player's OK, one that never comes, and an
+    // addon only on SurvivorsForge (hypothetical words, real names).
+    let before: Vec<AddonRow> = ui.get_addon_rows().iter().collect();
+    let forge_rows = vec![
+        AddonRow {
+            badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · unscanned", 5)]),
+            reason: "Waits for your OK: SurvivorsForge hasn't scanned this version yet".into(),
+            reason_kind: 1,
+            ..addon("AZS Spell Meter", 0, "kex0", "1.35", "1.36", ("", 0), "")
+        },
+        AddonRow {
+            badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · verified", 4)]),
+            released: "released yesterday".into(),
+            ..addon("LuckyOdds", 0, "cadoky", "0.8.0", "", ("", 0), "")
+        },
+        AddonRow {
+            badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · source changed", 6)]),
+            reason: "The file changed after SurvivorsForge scanned it. It stays as you have it; no updates.".into(),
+            reason_kind: 2,
+            ..addon("Survivor UI", 0, "morderous", "3.0.47", "", ("", 0), "")
+        },
+        AddonRow {
+            badge: "SurvivorsForge · scanned".into(),
+            badge_kind: 4,
+            badges: badge_rows(&[("SurvivorsForge · scanned", 4)]),
+            released: SharedString::new(),
+            ..addon("TotemManager", 1, "BippyMiester", "v1.1.1", "", ("", 0), "")
+        },
+    ];
+    ui.set_addon_rows(ModelRc::new(VecModel::from(forge_rows)));
+    ui.set_addons_count(4);
+    ui.set_addons_header("1 update · it waits for your OK".into());
+    ui.set_can_update_all(false);
+    ui.set_addons_page(0);
+    both("32-addons-asks-and-never", size);
+    ui.set_addon_open("AZS Spell Meter".into());
+    both("32b-addons-update-anyway", size);
+    ui.set_addon_open("".into());
+    ui.set_addon_rows(ModelRc::new(VecModel::from(before)));
+    ui.set_addons_count(5);
+    ui.set_addons_header("4 updates · 3 go in when you press Play, 1 asks first".into());
+    ui.set_can_update_all(true);
+
+    // Settings → Addons → Sources: SurvivorsForge on, off, silent; About's block at the foot.
+    ui.set_tab(4);
+    let whole = PhysicalSize::new(580, 1950);
+    both("33-settings-sources-on", whole);
+    ui.set_addons_forge(false);
+    ui.set_saved_form(SettingsForm { addons_forge: false, ..ui.get_saved_form() });
+    ui.set_forge_answer("Off".into());
+    both("33b-settings-sources-off", whole);
+    ui.set_addons_forge(true);
+    ui.set_saved_form(SettingsForm { addons_forge: true, ..ui.get_saved_form() });
+    ui.set_forge_answer("Isn't answering since 14:40".into());
+    ui.set_forge_offline(true);
+    both("33c-settings-sources-offline", whole);
+    ui.set_forge_answer("Last answer 14:40".into());
+    ui.set_forge_offline(false);
+    ui.set_tab(0);
 
     let card = PlayCard::new().expect("card");
     card.set_lines(card_lines(&[

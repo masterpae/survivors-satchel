@@ -198,6 +198,7 @@ pub fn page_release(tag: &str, file: &PageFile, seen: DateTime<Utc>) -> Release 
         interface: 0,
         folders: BTreeMap::new(),
         notes: None,
+        downloads: None,
     }
 }
 

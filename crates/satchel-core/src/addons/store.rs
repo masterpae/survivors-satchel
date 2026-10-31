@@ -66,6 +66,11 @@ pub struct Record {
     /// Earlier versions in the backups, newest first.
     #[serde(default)]
     pub earlier: Vec<Kept>,
+    /// Installed from SurvivorsForge alone: its slug there. Its updates come from SurvivorsForge's
+    /// registry, under SurvivorsForge's rules. A field rather than a badge (its badge is `Added`):
+    /// an earlier Satchel refuses a badge it doesn't know, and skips a field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forge: Option<String>,
 }
 
 /// An earlier version kept in the backups.
@@ -179,5 +184,22 @@ impl Store {
     pub fn remove(&mut self, id: &str) -> Option<Record> {
         let at = self.addons.iter().position(|r| r.id == id)?;
         Some(self.addons.remove(at))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_record_from_before_survivorsforge_reads_and_writes_as_it_was() {
+        let before = r#"{"id": "lucky-odds", "name": "LuckyOdds", "badge": "verified", "folders": {"LuckyOdds": "p1"}, "installed": "2026-10-30T18:00:00Z"}"#;
+        let record: Record = serde_json::from_str(before).unwrap();
+        assert_eq!(record.forge, None);
+        assert!(!serde_json::to_string(&record).unwrap().contains("forge"), "written as before");
+        let forged = Record { id: "forge:totems".into(), badge: Badge::Added, forge: Some("totems".into()), ..record };
+        let text = serde_json::to_string(&forged).unwrap();
+        assert!(text.contains(r#""forge":"totems""#) && text.contains(r#""badge":"added""#), "{text}");
+        assert_eq!(serde_json::from_str::<Record>(&text).unwrap(), forged);
     }
 }

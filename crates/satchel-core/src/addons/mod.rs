@@ -7,6 +7,7 @@
 
 pub mod catalog;
 pub mod enabled;
+pub mod forge;
 pub mod github;
 pub mod install;
 pub mod overview;

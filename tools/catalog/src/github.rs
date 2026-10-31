@@ -31,6 +31,9 @@ pub struct GhAsset {
     pub browser_download_url: String,
     /// `sha256:<hex>`, on files uploaded since mid-2025.
     pub digest: Option<String>,
+    /// How many times GitHub has served the file: the catalog's popularity.
+    #[serde(default)]
+    pub download_count: Option<u64>,
 }
 
 #[derive(Deserialize)]

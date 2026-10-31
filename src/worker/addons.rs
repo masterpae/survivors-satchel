@@ -1,6 +1,7 @@
 //! The Addons tab, the worker's side. Everything that changes AddOns happens here, on the worker
 //! thread, and only with the game closed. The network thread fetches; nothing here waits for it.
 
+use super::forge::{Held, forge_badge, row_reason};
 use super::{Worker, ago, when};
 use crate::net::{Answer, Job, Lookup};
 use crate::view::{AddonLine, AddonsView, LinkView, OfferLine, RemovedLine};
@@ -9,6 +10,8 @@ use chrono::{DateTime, Local, TimeDelta, Utc};
 use satchel_core::activity::Kind;
 use satchel_core::addons::catalog::{self, Catalog, Release};
 use satchel_core::addons::enabled::EnableList;
+use satchel_core::addons::forge::{self, Verdict, Why};
+use satchel_core::addons::github;
 use satchel_core::addons::install::{Addons, Incoming};
 use satchel_core::addons::overview::{self, Inputs, Line, Offer, Standing, initials};
 use satchel_core::addons::store::{Badge, Gone, Record, Store};
@@ -55,6 +58,46 @@ pub(super) struct Want {
     /// When the release was published, when that's known (`release.published` is only the time
     /// it was seen for a release from GitHub's page, a link's or an import's).
     pub(super) released: Option<DateTime<Utc>>,
+    /// Installed from SurvivorsForge alone: its slug there, which the record keeps.
+    pub(super) forge: Option<String>,
+    /// The addon folders its zip must hold exactly: the ones SurvivorsForge lists for its own.
+    pub(super) expected_folders: Option<Vec<String>>,
+    /// The player OK'd it where SurvivorsForge asks first (Install anyway, Update anyway, Replace
+    /// beside the reason), or it's theirs to judge (a link, a zip file): an Ask it meets when it
+    /// goes in doesn't stop it.
+    pub(super) ok: bool,
+}
+
+/// Why an install didn't go in.
+pub(super) enum Refused {
+    /// SurvivorsForge asks first and the player didn't OK it: the whole sentence.
+    Waits(String),
+    /// SurvivorsForge says No: the whole sentence.
+    Never(String),
+    /// The install failed: why, to follow "<name> wasn't installed: ".
+    Failed(String),
+}
+
+impl Refused {
+    /// What the player reads about `name`.
+    pub(super) fn said(self, name: &str) -> String {
+        match self {
+            Refused::Waits(text) | Refused::Never(text) => text,
+            Refused::Failed(why) => format!("{name} wasn't installed: {why}"),
+        }
+    }
+}
+
+impl From<String> for Refused {
+    fn from(why: String) -> Refused {
+        Refused::Failed(why)
+    }
+}
+
+impl From<&str> for Refused {
+    fn from(why: &str) -> Refused {
+        Refused::Failed(why.to_string())
+    }
 }
 
 pub(super) struct AddonsState {
@@ -65,7 +108,7 @@ pub(super) struct AddonsState {
     prints: BTreeMap<String, String>,
     pub(super) enabled: EnableList,
     pub(super) lines: Vec<Line>,
-    offers: Vec<Offer>,
+    pub(super) offers: Vec<Offer>,
     /// Releases newer than the catalog or the record knows, from GitHub's pages, by addon id.
     pub(super) newer: BTreeMap<String, Release>,
     /// Downloaded zips: (addon id, release tag) → checksum.
@@ -74,7 +117,7 @@ pub(super) struct AddonsState {
     /// Downloads that failed, with why; tried again after the next look or "Check now".
     pub(super) refused: BTreeMap<(String, String), String>,
     /// Installs waiting for their download (or for the game to close).
-    waiting: Vec<Want>,
+    pub(super) waiting: Vec<Want>,
     /// Addons installed again from the Removed list, by id: once one is in, its switches are set
     /// as they were, and its settings come back from the removal's backup when they went with it.
     restore: BTreeMap<String, Gone>,
@@ -90,7 +133,7 @@ pub(super) struct AddonsState {
     /// What the last adoption found, for the Installed list's footer.
     adopted_note: Option<String>,
     message: Option<(String, Instant)>,
-    net: Sender<Job>,
+    pub(super) net: Sender<Job>,
 }
 
 impl AddonsState {
@@ -157,9 +200,13 @@ pub(super) fn zip_ready(cache: &Path, ready: &BTreeMap<(String, String), String>
 /// channel, so the Verified badge would claim what the list no longer says.
 pub(super) const UNLISTED_BADGE: (&str, i32) = ("No longer listed", 1);
 
+/// The badge of an addon installed from SurvivorsForge alone, when its trust level isn't shown
+/// (its switch is off, or it is silent and the level would let things in).
+pub(super) const FORGE_BADGE: (&str, i32) = ("SurvivorsForge", 4);
+
 fn badge_text(badge: Option<Badge>) -> (&'static str, i32) {
     match badge {
-        Some(Badge::Verified) => ("Verified", 0),
+        Some(Badge::Verified) => ("Discord Verified", 0),
         Some(Badge::Added) => ("Added by you", 1),
         Some(Badge::File) => ("From a file", 2),
         None => ("Installed by hand", 3),
@@ -179,6 +226,32 @@ fn shown(release: &Release) -> String {
 /// Calendar days from `t` to today, on this PC's clock.
 fn days_since(t: DateTime<Utc>) -> i64 {
     (Local::now().date_naive() - t.with_timezone(&Local).date_naive()).num_days()
+}
+
+/// A publish date as a card says it: "today", "3 days ago".
+fn day_text(t: DateTime<Utc>) -> String {
+    let ago = overview::released_ago(days_since(t));
+    ago.strip_prefix("released ").unwrap_or(&ago).to_string()
+}
+
+/// "8,382 downloads": a count as people read it.
+fn downloads_text(n: u64) -> String {
+    let digits = n.to_string();
+    let mut grouped = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    if n == 1 { "1 download".into() } else { format!("{grouped} downloads") }
+}
+
+/// The day the built-in list was last compared with the game's verified-addons channel, as shown:
+/// "31 Oct 2026" (as written when it isn't a date); empty when the catalog doesn't say.
+fn discord_day(day: Option<&str>) -> String {
+    let Some(day) = day.map(str::trim).filter(|d| !d.is_empty()) else { return String::new() };
+    chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").map_or_else(|_| day.to_string(), |d| d.format("%-d %b %Y").to_string())
 }
 
 impl Worker {
@@ -252,18 +325,23 @@ impl Worker {
     /// that showed up.
     pub(super) fn addons_lines(&mut self) {
         let auto = self.engine.settings.addons.update_by_themselves;
+        // SurvivorsForge's word as this PC's cache holds it: the verdicts, and its own offers.
+        let forge_view = self.forge.view(self.engine.settings.addons.forge, Utc::now());
         let a = &mut self.addons;
-        a.lines = overview::lines(&Inputs {
-            catalog: &a.catalog,
-            store: &a.store,
-            found: &a.found,
-            prints: &a.prints,
-            enabled: &a.enabled,
-            newer: &a.newer,
-            auto,
-            avrt: a.avrt,
-        });
-        a.offers = overview::offers(&a.catalog, &a.store, &a.found);
+        a.lines = overview::lines(
+            &Inputs {
+                catalog: &a.catalog,
+                store: &a.store,
+                found: &a.found,
+                prints: &a.prints,
+                enabled: &a.enabled,
+                newer: &a.newer,
+                auto,
+                avrt: a.avrt,
+            },
+            &forge_view,
+        );
+        a.offers = overview::offers(&a.catalog, &a.store, &a.found, &forge_view);
         self.addons_fetch();
     }
 
@@ -295,8 +373,9 @@ impl Worker {
         let _ = self.addons.net.send(Job::Look(watches));
     }
 
-    /// Downloads for every update shown (a turned-off addon's waits until it's on), every install
-    /// waiting and every release the shared list brings at the next Play.
+    /// Downloads for every update shown (a turned-off addon's waits until it's on, and one
+    /// SurvivorsForge says No to never comes), every install waiting and every release the shared
+    /// list brings at the next Play.
     pub(super) fn addons_fetch(&mut self) {
         let cache = self.engine.local.addon_cache();
         let shared = self.share_wanted();
@@ -304,7 +383,7 @@ impl Worker {
         let mut wanted: Vec<(String, Release)> = a
             .lines
             .iter()
-            .filter(|l| !l.off)
+            .filter(|l| !l.off && !matches!(l.verdict, Verdict::No(_)))
             .filter_map(|l| match &l.standing {
                 Standing::Update { to, .. } => Some((l.id.clone(), to.clone())),
                 _ => None,
@@ -412,6 +491,10 @@ impl Worker {
                 }
             }
             Answer::Satchel(result) => self.satchel_answer(result),
+            Answer::ForgeRegistry(answer) => self.forge_registry_answer(answer),
+            Answer::ForgeDetails { slug, answer } => self.forge_details_answer(&slug, answer),
+            Answer::ForgeVersions { slug, answer } => self.forge_versions_answer(&slug, answer),
+            Answer::ForgeFindings { slug, tag, answer } => self.forge_findings_answer(&slug, &tag, answer),
             Answer::LookedUp(result) => {
                 let catalog = &self.addons.catalog;
                 self.addons.link = match result {
@@ -455,7 +538,7 @@ impl Worker {
         for want in ready {
             match self.addons_install(&want) {
                 Ok(text) => self.addons_say(text),
-                Err(e) => self.addons_say(format!("{} wasn't installed: {e}", want.name)),
+                Err(e) => self.addons_say(e.said(&want.name)),
             }
         }
         self.addons_scan();
@@ -463,7 +546,14 @@ impl Worker {
     }
 
     /// Installs `want` from its downloaded zip. The game must be closed (the caller's part).
-    pub(super) fn addons_install(&mut self, want: &Want) -> Result<String, String> {
+    /// Every install ends here, so SurvivorsForge's word is asked once more, as it stands now: a
+    /// download can outlast its last answer, or meet a block on the way.
+    pub(super) fn addons_install(&mut self, want: &Want) -> Result<String, Refused> {
+        if let Err(refused) = self.forge_judge(want) {
+            // An Install again that doesn't go in leaves nothing to restore later.
+            self.addons.restore.remove(&want.id);
+            return Err(refused);
+        }
         let game = self.game_addons().ok_or("the game's folder isn't set")?;
         let cache = self.engine.local.addon_cache();
         let (path, sha) = zip_ready(&cache, &self.addons.ready, &want.id, &want.release).ok_or("its download isn't finished")?;
@@ -481,6 +571,8 @@ impl Worker {
             version: known_version(&want.release),
             released: want.released,
             url: (!want.release.url.is_empty()).then(|| want.release.url.clone()),
+            forge: want.forge.clone(),
+            expected_folders: want.expected_folders.clone(),
         };
         let mut addons = Addons { game: &game, local: &self.engine.local, store: &mut self.addons.store };
         let done = addons.install(incoming, Utc::now()).map_err(|e| e.to_string())?;
@@ -521,7 +613,7 @@ impl Worker {
         if zip_ready(&cache, &self.addons.ready, &want.id, &want.release).is_some() {
             match self.addons_install(&want) {
                 Ok(text) => self.addons_say(text),
-                Err(e) => self.addons_say(format!("{} wasn't installed: {e}", want.name)),
+                Err(e) => self.addons_say(e.said(&want.name)),
             }
             self.addons_scan();
         } else {
@@ -540,6 +632,7 @@ impl Worker {
             return;
         }
         self.addons_scan();
+        // Only what SurvivorsForge lets in goes in by itself: its verdict is in `by_itself`.
         let mut due: Vec<Want> = overview::at_play(&self.addons.lines)
             .into_iter()
             .filter_map(|(line, to)| {
@@ -550,7 +643,10 @@ impl Worker {
                     badge: record.badge,
                     repo: record.repo.clone(),
                     release: to.clone(),
-                    released: self.addons.catalog.published(&line.id, &to.tag),
+                    released: self.forge_published(&line.id, line.forge_slug.as_deref(), &to.tag),
+                    forge: record.forge.clone(),
+                    expected_folders: self.forge_folders(record.forge.as_deref()),
+                    ok: false,
                 })
             })
             .collect();
@@ -578,7 +674,10 @@ impl Worker {
                     changed = true;
                     self.card_line(&text, true, false);
                 }
-                Err(e) => {
+                // SurvivorsForge's word changed while it waited: it doesn't go in, and the line says why.
+                Err(Refused::Waits(text)) => self.card_line(&text, false, false),
+                Err(Refused::Never(text)) => self.card_line(&text, false, true),
+                Err(Refused::Failed(e)) => {
                     log!("{} not updated before play: {e}", want.name);
                     let stays = from.map(|f| format!(" stays at {f}")).unwrap_or_else(|| " wasn't installed".into());
                     self.card_line(&format!("{}{stays}: {e}", want.name), false, true);
@@ -587,6 +686,18 @@ impl Worker {
         }
         if changed {
             self.addons_scan();
+        }
+        // Updates SurvivorsForge asks about first wait for the player's OK on their rows.
+        let asks = self
+            .addons
+            .lines
+            .iter()
+            .filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && matches!(l.verdict, Verdict::Ask(_)))
+            .count();
+        match asks {
+            0 => {}
+            1 => self.card_line("1 update waits for your OK (Addons)", false, false),
+            n => self.card_line(&format!("{n} updates wait for your OK (Addons)"), false, false),
         }
         if self.addons.looked.is_none_or(|t| Utc::now() - t >= LOOK_EVERY) {
             self.addons_look();
@@ -656,7 +767,21 @@ impl Worker {
         self.addons_scan();
     }
 
+    /// Update now, on an installed addon's row or in its panel.
     pub(super) fn addon_update(&mut self, id: &str) {
+        self.addon_update_as(id, false, true);
+    }
+
+    /// Update anyway: the player's OK for an update SurvivorsForge asks about first.
+    pub(super) fn addon_update_anyway(&mut self, id: &str) {
+        self.addon_update_as(id, true, true);
+    }
+
+    /// Updates an installed addon to its newer version as SurvivorsForge's verdict on that version
+    /// allows (the row's, `Line::verdict`): Go installs, Ask only with the player's OK (`anyway`),
+    /// No never. `ask_first`: an update the player asked for first asks SurvivorsForge about a
+    /// version it says nothing about yet, and waits for the answer (`forge_ask_first`).
+    pub(super) fn addon_update_as(&mut self, id: &str, anyway: bool, ask_first: bool) {
         if self.addons_blocked() {
             return;
         }
@@ -665,9 +790,32 @@ impl Worker {
             Standing::Update { to, .. } | Standing::Kept { newer: Some(to) } => to.clone(),
             _ => return,
         };
+        let (name, slug, verdict) = (line.name.clone(), line.forge_slug.clone(), line.verdict.clone());
+        if ask_first
+            && let Some(slug) = slug.as_deref()
+            && self.forge_view().word(slug, &to.tag).is_none()
+            && self.forge_ask_first(slug, &to.tag, Held::Update { id: id.to_string(), anyway })
+        {
+            return self.addons_say(format!("Asking SurvivorsForge about {name} {} before it goes in…", shown(&to)));
+        }
+        match verdict {
+            Verdict::Go => {}
+            Verdict::Ask(_) if anyway => {}
+            Verdict::Ask(why) => return self.addons_say(format!("{name} waits for your OK: {}", why.text())),
+            Verdict::No(why) => return self.addons_say(format!("{name} isn't updated: {}", why.text())),
+        }
         let Some(record) = self.addons.store.get(id) else { return };
-        let released = self.addons.catalog.published(id, &to.tag);
-        let want = Want { id: id.into(), name: record.name.clone(), badge: record.badge, repo: record.repo.clone(), release: to, released };
+        let want = Want {
+            id: id.into(),
+            name: record.name.clone(),
+            badge: record.badge,
+            repo: record.repo.clone(),
+            released: self.forge_published(id, slug.as_deref(), &to.tag),
+            release: to,
+            forge: record.forge.clone(),
+            expected_folders: self.forge_folders(record.forge.as_deref()),
+            ok: anyway,
+        };
         self.install_or_wait(want);
     }
 
@@ -675,22 +823,29 @@ impl Worker {
         if self.addons_blocked() {
             return;
         }
-        // A turned-off addon is left alone: its own row's Update now still updates it.
+        // A turned-off addon is left alone (its own row's Update now still updates it), and so is
+        // one SurvivorsForge holds back: Update all takes only what it lets in.
         let ids: Vec<String> = self
             .addons
             .lines
             .iter()
-            .filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off)
+            .filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && l.verdict.is_go())
             .map(|l| l.id.clone())
             .collect();
         for id in ids {
-            self.addon_update(&id);
+            self.addon_update_as(&id, false, false);
         }
     }
 
+    /// Go back: the version kept from before, from the backups. The player's own act, so a
+    /// question of SurvivorsForge's doesn't stop it; a file it says never to install does.
     pub(super) fn addon_back(&mut self, id: &str) {
         if self.addons_blocked() {
             return;
+        }
+        if let Some(Verdict::No(why)) = self.back_verdict(id).filter(barred_back) {
+            let name = self.line(id).map(|l| l.name.clone()).unwrap_or_default();
+            return self.addons_say(format!("{name} doesn't go back: {}", why.text()));
         }
         let Some(game) = self.game_addons() else { return };
         let mut addons = Addons { game: &game, local: &self.engine.local, store: &mut self.addons.store };
@@ -755,11 +910,13 @@ impl Worker {
             .and_then(|l| l.repo.clone())
             .or_else(|| self.addons.catalog.get(id).map(|e| e.repo.clone()))
             .or_else(|| self.share_repo(id))
+            .or_else(|| self.forge_repo(id))
             .or_else(|| match &self.addons.link {
                 Link::Found { lookup, .. } if lookup.repo == id => Some(lookup.repo.clone()),
                 _ => None,
             });
-        if let Some(repo) = repo {
+        // A repository's own page only: a name from SurvivorsForge or another PC is checked first.
+        if let Some(repo) = repo.and_then(|r| github::repo_from_input(&r).filter(|clean| clean.eq_ignore_ascii_case(r.trim()))) {
             win::open_url(&format!("https://github.com/{repo}"));
         }
     }
@@ -779,22 +936,134 @@ impl Worker {
         }
     }
 
-    /// Installs a verified addon from Browse, or replaces a copy installed by hand with its
-    /// author's latest release.
+    /// Browse's Install: an addon of our list, one only on SurvivorsForge (`forge:<slug>`), or our
+    /// list's latest release in place of a copy installed by hand (`folder:<name>`).
     pub(super) fn browse_install(&mut self, id: &str) {
+        self.browse_install_with(id, false);
+    }
+
+    /// Install anyway: the player's OK for an addon SurvivorsForge asks about first.
+    pub(super) fn browse_install_anyway(&mut self, id: &str) {
+        self.browse_install_with(id, true);
+    }
+
+    /// Installs from Browse as SurvivorsForge's verdict allows (`ForgeView::verdict`, as for every
+    /// install): Go installs; Ask only with the player's OK (`anyway`, or Replace pressed under the
+    /// reason on a copy's row); No never. A version SurvivorsForge says nothing about yet is asked
+    /// about first, and the install waits for the answer.
+    pub(super) fn browse_install_with(&mut self, id: &str, anyway: bool) {
         if self.addons_blocked() {
             return;
+        }
+        let Some(mut want) = self.browse_want(id) else {
+            if let Some(slug) = forge::slug_in(id) {
+                let why = if self.forge_on() { Why::NotListed } else { Why::Off };
+                self.addons_say(format!("{slug} isn't installed: {}", why.text()));
+            }
+            return;
+        };
+        if let Some(slug) = self.want_slug(&want)
+            && self.forge_view().word(&slug, &want.release.tag).is_none()
+            && self.forge_ask_first(&slug, &want.release.tag, Held::Install { id: id.to_string(), anyway })
+        {
+            return self.addons_say(format!("Asking SurvivorsForge about {} {} before it goes in…", want.name, shown(&want.release)));
+        }
+        let verdict = self.want_verdict(&want);
+        match &verdict {
+            Verdict::Go => {}
+            // The player's OK: Install anyway, or Replace pressed under the reason on the copy's row.
+            Verdict::Ask(_) if anyway || id.starts_with("folder:") => {}
+            Verdict::Ask(why) => return self.addons_say(format!("{} waits for your OK: {}", want.name, why.text())),
+            Verdict::No(why) => return self.addons_say(format!("{} isn't installed: {}", want.name, why.text())),
+        }
+        // The OK goes with it: a question SurvivorsForge raises while it downloads doesn't stop it.
+        want.ok = anyway || matches!(verdict, Verdict::Ask(_));
+        self.install_or_wait(want);
+    }
+
+    /// What Browse installs for an offer: our catalog's release (a newer one found on GitHub, else
+    /// its latest), or for SurvivorsForge's own its registry's latest, from where its author
+    /// published it, its zip held to the folders SurvivorsForge lists.
+    fn browse_want(&self, id: &str) -> Option<Want> {
+        if let Some(slug) = forge::slug_in(id) {
+            let view = self.forge_view();
+            let entry = view.entry(slug)?;
+            let tag = entry.latest.as_ref().map_or("", |l| l.tag.as_str());
+            let seen = view.state.seen.get(slug).and_then(|tags| tags.get(tag)).copied().unwrap_or_else(Utc::now);
+            let release = forge::latest_release(entry, seen)?;
+            return Some(Want {
+                id: forge::id_for(slug),
+                name: if entry.name.trim().is_empty() { slug.to_string() } else { entry.name.clone() },
+                badge: Badge::Added,
+                repo: Some(entry.repo.clone()),
+                released: self.forge_published(id, Some(slug), &release.tag),
+                release,
+                forge: Some(slug.to_string()),
+                expected_folders: self.forge_folders(Some(slug)),
+                ok: false,
+            });
         }
         let entry = match id.strip_prefix("folder:") {
             Some(folder) => self.addons.catalog.for_folder(folder),
             None => self.addons.catalog.get(id),
-        };
-        let Some(entry) = entry else { return };
+        }?;
         let release = self.addons.newer.get(&entry.id).cloned().unwrap_or_else(|| entry.latest.clone());
-        let released = self.addons.catalog.published(&entry.id, &release.tag);
-        let want =
-            Want { id: entry.id.clone(), name: entry.name.clone(), badge: Badge::Verified, repo: Some(entry.repo.clone()), release, released };
-        self.install_or_wait(want);
+        Some(Want {
+            id: entry.id.clone(),
+            name: entry.name.clone(),
+            badge: Badge::Verified,
+            repo: Some(entry.repo.clone()),
+            released: self.addons.catalog.published(&entry.id, &release.tag),
+            release,
+            forge: None,
+            expected_folders: None,
+            ok: false,
+        })
+    }
+
+    /// The slug SurvivorsForge lists the addon of an install under (its own, for one of its own).
+    pub(super) fn want_slug(&self, want: &Want) -> Option<String> {
+        let catalog_id = (want.badge == Badge::Verified).then_some(want.id.as_str());
+        self.forge_view().slug_for(want.forge.as_deref(), catalog_id, want.repo.as_deref())
+    }
+
+    /// SurvivorsForge's verdict on an install: the one rule for every path that installs.
+    pub(super) fn want_verdict(&self, want: &Want) -> Verdict {
+        let slug = self.want_slug(want);
+        let origin = forge::origin_of(want.badge, want.forge.as_deref());
+        self.forge_view().verdict(origin, slug.as_deref(), &want.release.tag, Some(want.release.sha256.as_str()))
+    }
+
+    /// Whether `want` may go in now, by SurvivorsForge's verdict as it stands: Go, or an Ask the
+    /// player OK'd (`Want::ok`); else why not, as the player reads it.
+    pub(super) fn forge_judge(&self, want: &Want) -> Result<(), Refused> {
+        match self.want_verdict(want) {
+            Verdict::Go => Ok(()),
+            Verdict::Ask(_) if want.ok => Ok(()),
+            Verdict::Ask(why) => Err(Refused::Waits(format!("{} waits for your OK: {}", want.name, why.text()))),
+            Verdict::No(why) => {
+                let what = if self.addons.store.get(&want.id).is_some() { "wasn't updated" } else { "wasn't installed" };
+                Err(Refused::Never(format!("{} {what}: {}", want.name, why.text())))
+            }
+        }
+    }
+
+    /// SurvivorsForge's verdict on the version an installed addon would go back to (`Go back`).
+    /// While it is silent, one of its own that the registry kept here doesn't list still counts as
+    /// gone from it: an outage doesn't let it go back.
+    fn back_verdict(&self, id: &str) -> Option<Verdict> {
+        let record = self.addons.store.get(id)?;
+        let kept = record.earlier.first()?;
+        let view = self.forge_view();
+        let slug = self.line(id).and_then(|l| l.forge_slug.clone());
+        let origin = forge::origin_of(record.badge, record.forge.as_deref());
+        // A re-zipped copy of our list's release is judged as that release (`judged_sha`).
+        let sha = overview::judged_sha(&self.addons.catalog, record, kept.tag.as_deref(), kept.sha256.as_deref());
+        let verdict = view.verdict(origin, slug.as_deref(), kept.tag.as_deref().unwrap_or_default(), sha);
+        Some(match verdict {
+            Verdict::No(Why::Offline) if record.forge.as_deref().is_some_and(|own| view.entry(own).is_none()) => Verdict::No(Why::NotListed),
+            other => other,
+        })
     }
 
     /// The Removed list's Install again: the version it had, from its download link, the catalog,
@@ -823,9 +1092,24 @@ impl Worker {
             interface: if record.version.is_some() { toc::GAME_INTERFACE } else { 0 },
             folders: BTreeMap::new(),
             notes: None,
+            downloads: None,
         };
-        let want =
-            Want { id: record.id.clone(), name: record.name.clone(), badge: record.badge, repo: record.repo.clone(), release, released: record.released };
+        let want = Want {
+            id: record.id.clone(),
+            name: record.name.clone(),
+            badge: record.badge,
+            repo: record.repo.clone(),
+            release,
+            released: record.released,
+            forge: record.forge.clone(),
+            expected_folders: None,
+            ok: false,
+        };
+        // The one rule for every install, now and again when it goes in: what SurvivorsForge says
+        // No to doesn't come back, and one it asks about first waits for the player's OK.
+        if let Err(refused) = self.forge_judge(&want) {
+            return self.addons_say(refused.said(&want.name));
+        }
         self.addons.restore.insert(id.to_string(), Gone { record, ..gone });
         self.install_or_wait(want);
     }
@@ -878,6 +1162,8 @@ impl Worker {
                 let record = &g.record;
                 let (badge, badge_kind) = if record.badge == Badge::Verified && self.addons.catalog.get(&record.id).is_none() {
                     UNLISTED_BADGE
+                } else if record.forge.is_some() {
+                    FORGE_BADGE
                 } else {
                     badge_text(Some(record.badge))
                 };
@@ -942,6 +1228,7 @@ impl Worker {
             interface: toc::GAME_INTERFACE,
             folders: BTreeMap::new(),
             notes: None,
+            downloads: None,
         };
         let want = match entry {
             Some(e) => Want {
@@ -951,6 +1238,10 @@ impl Worker {
                 repo: Some(e.repo.clone()),
                 released: self.addons.catalog.published(&e.id, &release.tag).or(lookup.released),
                 release,
+                forge: None,
+                expected_folders: None,
+                // A link the player looked up and installs: only SurvivorsForge's No stops it.
+                ok: true,
             },
             None => Want {
                 id: lookup.repo.clone(),
@@ -959,15 +1250,23 @@ impl Worker {
                 repo: Some(lookup.repo.clone()),
                 release,
                 released: lookup.released,
+                forge: None,
+                expected_folders: None,
+                ok: true,
             },
         };
+        // What SurvivorsForge says No to (blocked, changed after its scan, another file than the
+        // one it scanned) isn't installed; anything else as before.
+        if let Verdict::No(why) = self.want_verdict(&want) {
+            return self.addons_say(format!("{} wasn't installed: {}", want.name, why.text()));
+        }
         let installed = self.addons_install(&want);
         match installed {
             Ok(text) => {
                 self.addons.link = Link::Idle;
                 self.addons_say(text);
             }
-            Err(e) => self.addons_say(format!("{} wasn't installed: {e}", want.name)),
+            Err(e) => self.addons_say(e.said(&want.name)),
         }
         self.addons_scan();
     }
@@ -1000,10 +1299,27 @@ impl Worker {
         let known = self.addons.catalog.addons.iter().find_map(|e| e.release_matching(&prints).map(|r| (e.clone(), r.clone())));
         let want = match known {
             Some((entry, release)) => {
-                // Its files are exactly that release's: the file picked goes in, not a download.
-                let released = Some(release.published);
-                let release = Release { sha256: sha.clone(), url: String::new(), ..release };
-                Want { id: entry.id.clone(), name: entry.name.clone(), badge: Badge::Verified, repo: Some(entry.repo.clone()), release, released }
+                let want = Want {
+                    id: entry.id.clone(),
+                    name: entry.name.clone(),
+                    badge: Badge::Verified,
+                    repo: Some(entry.repo.clone()),
+                    released: Some(release.published),
+                    release: release.clone(),
+                    forge: None,
+                    expected_folders: None,
+                    // A file the player picked: only SurvivorsForge's No stops it.
+                    ok: true,
+                };
+                // SurvivorsForge's word on the release these files are: what it says No to isn't
+                // installed.
+                if let Verdict::No(why) = self.want_verdict(&want) {
+                    return self.addons_say(format!("{file} isn't installed: {}", why.text()));
+                }
+                // Its files are exactly that release's: the file picked goes in, not a download. Its
+                // own checksum waits in `ready` (below), so it is judged as that release when it goes
+                // in too, not as another file than the one SurvivorsForge scanned.
+                Want { release: Release { sha256: String::new(), url: String::new(), ..release }, ..want }
             }
             None => {
                 let main = &found.folders[0];
@@ -1020,8 +1336,19 @@ impl Worker {
                     interface: toc::GAME_INTERFACE,
                     folders: BTreeMap::new(),
                     notes: None,
+                    downloads: None,
                 };
-                Want { id: format!("file:{}", main.name), name, badge: Badge::File, repo: None, release, released: None }
+                Want {
+                    id: format!("file:{}", main.name),
+                    name,
+                    badge: Badge::File,
+                    repo: None,
+                    release,
+                    released: None,
+                    forge: None,
+                    expected_folders: None,
+                    ok: true,
+                }
             }
         };
         self.addons.ready.insert((want.id.clone(), want.release.tag.clone()), sha);
@@ -1049,36 +1376,49 @@ impl Worker {
     pub(super) fn addons_view(&self) -> AddonsView {
         let a = &self.addons;
         let auto = self.engine.settings.addons.update_by_themselves;
+        let forge_view = self.forge_view();
         let cache = self.engine.local.addon_cache();
         let running = self.tracker.game_running();
-        // An install waiting for its download shows as under way.
-        let waiting = |id: &str| a.waiting.iter().any(|w| w.id == id);
+        // An install waiting for its download, or for SurvivorsForge's word on its version, shows
+        // as under way.
+        let waiting = |id: &str| a.waiting.iter().any(|w| w.id == id) || self.forge.holds(id);
         let rows: Vec<AddonLine> = a
             .lines
             .iter()
             .map(|line| {
+                let record = a.store.get(&line.id);
+                // Installed from SurvivorsForge alone: its badge is SurvivorsForge's.
+                let own = record.is_some_and(|r| r.forge.is_some());
                 let (badge, badge_kind) = match line.standing {
                     // Its badge said the game's devs had verified it; the list no longer says so.
                     Standing::Unlisted => UNLISTED_BADGE,
+                    _ if own => FORGE_BADGE,
                     _ => badge_text(line.badge),
                 };
-                let record = a.store.get(&line.id);
+                // Every badge that applies: ours, then SurvivorsForge's (only its, for its own).
+                let theirs = forge_badge(&forge_view, line.forge_slug.as_deref(), &line.verdict, None);
+                let badges: Vec<(String, i32)> =
+                    if own { theirs.into_iter().collect() } else { std::iter::once((badge.to_string(), badge_kind)).chain(theirs).collect() };
+                let (reason, reason_kind) = row_reason(&line.verdict);
+                let held_back = matches!(line.verdict, Verdict::No(_));
                 let (share, share_kind, ask_pc) = self.share_line(&line.id);
                 // Its switches show once addons go to every PC (an addon installed by hand stays here).
                 let shared = !share.is_empty() && record.is_some();
                 let downloaded = |to: &Release| zip_ready(&cache, &a.ready, &line.id, to).is_some();
-                let (update, mut state, mut state_kind) = match &line.standing {
+                // Our list's addons and SurvivorsForge's own go in by themselves, unless Settings says not.
+                let ours = line.badge == Some(Badge::Verified) || own;
+                let (mut update, mut state, mut state_kind) = match &line.standing {
                     Standing::Current => (String::new(), String::new(), 0),
                     Standing::Update { to, by_itself: true } if downloaded(to) => {
                         (shown(to), "Goes in when you press Play".into(), 1)
                     }
                     Standing::Update { to, by_itself: true } => (shown(to), "Downloading; it goes in at a Play once it's here".into(), 1),
                     Standing::Update { to, by_itself: false } => {
-                        let why = if line.badge == Some(Badge::Verified) && !to.sha256.is_empty() && auto && line.off {
+                        let why = if ours && !to.sha256.is_empty() && auto && line.off {
                             "Turned off, so it waits: it goes in at the first Play after you turn it on"
-                        } else if line.badge == Some(Badge::Verified) && !to.sha256.is_empty() {
+                        } else if ours && !to.sha256.is_empty() {
                             "Asks first (Settings)"
-                        } else if line.badge == Some(Badge::Verified) {
+                        } else if ours {
                             "Asks first: GitHub published no checksum for this file"
                         } else {
                             "Asks first: nobody reviewed it"
@@ -1094,8 +1434,29 @@ impl Worker {
                         None => (String::new(), String::new(), 0),
                     },
                     Standing::Elsewhere => (String::new(), "DragonUI's own updater (avrt.dll beside the game) keeps it current".into(), 0),
-                    Standing::Unlisted => (String::new(), "No longer in the verified list: the Satchel doesn't update it".into(), 2),
+                    Standing::Unlisted => (String::new(), "No longer in the Discord Verified list: the Satchel doesn't update it".into(), 2),
                 };
+                // SurvivorsForge's word stands in the way of the update: the reason line says it.
+                if !line.verdict.is_go() {
+                    if matches!(line.standing, Standing::Update { .. }) {
+                        state.clear();
+                        state_kind = 0;
+                    }
+                    if held_back {
+                        update.clear();
+                    }
+                }
+                // A step back on SurvivorsForge (its latest is a version this PC saw before this
+                // one) isn't an update: the row says what SurvivorsForge offers now.
+                if line.standing == Standing::Current
+                    && let Some(record) = record.filter(|r| r.forge.is_some())
+                    && let Some(latest) = record.forge.as_deref().and_then(|slug| forge_view.entry(slug)).and_then(|e| e.latest.as_ref())
+                    && !latest.tag.is_empty()
+                    && record.tag.as_deref() != Some(latest.tag.as_str())
+                {
+                    state = format!("SurvivorsForge now offers {}; you have {}", latest.tag, record.tag.as_deref().unwrap_or(&line.version));
+                    state_kind = 0;
+                }
                 if let Standing::Update { to, .. } = &line.standing
                     && !downloaded(to)
                     && let Some(why) = a.refused.get(&(line.id.clone(), to.tag.clone()))
@@ -1116,8 +1477,11 @@ impl Worker {
                     id: line.id.clone(),
                     initials: initials(&line.name),
                     name: line.name.clone(),
-                    badge: badge.into(),
+                    badge: badges.first().map_or_else(|| badge.to_string(), |(text, _)| text.clone()),
                     badge_kind,
+                    badges,
+                    reason,
+                    reason_kind,
                     author: line.author.clone(),
                     version: line.version.clone(),
                     released: line.released.map(|t| overview::released_ago(days_since(t))).unwrap_or_default(),
@@ -1130,10 +1494,11 @@ impl Worker {
                     problems: problems.join("\n"),
                     notes: line.notes.as_deref().map(|n| overview::plain_notes(n, 700)).unwrap_or_default(),
                     notes_title: format!("What's new in {notes_of}"),
-                    back_to: line.back_to.clone().unwrap_or_default(),
+                    // Go back shows only where SurvivorsForge lets it go back (`barred_back`).
+                    back_to: line.back_to.clone().filter(|_| !self.back_verdict(&line.id).as_ref().is_some_and(barred_back)).unwrap_or_default(),
                     pinned: line.pinned,
                     can_pin: line.badge.is_some_and(|b| b != Badge::File),
-                    can_update: matches!(line.standing, Standing::Update { .. } | Standing::Kept { newer: Some(_) }),
+                    can_update: matches!(line.standing, Standing::Update { .. } | Standing::Kept { newer: Some(_) }) && !held_back,
                     has_page: line.repo.is_some(),
                     replace_with: line.replace_with.clone().unwrap_or_default(),
                     installing: waiting(&line.id) || replacing,
@@ -1151,9 +1516,11 @@ impl Worker {
         let mut rows = rows;
         rows.extend(self.share_incoming());
         rows.sort_by_key(|r| r.name.to_lowercase());
-        // A turned-off addon's update waits for it to be on: it isn't counted, only mentioned.
-        let off = a.lines.iter().filter(|l| matches!(l.standing, Standing::Update { .. }) && l.off).count();
-        let updates: Vec<&Line> = a.lines.iter().filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off).collect();
+        // A turned-off addon's update waits for it to be on: it isn't counted, only mentioned. One
+        // SurvivorsForge says No to never comes, so it isn't counted at all.
+        let coming = |l: &&Line| matches!(l.standing, Standing::Update { .. }) && !matches!(l.verdict, Verdict::No(_));
+        let off = a.lines.iter().filter(coming).filter(|l| l.off).count();
+        let updates: Vec<&Line> = a.lines.iter().filter(coming).filter(|l| !l.off).collect();
         let by_itself = updates.iter().filter(|l| matches!(l.standing, Standing::Update { by_itself: true, .. })).count();
         // One kept at an older version while a newer is out isn't news, but it isn't up to date.
         let kept = a.lines.iter().filter(|l| matches!(l.standing, Standing::Kept { newer: Some(_) })).count();
@@ -1172,15 +1539,15 @@ impl Worker {
             },
             match unlisted {
                 0 => None,
-                1 => Some("1 addon no longer in the verified list".to_string()),
-                n => Some(format!("{n} addons no longer in the verified list")),
+                1 => Some("1 addon no longer in the Discord Verified list".to_string()),
+                n => Some(format!("{n} addons no longer in the Discord Verified list")),
             },
         ]
         .into_iter()
         .flatten()
         .collect();
         let mut header = match (updates.len(), by_itself) {
-            (0, _) if a.lines.is_empty() => "No addons yet: the verified ones are in Browse".to_string(),
+            (0, _) if a.lines.is_empty() => "No addons yet: find them in Browse".to_string(),
             (0, _) if !except.is_empty() => format!("Up to date, except {}", except.join(" and ")),
             (0, _) => "Everything is up to date".into(),
             (1, 1) => "1 update · it goes in when you press Play".into(),
@@ -1202,7 +1569,7 @@ impl Worker {
             }
             match unlisted {
                 0 => {}
-                n => header.push_str(&format!(" · {n} no longer in the verified list")),
+                n => header.push_str(&format!(" · {n} no longer in the Discord Verified list")),
             }
         }
         let looked = if a.looking {
@@ -1231,28 +1598,68 @@ impl Worker {
             notice.push("SurvivorsForge also manages addons here. When both update one, the Satchel just records the newer release.".into());
         }
 
-        let offers = a
+        let offers: Vec<OfferLine> = a
             .offers
             .iter()
-            .map(|o| OfferLine {
-                id: o.id.clone(),
-                initials: initials(&o.name),
-                name: o.name.clone(),
-                author: o.author.clone(),
-                summary: o.summary.clone(),
-                group: o.group.clone(),
-                version: a.newer.get(&o.id).map(shown).unwrap_or_else(|| o.version.clone()),
-                installed: o.installed,
-                installing: waiting(&o.id),
-                warning: o.warning.clone().unwrap_or_default(),
-                notes: o.notes.as_deref().map(|n| overview::plain_notes(n, 700)).unwrap_or_default(),
+            .map(|o| {
+                let newer = a.newer.get(&o.id);
+                // Our badge for an addon of our list, then SurvivorsForge's.
+                let ours = (o.origin != 2).then(|| ("Discord Verified".to_string(), 0));
+                // SurvivorsForge's badge speaks of the version the card offers.
+                let offered = self.offer_tag(&o.id);
+                let badges: Vec<(String, i32)> =
+                    ours.into_iter().chain(forge_badge(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref())).collect();
+                // A newer release found on GitHub's page carries no true date.
+                let date = o.date.filter(|_| newer.is_none());
+                // SurvivorsForge's own sort by their newest version, once its versions are cached.
+                let newest = o
+                    .forge_slug
+                    .as_deref()
+                    .filter(|_| o.origin == 2)
+                    .and_then(|slug| self.forge.versions.get(slug))
+                    .and_then(|versions| versions.iter().filter_map(|v| v.published_at).max());
+                let action = if o.installed {
+                    3
+                } else if waiting(&o.id) {
+                    2
+                } else if matches!(o.verdict, Verdict::Ask(_)) {
+                    1
+                } else {
+                    0
+                };
+                OfferLine {
+                    id: o.id.clone(),
+                    initials: initials(&o.name),
+                    name: o.name.clone(),
+                    author: o.author.clone(),
+                    summary: o.summary.clone(),
+                    badges,
+                    tags: o.tags.clone(),
+                    origin: o.origin,
+                    version: newer.map(shown).unwrap_or_else(|| o.version.clone()),
+                    date: date.map(day_text).unwrap_or_default(),
+                    sort_date: newest.or(o.date).map(|t| t.timestamp()),
+                    downloads: o.downloads,
+                    downloads_text: o.downloads.map(downloads_text).unwrap_or_default(),
+                    action,
+                    reason: match &o.verdict {
+                        Verdict::Ask(why) if action == 1 => why.text(),
+                        _ => String::new(),
+                    },
+                    warning: o.warning.clone().unwrap_or_default(),
+                }
             })
             .collect();
-        let browse_note = format!(
-            "{} verified addons · the catalog of {} · each pinned to its author's GitHub",
-            a.catalog.addons.len(),
-            when(a.catalog.generated)
-        );
+        // Our list, and SurvivorsForge's while it answers, counted as the filters count them.
+        let ours = offers.iter().filter(|o| o.origin != 2).count();
+        let theirs = offers.iter().filter(|o| o.origin != 0).count();
+        let catalog_of = format!("the catalog of {}", when(a.catalog.generated));
+        let browse_note = if self.forge_on() && forge_view.online() {
+            format!("{ours} Discord Verified · {theirs} on SurvivorsForge · {catalog_of}")
+        } else {
+            format!("{ours} Discord Verified · {catalog_of}")
+        };
+        let (forge_status, forge_answer, forge_offline) = self.forge_status();
 
         let link = match &a.link {
             Link::Idle => LinkView::default(),
@@ -1286,7 +1693,7 @@ impl Worker {
                 }
                 let (note, warn) = match (warning, verified) {
                     (Some(w), _) => (w.clone(), true),
-                    (None, Some(_)) => ("This is a verified addon: it installs as one and updates by itself.".into(), false),
+                    (None, Some(_)) => ("This is a Discord Verified addon: it installs as one and updates by itself.".into(), false),
                     (None, None) => {
                         ("Not reviewed by the game's devs. Addon code can't reach your PC, and it asks before each update.".into(), false)
                     }
@@ -1299,17 +1706,31 @@ impl Worker {
             count: a.lines.len(),
             rows,
             header,
-            update_all: !updates.is_empty() && !running,
+            update_all: updates.iter().any(|l| l.verdict.is_go()) && !running,
             footer,
             share: self.share_header(),
             notice: notice.join(" "),
             message: a.message.as_ref().map(|(m, _)| m.clone()).unwrap_or_default(),
             offers,
             browse_note,
+            panel: self.forge_panel(),
+            forge_status,
+            forge_answer,
+            forge_offline,
+            discord_checked: discord_day(a.catalog.discord_checked.as_deref()),
             link,
             removed: self.removed_lines(),
         }
     }
+}
+
+/// Go back is the player's own act on a backup this PC already holds. What bars it: SurvivorsForge's
+/// word on the file itself (blocked, changed after its scan, another file than the one it scanned),
+/// and for one of SurvivorsForge's own, its leaving the registry (deleted or blocked there, not
+/// known which). Not a question, and not what speaks only of the registry's latest download (off,
+/// silent, no checksum known for an older version).
+fn barred_back(verdict: &Verdict) -> bool {
+    matches!(verdict, Verdict::No(Why::Blocked(_) | Why::SourceChanged | Why::OtherFile | Why::NotListed))
 }
 
 /// Removes folders the Satchel didn't install: each goes to the Recycle Bin, its settings too

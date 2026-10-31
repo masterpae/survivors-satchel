@@ -1,14 +1,16 @@
 //! The Addons tab's model: every addon in AddOns with where it stands, what's wrong with it in
 //! plain words and what can be done with it; the updates that go in by themselves at Play; the
-//! verified addons on offer; and what to ask GitHub about. The app formats and wires it.
+//! addons on offer, our catalog's and SurvivorsForge's; and what to ask GitHub about. The app
+//! formats and wires it.
 
 use super::catalog::{self, Asset, Catalog, Release, State};
 use super::enabled::EnableList;
+use super::forge::{self, Origin, Verdict};
 use super::github::Pick;
 use super::store::{Badge, Record, Store};
 use super::Found;
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// DragonUI's folder: its optional `avrt.dll` beside the game updates it at every game start.
 pub const SELF_UPDATING: &str = "SurvivorsDragonUi";
@@ -65,6 +67,13 @@ pub struct Line {
     pub pinned: bool,
     /// A copy installed by hand of a verified addon: the release that can replace it.
     pub replace_with: Option<String>,
+    /// SurvivorsForge's verdict on the update, or on the replacement for a copy installed by hand.
+    /// With neither, only a No stays (blocked, off, not answering, no longer listed): nothing
+    /// waits for an OK.
+    pub verdict: Verdict,
+    /// The slug SurvivorsForge lists it under (its own for a SurvivorsForge install), with the
+    /// switch on.
+    pub forge_slug: Option<String>,
 }
 
 pub struct Inputs<'a> {
@@ -82,7 +91,158 @@ pub struct Inputs<'a> {
     pub avrt: bool,
 }
 
-/// An addon's known releases, newest first: one found on GitHub, then the catalog's.
+/// What SurvivorsForge says, as the worker holds it in memory (no I/O here): the switch, the time,
+/// the cache's state, the registry and its join with our catalog, and each slug's versions as
+/// cached under its entry as it stands now (`forge::Cache::versions`).
+#[derive(Clone, Copy, Debug)]
+pub struct ForgeView<'a> {
+    /// The switch in Settings: off, SurvivorsForge is ignored completely.
+    pub switch_on: bool,
+    pub now: DateTime<Utc>,
+    pub state: &'a forge::State,
+    /// The registry as last received.
+    pub registry: Option<&'a forge::Registry>,
+    /// Our catalog's ids → their slugs (`forge::join`).
+    pub join: &'a BTreeMap<String, String>,
+    /// Slug → its versions.
+    pub versions: &'a BTreeMap<String, Vec<forge::Version>>,
+}
+
+impl<'a> ForgeView<'a> {
+    /// It answered within the hour.
+    pub fn online(&self) -> bool {
+        forge::online(self.state, self.now)
+    }
+
+    /// A slug's entry in the registry, with the switch on.
+    pub fn entry(&self, slug: &str) -> Option<&'a forge::ForgeAddon> {
+        self.registry.filter(|_| self.switch_on)?.get(slug)
+    }
+
+    /// The slug SurvivorsForge lists an addon under, with the switch on: a SurvivorsForge install's
+    /// own; else the one joined to its catalog id; else the one listed with its repository, now or
+    /// before, so an addon that left the registry keeps its slug.
+    pub fn slug_for(&self, own_slug: Option<&str>, catalog_id: Option<&str>, repo: Option<&str>) -> Option<String> {
+        if !self.switch_on {
+            return None;
+        }
+        if let Some(slug) = own_slug.or_else(|| self.join.get(catalog_id?).map(String::as_str)) {
+            return Some(slug.to_string());
+        }
+        let repo = repo.filter(|r| !r.trim().is_empty())?;
+        let listed = self.registry.and_then(|r| r.addons.iter().find(|a| forge::same_repo(&a.repo, repo)));
+        listed.map(|a| a.id.clone()).or_else(|| self.state.repos.iter().find(|(_, r)| forge::same_repo(r, repo)).map(|(slug, _)| slug.clone()))
+    }
+
+    /// Its word on version `tag` of the addon listed as `slug` (`forge::word_for`), from current
+    /// answers only. `None`: before an install the player asked for, its versions are worth one
+    /// request.
+    pub fn word(&self, slug: &str, tag: &str) -> Option<(forge::Word, forge::Counts, Option<String>)> {
+        forge::word_for(self.entry(slug), self.versions.get(slug).map(Vec::as_slice), tag)
+    }
+
+    /// A word that held version `tag` back in an answer no longer current (`State::restrictions`),
+    /// with the switch on.
+    pub fn restriction(&self, slug: &str, tag: &str) -> Option<(forge::Word, forge::Counts)> {
+        let kept = self.state.restrictions.get(slug).filter(|_| self.switch_on)?.get(tag)?;
+        Some((forge::Word::parse(&kept.trust), kept.findings)).filter(|(word, _)| word.restricts())
+    }
+
+    /// The verdict on installing version `tag` (our checksum `sha256`) of an addon listed as `slug`
+    /// (a SurvivorsForge install's own slug is in `origin`): the facts gathered here, the rule in
+    /// `forge::decide`. The same for every path that installs. With no current word on the
+    /// version, a word that held it back before still holds: old data can't let anything in.
+    pub fn verdict(&self, origin: Origin, slug: Option<&str>, tag: &str, sha256: Option<&str>) -> Verdict {
+        self.judge(origin, slug, tag, sha256, true)
+    }
+
+    /// The verdict a Browse card shows. A No that only a word kept from an older answer gives
+    /// shows as Ask, with its reason: the card stays, and opening it asks SurvivorsForge again,
+    /// while the install itself is refused until a current answer lifts the word. A No from current
+    /// answers hides the card.
+    pub fn offer_verdict(&self, origin: Origin, slug: Option<&str>, tag: &str, sha256: Option<&str>) -> Verdict {
+        match self.verdict(origin, slug, tag, sha256) {
+            Verdict::No(why) if !matches!(self.judge(origin, slug, tag, sha256, false), Verdict::No(_)) => Verdict::Ask(why),
+            verdict => verdict,
+        }
+    }
+
+    /// The verdict with, or without (`kept` false), the words kept from older answers.
+    fn judge(&self, origin: Origin, slug: Option<&str>, tag: &str, sha256: Option<&str>, kept: bool) -> Verdict {
+        let slug = match origin {
+            Origin::ForgeOnly { slug } => Some(slug),
+            _ => slug,
+        };
+        let word = slug.and_then(|s| self.word(s, tag));
+        let held = slug.filter(|_| kept && word.is_none()).and_then(|s| self.restriction(s, tag));
+        let facts = forge::Facts {
+            switch_on: self.switch_on,
+            online: self.online(),
+            listed: slug.and_then(|s| self.entry(s)),
+            dropped: slug.is_some_and(|s| forge::dropped(self.state, self.registry, s)),
+            blocked: slug.and_then(|s| self.state.blocked.get(s)).map(String::as_str),
+            word: word.as_ref().map(|(w, c, _)| (*w, *c)).or(held),
+            forge_sha: word.as_ref().and_then(|(_, _, sha)| sha.as_deref()),
+        };
+        forge::decide(origin, sha256, &facts)
+    }
+
+    /// A SurvivorsForge install's releases, newest first by when this PC first saw each as the
+    /// registry's latest: the latest now and, when this PC saw the installed version as latest
+    /// before (it went back to it, or followed another PC to it), that one too. A later latest is
+    /// then an update, and an earlier one a step back. A latest not dated yet (a lost cache) is no
+    /// newer than the install, until the next answer dates it.
+    fn releases_of(&self, record: &Record, slug: &str) -> Vec<Release> {
+        let Some(entry) = self.entry(slug) else { return Vec::new() };
+        let seen = self.state.seen.get(slug);
+        let tag = entry.latest.as_ref().map_or("", |l| l.tag.as_str());
+        let latest_seen = seen.and_then(|tags| tags.get(tag)).copied().unwrap_or(record.installed);
+        let Some(latest) = forge::latest_release(entry, latest_seen) else { return Vec::new() };
+        let installed_seen = record.tag.as_deref().filter(|t| *t != latest.tag).and_then(|t| Some((t, *seen?.get(t)?)));
+        let Some((installed_tag, first_seen)) = installed_seen else { return vec![latest] };
+        // The installed version as a release of its own, only to place the latest: never downloaded.
+        let installed = Release {
+            tag: installed_tag.to_string(),
+            version: record.version.clone(),
+            published: first_seen,
+            prerelease: false,
+            file: record.file.clone().unwrap_or_default(),
+            url: String::new(),
+            sha256: record.sha256.clone().unwrap_or_default(),
+            size: 0,
+            interface: 0,
+            folders: BTreeMap::new(),
+            notes: None,
+            downloads: None,
+        };
+        if latest.published > installed.published { vec![latest, installed] } else { vec![installed, latest] }
+    }
+}
+
+/// The checksum to judge a record's version `tag` by: for an addon of our list whose release with
+/// that tag the catalog holds, that release's (a copy imported from a re-zipped file records its own
+/// zip's checksum, though its files are exactly the release's); else `sha256`, the one recorded.
+pub fn judged_sha<'a>(catalog: &'a Catalog, record: &Record, tag: Option<&str>, sha256: Option<&'a str>) -> Option<&'a str> {
+    let release = (record.badge == Badge::Verified && record.forge.is_none())
+        .then(|| catalog.get(&record.id))
+        .flatten()
+        .and_then(|entry| entry.releases().find(|r| Some(r.tag.as_str()) == tag))
+        .filter(|r| !r.sha256.is_empty());
+    release.map_or(sha256, |r| Some(r.sha256.as_str()))
+}
+
+/// SurvivorsForge's verdict on the version already in: with nothing to install nothing waits for
+/// an OK, and what speaks only of the registry's latest (no checksum, a download elsewhere) doesn't
+/// count for a file already in.
+fn standing_verdict(verdict: Verdict) -> Verdict {
+    match verdict {
+        Verdict::Ask(_) | Verdict::No(forge::Why::NotHashed | forge::Why::NotOnGitHub) => Verdict::Go,
+        other => other,
+    }
+}
+
+/// An addon's known releases, newest first: one found on GitHub, then the catalog's. (A
+/// SurvivorsForge install's come from its registry, in `lines`.)
 pub fn releases(record: &Record, catalog: &Catalog, newer: &BTreeMap<String, Release>) -> Vec<Release> {
     let mut all: Vec<Release> = newer.get(&record.id).cloned().into_iter().collect();
     if record.badge == Badge::Verified
@@ -227,7 +387,7 @@ fn owner(repo: &str) -> String {
 }
 
 /// The Installed list: the Satchel's own addons, then any other folder in AddOns, by name.
-pub fn lines(inputs: &Inputs) -> Vec<Line> {
+pub fn lines(inputs: &Inputs, forge_view: &ForgeView) -> Vec<Line> {
     let present = |folder: &str| inputs.found.iter().find(|f| f.folder.eq_ignore_ascii_case(folder));
     let loads = |folder: &str| present(folder).is_some_and(|f| f.toc.is_some());
     let is_on = |folder: &str| {
@@ -266,8 +426,25 @@ pub fn lines(inputs: &Inputs) -> Vec<Line> {
     let mut lines = Vec::new();
     for record in &inputs.store.addons {
         let entry = (record.badge == Badge::Verified).then(|| inputs.catalog.get(&record.id)).flatten();
-        let releases = releases(record, inputs.catalog, inputs.newer);
+        let slug = forge_view.slug_for(
+            record.forge.as_deref(),
+            (record.badge == Badge::Verified).then_some(record.id.as_str()),
+            entry.map(|e| e.repo.as_str()).or(record.repo.as_deref()),
+        );
+        let origin = forge::origin_of(record.badge, record.forge.as_deref());
+        // A SurvivorsForge install's releases are its registry's, and it has no look on GitHub.
+        let releases = match &record.forge {
+            Some(own) => forge_view.releases_of(record, own),
+            None => releases(record, inputs.catalog, inputs.newer),
+        };
         let state = catalog::state(record, &releases, &on_disk(record, inputs.prints));
+        let verdict = match &state {
+            State::Update { to, .. } | State::Kept { newer: Some(to) } => forge_view.verdict(origin, slug.as_deref(), &to.tag, Some(to.sha256.as_str())),
+            _ => {
+                let sha = judged_sha(inputs.catalog, record, record.tag.as_deref(), record.sha256.as_deref());
+                standing_verdict(forge_view.verdict(origin, slug.as_deref(), record.tag.as_deref().unwrap_or_default(), sha))
+            }
+        };
         let elsewhere = inputs.avrt && record.folders.keys().any(|f| f.eq_ignore_ascii_case(SELF_UPDATING));
         let folders: Vec<String> = record.folders.keys().cloned().collect();
         let on = folders.iter().all(|f| is_on(f));
@@ -278,8 +455,8 @@ pub fn lines(inputs: &Inputs) -> Vec<Line> {
             State::Update { .. } | State::Changed if elsewhere => Standing::Elsewhere,
             State::Update { to, by_itself } => {
                 // A release whose checksum GitHub didn't publish asks first, verified or not; a
-                // turned-off addon waits until it's turned on.
-                let by_itself = by_itself && inputs.auto && !to.sha256.is_empty() && !off;
+                // turned-off addon waits until it's turned on; SurvivorsForge's verdict holds.
+                let by_itself = by_itself && inputs.auto && !to.sha256.is_empty() && !off && verdict.is_go();
                 Standing::Update { to, by_itself }
             }
             State::Kept { newer } => Standing::Kept { newer },
@@ -294,7 +471,7 @@ pub fn lines(inputs: &Inputs) -> Vec<Line> {
         match &standing {
             Standing::Changed => problems.push("its files changed since the Satchel installed it, so it isn't updated by itself".into()),
             Standing::Gone => problems.push("its folder is gone from AddOns".into()),
-            Standing::Unlisted => problems.push("it left the verified list, so the Satchel doesn't update it".into()),
+            Standing::Unlisted => problems.push("it left the Discord Verified list, so the Satchel doesn't update it".into()),
             _ => {}
         }
         let notes = match &standing {
@@ -320,6 +497,8 @@ pub fn lines(inputs: &Inputs) -> Vec<Line> {
             back_to: record.earlier.first().map(|k| k.version.clone().or_else(|| k.tag.clone()).unwrap_or_else(|| "the earlier version".into())),
             pinned: record.pinned,
             replace_with: None,
+            verdict,
+            forge_slug: slug,
         });
     }
 
@@ -345,6 +524,12 @@ pub fn lines(inputs: &Inputs) -> Vec<Line> {
         if entry.is_some() {
             problems.push("installed by hand, and its files aren't one of its author's releases, so it isn't updated".into());
         }
+        let slug = entry.and_then(|e| forge_view.slug_for(None, Some(e.id.as_str()), Some(e.repo.as_str())));
+        // Replacing the copy installs the catalog's latest: the verdict on that.
+        let verdict = match entry {
+            Some(e) => forge_view.verdict(Origin::OurList, slug.as_deref(), &e.latest.tag, Some(e.latest.sha256.as_str())),
+            None => Verdict::Go,
+        };
         lines.push(Line {
             id: format!("folder:{}", found.folder),
             name: entry
@@ -366,6 +551,8 @@ pub fn lines(inputs: &Inputs) -> Vec<Line> {
             back_to: None,
             pinned: false,
             replace_with: entry.map(|e| e.latest.shown_version().to_string()),
+            verdict,
+            forge_slug: slug,
         });
     }
     lines.sort_by_key(|l| l.name.to_lowercase());
@@ -383,7 +570,7 @@ pub fn at_play(lines: &[Line]) -> Vec<(&Line, &Release)> {
         .collect()
 }
 
-/// A verified addon on offer in Browse.
+/// An addon on offer in Browse: from our catalog, or from SurvivorsForge alone (`forge:<slug>`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Offer {
     pub id: String,
@@ -397,12 +584,40 @@ pub struct Offer {
     /// Shown before installing: an addon it doesn't mix with is already in AddOns.
     pub warning: Option<String>,
     pub notes: Option<String>,
+    /// Our group for an addon of our list and SurvivorsForge's category for one it lists: both for
+    /// an addon on both, while SurvivorsForge answers.
+    pub tags: Vec<String>,
+    /// The slug SurvivorsForge lists it under, with the switch on: for its details and versions.
+    pub forge_slug: Option<String>,
+    /// 0 our list only, 1 both (while SurvivorsForge answers), 2 SurvivorsForge only.
+    pub origin: i32,
+    /// When `version` was published: a real date only, never when it was first seen.
+    pub date: Option<DateTime<Utc>>,
+    /// GitHub's downloads: our catalog's count, or the sum over the versions cached.
+    pub downloads: Option<u64>,
+    /// SurvivorsForge's verdict on installing `version`: Go, or Ask with why. A No is never offered.
+    pub verdict: Verdict,
 }
 
-/// The catalog's addons, in its order (by group).
-pub fn offers(catalog: &Catalog, store: &Store, found: &[Found]) -> Vec<Offer> {
+/// Tags as Browse shows them: each once (without case), none empty.
+fn tags(names: &[&str]) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for name in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
+        if !tags.iter().any(|t| t.eq_ignore_ascii_case(name)) {
+            tags.push(name.to_string());
+        }
+    }
+    tags
+}
+
+/// Our catalog's addons, in its order (by group), then SurvivorsForge's own while it answers. An
+/// addon SurvivorsForge's current answers say No to (blocked, changed after its scan, another file
+/// than the one it scanned, not installable) isn't offered; a No only an older answer gives asks
+/// (`ForgeView::offer_verdict`).
+pub fn offers(catalog: &Catalog, store: &Store, found: &[Found], forge_view: &ForgeView) -> Vec<Offer> {
     let present = |folder: &str| found.iter().any(|f| f.folder.eq_ignore_ascii_case(folder));
-    catalog
+    let online = forge_view.online();
+    let mut offers: Vec<Offer> = catalog
         .addons
         .iter()
         .map(|entry| {
@@ -418,6 +633,9 @@ pub fn offers(catalog: &Catalog, store: &Store, found: &[Found]) -> Vec<Offer> {
                 }
             }
             let warning = (!clashes.is_empty() && !installed).then(|| format!("doesn't mix with {}, which you have", clashes.join(", ")));
+            let slug = forge_view.slug_for(None, Some(entry.id.as_str()), Some(entry.repo.as_str()));
+            // Listed now, and answering: its category, and the "both" list.
+            let listed = slug.as_deref().and_then(|s| forge_view.entry(s)).filter(|_| online);
             Offer {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
@@ -429,9 +647,50 @@ pub fn offers(catalog: &Catalog, store: &Store, found: &[Found]) -> Vec<Offer> {
                 installed,
                 warning,
                 notes: entry.latest.notes.clone(),
+                tags: tags(&[entry.group.as_str(), listed.map_or("", |l| l.category.as_str())]),
+                origin: if listed.is_some() { 1 } else { 0 },
+                date: Some(entry.latest.published),
+                downloads: entry.downloads,
+                verdict: forge_view.offer_verdict(Origin::OurList, slug.as_deref(), &entry.latest.tag, Some(entry.latest.sha256.as_str())),
+                forge_slug: slug,
             }
         })
-        .collect()
+        .collect();
+    // SurvivorsForge's own addons, while it answers: those our catalog doesn't carry.
+    if forge_view.switch_on
+        && online
+        && let Some(registry) = forge_view.registry
+    {
+        let joined: BTreeSet<&str> = forge_view.join.values().map(String::as_str).collect();
+        for listed in registry.addons.iter().filter(|a| !joined.contains(a.id.as_str())) {
+            let Some(latest) = &listed.latest else { continue };
+            let versions = forge_view.versions.get(&listed.id);
+            let installed = store.addons.iter().any(|r| {
+                r.forge.as_deref() == Some(listed.id.as_str()) || r.repo.as_deref().is_some_and(|repo| forge::same_repo(repo, &listed.repo))
+            }) || (!listed.folders.is_empty() && listed.folders.iter().all(|f| present(f)));
+            offers.push(Offer {
+                id: forge::id_for(&listed.id),
+                name: listed.name.clone(),
+                author: listed.author.clone(),
+                repo: listed.repo.clone(),
+                summary: listed.description.clone(),
+                group: listed.category.clone(),
+                version: latest.tag.clone(),
+                installed,
+                warning: None,
+                notes: None,
+                tags: tags(&[listed.category.as_str()]),
+                forge_slug: Some(listed.id.clone()),
+                origin: 2,
+                // The registry has no dates or counts: they come with its versions, once opened.
+                date: versions.and_then(|v| v.iter().find(|x| x.tag == latest.tag)).and_then(|x| x.published_at),
+                downloads: versions.and_then(|v| v.iter().filter_map(|x| x.downloads).reduce(u64::saturating_add)),
+                verdict: forge_view.offer_verdict(Origin::ForgeOnly { slug: listed.id.as_str() }, None, &latest.tag, latest.sha256.as_deref()),
+            });
+        }
+    }
+    offers.retain(|o| !matches!(o.verdict, Verdict::No(_)));
+    offers
 }
 
 /// An installed addon to look up on GitHub: its repository, how to pick its file, and the tags
@@ -446,12 +705,13 @@ pub struct Watch {
 
 /// What to look up: verified addons published with release files, and addons added by link.
 /// Addons published by tag, imported files and DragonUI under its own updater are left to the
-/// catalog.
+/// catalog; SurvivorsForge's own, to its registry.
 pub fn watches(store: &Store, catalog: &Catalog, avrt: bool) -> Vec<Watch> {
     store
         .addons
         .iter()
         .filter(|r| !(avrt && r.folders.keys().any(|f| f.eq_ignore_ascii_case(SELF_UPDATING))))
+        .filter(|r| r.forge.is_none())
         .filter_map(|r| match r.badge {
             Badge::Verified => {
                 let entry = catalog.get(&r.id)?;
@@ -480,7 +740,7 @@ pub fn look_alike(catalog: &Catalog, repo: &str, name: &str, folders: &[String])
         })
         .map(|e| {
             format!(
-                "{} is a verified addon by {}. This one is by {}: a copy or a look-alike, not the verified one.",
+                "{} is a Discord Verified addon by {}. This one is by {}: a copy or a look-alike, not the Discord Verified one.",
                 e.name,
                 e.author,
                 owner(repo)
@@ -493,7 +753,7 @@ mod tests {
     use super::*;
     use crate::addons::catalog::Entry;
     use crate::addons::toc::Toc;
-    use chrono::{TimeZone, Utc};
+    use chrono::{TimeDelta, TimeZone, Utc};
 
     fn release(tag: &str, print: &str) -> Release {
         Release {
@@ -508,6 +768,7 @@ mod tests {
             interface: 11200,
             folders: [("A".to_string(), print.to_string())].into(),
             notes: Some(format!("notes {tag}")),
+            downloads: None,
         }
     }
 
@@ -525,6 +786,7 @@ mod tests {
             earlier: vec![release("v1", "p1")],
             doesnt_mix_with: mix.iter().map(|m| m.to_string()).collect(),
             notes: Vec::new(),
+            downloads: None,
         }
     }
 
@@ -547,6 +809,7 @@ mod tests {
             local_only: false,
             settings_per_pc: false,
             earlier: Vec::new(),
+            forge: None,
         }
     }
 
@@ -562,11 +825,18 @@ mod tests {
         enabled: EnableList,
         newer: BTreeMap<String, Release>,
         avrt: bool,
+        /// SurvivorsForge: the switch, what this PC remembers, the registry, cached versions.
+        forge_on: bool,
+        forge_state: forge::State,
+        registry: Option<forge::Registry>,
+        versions: BTreeMap<String, Vec<forge::Version>>,
+        now: DateTime<Utc>,
     }
 
     impl World {
         fn lines(&self) -> Vec<Line> {
-            lines(&Inputs {
+            let join = self.join();
+            let inputs = Inputs {
                 catalog: &self.catalog,
                 store: &self.store,
                 found: &self.found,
@@ -575,12 +845,34 @@ mod tests {
                 newer: &self.newer,
                 auto: true,
                 avrt: self.avrt,
-            })
+            };
+            lines(&inputs, &self.view(&join))
+        }
+
+        fn offers(&self, store: &Store, found: &[Found]) -> Vec<Offer> {
+            let join = self.join();
+            offers(&self.catalog, store, found, &self.view(&join))
+        }
+
+        fn join(&self) -> BTreeMap<String, String> {
+            self.registry.as_ref().map(|r| forge::join(&self.catalog, r)).unwrap_or_default()
+        }
+
+        fn view<'a>(&'a self, join: &'a BTreeMap<String, String>) -> ForgeView<'a> {
+            ForgeView {
+                switch_on: self.forge_on,
+                now: self.now,
+                state: &self.forge_state,
+                registry: self.registry.as_ref(),
+                join,
+                versions: &self.versions,
+            }
         }
     }
 
     fn world() -> World {
-        let mut catalog = Catalog { format: 1, generated: Utc::now(), addons: vec![entry("a", "A", &[]), entry("k", "Keijin", &["A"])] };
+        let mut catalog =
+            Catalog { format: 1, generated: Utc::now(), discord_checked: None, addons: vec![entry("a", "A", &[]), entry("k", "Keijin", &["A"])] };
         catalog.addons[1].latest.folders = [("Keijin".to_string(), "k2".to_string())].into();
         let mut store = Store::default();
         store.put(record("a", "A", "v1", "p1"));
@@ -592,7 +884,56 @@ mod tests {
             enabled: EnableList::default(),
             newer: BTreeMap::new(),
             avrt: false,
+            forge_on: true,
+            forge_state: forge::State::default(),
+            registry: None,
+            versions: BTreeMap::new(),
+            now: Utc.with_ymd_and_hms(2026, 10, 31, 12, 0, 0).unwrap(),
         }
+    }
+
+    /// A SurvivorsForge entry for these tests, its latest version `tag` with `trust` (flagged: 2
+    /// warnings) and its checksum.
+    fn listed(slug: &str, repo: &str, folders: &[&str], tag: &str, trust: &str, sha: Option<&str>) -> forge::ForgeAddon {
+        forge::ForgeAddon {
+            id: slug.into(),
+            name: slug.into(),
+            author: "sam".into(),
+            repo: repo.into(),
+            description: format!("{slug}, in one line"),
+            category: "Combat".into(),
+            folders: folders.iter().map(|f| f.to_string()).collect(),
+            trust: Some(trust.into()),
+            latest: Some(forge::Latest {
+                tag: tag.into(),
+                asset_url: format!("https://github.com/{repo}/releases/download/{tag}/{slug}.zip"),
+                sha256: sha.map(str::to_string),
+                trust: Some(trust.into()),
+                findings: forge::Counts { critical: 0, warn: if trust == "flagged" { 2 } else { 0 }, info: 0 },
+                ..forge::Latest::default()
+            }),
+            ..forge::ForgeAddon::default()
+        }
+    }
+
+    fn registry(addons: Vec<forge::ForgeAddon>) -> Option<forge::Registry> {
+        Some(forge::Registry { schema: 1, addons })
+    }
+
+    /// Totems, installed from SurvivorsForge alone at v1.0 on 29 Oct; SurvivorsForge answering,
+    /// its latest v1.1 (verified) first seen the next day.
+    fn forge_world() -> World {
+        let mut w = world();
+        let mut totems = record("forge:totems", "Totems", "v1.0", "t1");
+        (totems.badge, totems.repo, totems.forge, totems.sha256) = (Badge::Added, Some("sam/Totems".into()), Some("totems".into()), Some("s10".into()));
+        w.store = Store::default();
+        w.store.put(totems);
+        w.found = vec![found("Totems", Some("## Interface: 11200\n"))];
+        w.prints = [("Totems".to_string(), "t1".to_string())].into();
+        w.forge_state.answered = Some(w.now);
+        w.registry = registry(vec![listed("totems", "sam/Totems", &["Totems"], "v1.1", "verified", Some("s11"))]);
+        w.forge_state.seen.insert("totems".into(), [("v1.1".to_string(), Utc.with_ymd_and_hms(2026, 10, 30, 9, 0, 0).unwrap())].into());
+        w
     }
 
     #[test]
@@ -614,7 +955,7 @@ mod tests {
         let lines = w.lines();
         assert_eq!(lines[0].standing, Standing::Unlisted);
         assert_eq!(lines[0].badge, Some(Badge::Verified), "the record keeps its badge; the row says why");
-        assert!(lines[0].problems.iter().any(|p| p.contains("left the verified list")));
+        assert!(lines[0].problems.iter().any(|p| p.contains("left the Discord Verified list")));
         assert!(at_play(&lines).is_empty(), "nothing updates it");
         w.prints.clear();
         assert_eq!(w.lines()[0].standing, Standing::Gone, "a lost folder says more");
@@ -774,15 +1115,247 @@ mod tests {
     fn offers_and_look_alikes() {
         let mut w = world();
         w.found.push(found("Keijin", Some("## Interface: 11200\n")));
-        let offers = offers(&w.catalog, &Store::default(), &w.found[..1]);
+        let offers = w.offers(&Store::default(), &w.found[..1]);
         assert_eq!(offers.len(), 2);
         assert!(offers[0].installed, "its folder is there");
         assert_eq!(offers[1].warning.as_deref(), Some("doesn't mix with A, which you have"));
-        assert!(look_alike(&w.catalog, "other/A", "Something", &["A".into()]).unwrap().starts_with("A is a verified addon by o."));
+        assert!(look_alike(&w.catalog, "other/A", "Something", &["A".into()]).unwrap().starts_with("A is a Discord Verified addon by o."));
         assert_eq!(look_alike(&w.catalog, "o/A", "A", &["A".into()]), None, "the verified repository itself");
         let watch = &watches(&w.store, &w.catalog, false)[0];
         assert_eq!((watch.repo.as_str(), &watch.pick), ("o/A", &Pick::Pattern("A-*.zip".into())));
         assert_eq!(watch.known, ["v2", "v1", "v1"]);
+    }
+
+    #[test]
+    fn survivorsforge_holds_back_updates_of_our_list() {
+        let mut w = world();
+        w.forge_state.answered = Some(w.now);
+        // Our "a" is listed there as "a-forge", its v2 flagged.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v2", "flagged", Some("sha-v2"))]);
+        let lines = w.lines();
+        assert!(matches!(&lines[0].standing, Standing::Update { to, by_itself: false } if to.tag == "v2"));
+        assert_eq!(lines[0].verdict, Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 2 }));
+        assert_eq!(lines[0].forge_slug.as_deref(), Some("a-forge"));
+        assert!(at_play(&lines).is_empty(), "it waits for the player's OK");
+        // Silent for an hour: the warning holds.
+        w.forge_state.answered = Some(w.now - TimeDelta::hours(2));
+        assert!(matches!(w.lines()[0].verdict, Verdict::Ask(_)) && at_play(&w.lines()).is_empty());
+        // Off in Settings: as before SurvivorsForge.
+        w.forge_on = false;
+        assert_eq!((w.lines()[0].verdict.clone(), w.lines()[0].forge_slug.clone()), (Verdict::Go, None));
+        assert_eq!(at_play(&w.lines()).len(), 1);
+        // Verified there: in by itself, as before.
+        w.forge_on = true;
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v2", "verified", Some("sha-v2"))]);
+        assert_eq!(at_play(&w.lines()).len(), 1);
+        // Another file than ours under that tag: never.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v2", "verified", Some("sha-other"))]);
+        assert_eq!(w.lines()[0].verdict, Verdict::No(forge::Why::OtherFile));
+        assert!(at_play(&w.lines()).is_empty());
+        // Another version as its latest: its word on v2 comes from the versions, when cached.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v3", "verified", Some("sha-v3"))]);
+        assert_eq!(w.lines()[0].verdict, Verdict::Go, "nothing known about v2: our rule");
+        w.versions.insert("a-forge".into(), vec![forge::Version { tag: "v2".into(), trust: Some("unscanned".into()), ..forge::Version::default() }]);
+        assert_eq!(w.lines()[0].verdict, Verdict::Ask(forge::Why::NotScanned));
+    }
+
+    #[test]
+    fn our_addon_that_leaves_survivorsforge_asks_first_until_its_details_say_why() {
+        let mut w = world();
+        w.forge_state.answered = Some(w.now);
+        w.forge_state.listed.insert("a-forge".into());
+        w.forge_state.repos.insert("a-forge".into(), "o/A".into());
+        w.registry = registry(Vec::new());
+        let lines = w.lines();
+        assert_eq!((lines[0].verdict.clone(), lines[0].forge_slug.as_deref()), (Verdict::Ask(forge::Why::Dropped), Some("a-forge")));
+        assert!(at_play(&lines).is_empty());
+        // Its details answered 404: deleted there, so our rule again.
+        w.forge_state.deleted.insert("a-forge".into());
+        assert_eq!(at_play(&w.lines()).len(), 1);
+        // Blocked there: never, and Browse doesn't offer it.
+        w.forge_state.deleted.clear();
+        w.forge_state.blocked.insert("a-forge".into(), "Not its author's".into());
+        assert_eq!(w.lines()[0].verdict, Verdict::No(forge::Why::Blocked(Some("Not its author's".into()))));
+        assert!(!w.offers(&Store::default(), &[]).iter().any(|o| o.id == "a"));
+    }
+
+    #[test]
+    fn a_survivorsforge_install_updates_from_its_registry() {
+        let mut w = forge_world();
+        let lines = w.lines();
+        assert!(matches!(&lines[0].standing, Standing::Update { to, by_itself: true } if to.tag == "v1.1" && to.url.ends_with("/v1.1/totems.zip")));
+        assert_eq!((lines[0].verdict.clone(), lines[0].forge_slug.as_deref()), (Verdict::Go, Some("totems")));
+        assert_eq!(at_play(&lines).len(), 1, "verified there: in by itself, like our list");
+        assert!(watches(&w.store, &w.catalog, false).is_empty(), "no look on GitHub for it");
+        // Flagged there: it waits for the player's OK.
+        w.registry = registry(vec![listed("totems", "sam/Totems", &["Totems"], "v1.1", "flagged", Some("s11"))]);
+        assert!(matches!(w.lines()[0].standing, Standing::Update { by_itself: false, .. }));
+        assert_eq!(w.lines()[0].verdict, Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 2 }));
+        // Silent for an hour: no updates until it's back.
+        w.registry = forge_world().registry;
+        w.forge_state.answered = Some(w.now - TimeDelta::minutes(61));
+        assert_eq!(w.lines()[0].verdict, Verdict::No(forge::Why::Offline));
+        assert!(at_play(&w.lines()).is_empty());
+        // Off in Settings: no updates at all.
+        w.forge_state.answered = Some(w.now);
+        w.forge_on = false;
+        assert_eq!((w.lines()[0].standing.clone(), w.lines()[0].verdict.clone()), (Standing::Current, Verdict::No(forge::Why::Off)));
+        // No longer listed: it stays as it is, without updates.
+        w.forge_on = true;
+        w.forge_state.listed.insert("totems".into());
+        w.registry = registry(Vec::new());
+        assert_eq!((w.lines()[0].standing.clone(), w.lines()[0].verdict.clone()), (Standing::Current, Verdict::No(forge::Why::NotListed)));
+    }
+
+    #[test]
+    fn a_step_back_on_survivorsforge_is_no_update() {
+        let mut w = forge_world();
+        // Its latest went back to v0.9, which this PC saw before it installed v1.0.
+        w.registry = registry(vec![listed("totems", "sam/Totems", &["Totems"], "v0.9", "verified", Some("s09"))]);
+        w.forge_state.seen.insert("totems".into(), [("v0.9".to_string(), Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap())].into());
+        let lines = w.lines();
+        assert_eq!((lines[0].standing.clone(), lines[0].verdict.clone()), (Standing::Current, Verdict::Go));
+        // A newer tag this PC never dated (a lost cache) waits until the next answer dates it.
+        w.registry = forge_world().registry;
+        w.forge_state.seen.clear();
+        assert_eq!(w.lines()[0].standing, Standing::Current);
+    }
+
+    #[test]
+    fn after_going_back_a_survivorsforge_install_updates_to_the_latest_it_saw() {
+        let mut w = forge_world();
+        // v1.0 was SurvivorsForge's latest from 25 Oct, v1.1 from 30 Oct; today the player went
+        // back to v1.0, which keeps it.
+        let totems = w.store.get_mut("forge:totems").unwrap();
+        (totems.installed, totems.pinned) = (Utc.with_ymd_and_hms(2026, 10, 31, 11, 0, 0).unwrap(), true);
+        let day = |d: u32| Utc.with_ymd_and_hms(2026, 10, d, 9, 0, 0).unwrap();
+        w.forge_state.seen.insert("totems".into(), [("v1.0".to_string(), day(25)), ("v1.1".to_string(), day(30))].into());
+        assert!(matches!(&w.lines()[0].standing, Standing::Kept { newer: Some(to) } if to.tag == "v1.1"));
+        // Kept no more: v1.1 is an update again, and goes in by itself.
+        w.store.get_mut("forge:totems").unwrap().pinned = false;
+        let lines = w.lines();
+        assert!(matches!(&lines[0].standing, Standing::Update { to, by_itself: true } if to.tag == "v1.1" && !to.url.is_empty()));
+        assert_eq!(at_play(&lines).len(), 1);
+        // A latest this PC saw before v1.0 is still a step back.
+        w.registry = registry(vec![listed("totems", "sam/Totems", &["Totems"], "v0.9", "verified", Some("s09"))]);
+        w.forge_state.seen.get_mut("totems").unwrap().insert("v0.9".into(), day(20));
+        assert_eq!(w.lines()[0].standing, Standing::Current);
+    }
+
+    #[test]
+    fn a_word_from_an_older_answer_still_holds_back_an_update_of_our_list() {
+        let mut w = world();
+        w.forge_state.answered = Some(w.now);
+        // SurvivorsForge's latest moved past our v2, to v3, and no current list of its versions is
+        // cached: nothing current is known about v2, so our rule.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v3", "verified", Some("sha-v3"))]);
+        assert_eq!(w.lines()[0].verdict, Verdict::Go);
+        // An earlier answer flagged v2: that word still holds v2 back.
+        let flagged = forge::Restriction { trust: "flagged".into(), findings: forge::Counts { critical: 0, warn: 1, info: 0 } };
+        w.forge_state.restrictions.insert("a-forge".into(), [("v2".to_string(), flagged)].into());
+        let lines = w.lines();
+        assert_eq!(lines[0].verdict, Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 1 }));
+        assert!(at_play(&lines).is_empty(), "not by itself");
+        // The install-time question is still asked: the word isn't a current one.
+        let join = w.join();
+        assert!(w.view(&join).word("a-forge", "v2").is_none());
+        // A current list that lets v2 in decides; with the switch off nothing holds.
+        w.versions.insert("a-forge".into(), vec![forge::Version { tag: "v2".into(), trust: Some("verified".into()), ..forge::Version::default() }]);
+        assert_eq!(w.lines()[0].verdict, Verdict::Go);
+        w.versions.clear();
+        w.forge_on = false;
+        assert_eq!(w.lines()[0].verdict, Verdict::Go);
+    }
+
+    #[test]
+    fn a_card_held_back_only_by_an_older_answer_stays_and_asks() {
+        let mut w = world();
+        w.forge_state.answered = Some(w.now);
+        // An earlier answer said our v2's file changed after its scan; SurvivorsForge's latest has
+        // moved on to v3 since, and nothing current speaks of v2.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v3", "verified", Some("sha-v3"))]);
+        let changed = forge::Restriction { trust: "source_changed".into(), findings: forge::Counts::default() };
+        w.forge_state.restrictions.insert("a-forge".into(), [("v2".to_string(), changed)].into());
+        let offers = w.offers(&Store::default(), &[]);
+        assert_eq!((offers[0].id.as_str(), offers[0].verdict.clone()), ("a", Verdict::Ask(forge::Why::SourceChanged)), "the card stays, and asks");
+        // The install itself is still refused until a current answer lifts the word.
+        let join = w.join();
+        assert_eq!(w.view(&join).verdict(Origin::OurList, Some("a-forge"), "v2", Some("sha-v2")), Verdict::No(forge::Why::SourceChanged));
+        // The same word in a current answer hides the card.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v2", "source_changed", Some("sha-v2"))]);
+        assert!(!w.offers(&Store::default(), &[]).iter().any(|o| o.id == "a"));
+    }
+
+    #[test]
+    fn a_rezipped_import_of_our_release_is_judged_by_the_releases_checksum() {
+        let mut w = world();
+        w.forge_state.answered = Some(w.now);
+        // v2 imported from a zip of its own: exactly the release's files, but that zip's checksum.
+        let a = w.store.get_mut("a").unwrap();
+        (a.tag, a.sha256, a.folders) = (Some("v2".into()), Some("rezipped".into()), [("A".to_string(), "p2".to_string())].into());
+        w.prints.insert("A".into(), "p2".into());
+        // SurvivorsForge scanned the release's own file.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v2", "verified", Some("sha-v2"))]);
+        let lines = w.lines();
+        assert_eq!((lines[0].standing.clone(), lines[0].verdict.clone()), (Standing::Current, Verdict::Go));
+        let record = w.store.get("a").unwrap();
+        assert_eq!(judged_sha(&w.catalog, record, Some("v2"), Some("rezipped")), Some("sha-v2"));
+        assert_eq!(judged_sha(&w.catalog, record, Some("v9"), Some("rezipped")), Some("rezipped"), "a release the catalog doesn't hold");
+        let linked = Record { badge: Badge::Added, ..record.clone() };
+        assert_eq!(judged_sha(&w.catalog, &linked, Some("v2"), Some("rezipped")), Some("rezipped"), "our list only");
+        // SurvivorsForge's checksum for v2 isn't the release's: that is still another file.
+        w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v2", "verified", Some("sha-other"))]);
+        assert_eq!(w.lines()[0].verdict, Verdict::No(forge::Why::OtherFile));
+    }
+
+    #[test]
+    fn survivorsforge_only_addons_in_browse() {
+        let mut w = world();
+        w.forge_state.answered = Some(w.now);
+        w.registry = registry(vec![
+            listed("a-forge", "o/A", &["A"], "v2", "verified", Some("sha-v2")),
+            listed("totems", "sam/Totems", &["Totems"], "v1.1", "scanned", Some("s11")),
+            listed("odd", "sam/Odd", &["Odd"], "v1", "flagged", Some("s1")),
+            listed("unhashed", "sam/Unhashed", &["Unhashed"], "v1", "verified", None),
+        ]);
+        let offers = w.offers(&Store::default(), &[]);
+        let ids: Vec<&str> = offers.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["a", "k", "forge:totems", "forge:odd"], "no checksum yet, no install: not offered");
+        let a = &offers[0];
+        assert_eq!((a.origin, a.tags.clone(), a.forge_slug.as_deref()), (1, vec!["g".to_string(), "Combat".to_string()], Some("a-forge")));
+        assert_eq!((a.date, a.downloads, a.verdict.clone()), (Some(Utc.with_ymd_and_hms(2026, 10, 29, 12, 0, 0).unwrap()), None, Verdict::Go));
+        assert_eq!((offers[1].origin, offers[1].tags.clone()), (0, vec!["g".to_string()]));
+        let totems = &offers[2];
+        assert_eq!((totems.origin, totems.tags.clone(), totems.version.as_str()), (2, vec!["Combat".to_string()], "v1.1"));
+        assert_eq!((totems.summary.as_str(), totems.forge_slug.as_deref()), ("totems, in one line", Some("totems")));
+        assert_eq!((totems.installed, totems.date, totems.downloads, totems.verdict.clone()), (false, None, None, Verdict::Go));
+        assert_eq!(offers[3].verdict, Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 2 }), "flagged: it asks first");
+        // A date and downloads come with its versions, once its panel fetched them.
+        let day = Utc.with_ymd_and_hms(2026, 10, 30, 9, 0, 0).unwrap();
+        w.versions.insert(
+            "totems".into(),
+            vec![
+                forge::Version { tag: "v1.1".into(), published_at: Some(day), downloads: Some(5), ..forge::Version::default() },
+                forge::Version { tag: "v1.0".into(), downloads: Some(7), ..forge::Version::default() },
+            ],
+        );
+        let offers = w.offers(&Store::default(), &[]);
+        assert_eq!((offers[2].date, offers[2].downloads), (Some(day), Some(12)));
+        // Installed: from SurvivorsForge, added by link from the same repository, or its folders there.
+        let mut store = Store::default();
+        let mut linked = record("sam/Totems", "Totems", "v1.1", "t1");
+        (linked.badge, linked.repo) = (Badge::Added, Some("SAM/totems".into()));
+        store.put(linked);
+        assert!(w.offers(&store, &[])[2].installed);
+        assert!(w.offers(&Store::default(), &[found("Totems", Some("## Interface: 11200\n"))])[2].installed);
+        // Silent for an hour, or off: our list alone, without SurvivorsForge's tags.
+        w.forge_state.answered = Some(w.now - TimeDelta::hours(2));
+        let offers = w.offers(&Store::default(), &[]);
+        assert_eq!((offers.len(), offers[0].origin, offers[0].tags.clone()), (2, 0, vec!["g".to_string()]));
+        w.forge_state.answered = Some(w.now);
+        w.forge_on = false;
+        let offers = w.offers(&Store::default(), &[]);
+        assert_eq!((offers.len(), offers[0].forge_slug.clone()), (2, None));
     }
 
     #[test]

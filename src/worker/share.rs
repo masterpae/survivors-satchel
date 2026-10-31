@@ -4,13 +4,15 @@
 //! and the game's own, go up when the game closes and come in before it starts.
 
 use super::Worker;
-use super::addons::{Want, zip_ready};
+use super::addons::{FORGE_BADGE, Refused, Want, zip_ready};
+use super::forge::forge_badge;
 use crate::view::{AddonLine, GameSettingsLine};
 use crate::win;
 use chrono::{DateTime, Utc};
 use satchel_core::activity::Kind;
 use satchel_core::addons::catalog::Release;
 use satchel_core::addons::enabled::EnableList;
+use satchel_core::addons::forge::{self, Verdict};
 use satchel_core::addons::install::Addons;
 use satchel_core::addons::overview::{self, Standing, initials};
 use satchel_core::addons::share::{self, Agreed, Bundle, Entry, Here, List, Memory, OwnKept, SettingsStep, Shipped, Split, Step};
@@ -129,8 +131,15 @@ fn want_of(entry: &Entry, release: &Shipped) -> Want {
             interface: if release.version.is_some() { toc::GAME_INTERFACE } else { 0 },
             folders: BTreeMap::new(),
             notes: None,
+            downloads: None,
         },
         released: release.released,
+        // SurvivorsForge's own keeps its slug here too. Its file is the one the first PC installed,
+        // held to that PC's checksum.
+        forge: entry.forge.clone(),
+        expected_folders: None,
+        // Followed only on SurvivorsForge's Go here, and judged again as it goes in.
+        ok: false,
     }
 }
 
@@ -285,23 +294,54 @@ impl Worker {
             pcs,
             pc,
             at: now,
+            // Where it came from on SurvivorsForge, and nothing of its word: each PC asks it.
+            forge: record.forge.clone(),
         }
     }
 
-    /// The releases the list brings at the next Play, for downloading beforehand.
-    pub(super) fn share_wanted(&self) -> Vec<(String, Release)> {
+    /// The releases the list brings at the next Play, for downloading beforehand: only those
+    /// SurvivorsForge lets in here, by this PC's own cache. One of its own addons in a version its
+    /// cached word doesn't cover is asked about first, and comes once the answer lets it in.
+    pub(super) fn share_wanted(&mut self) -> Vec<(String, Release)> {
         let Some(list) = &self.share.list else { return Vec::new() };
-        self.share
-            .steps
-            .iter()
-            .filter(|(_, step)| **step == Step::Follow)
-            .filter_map(|(id, _)| {
-                let entry = list.get(id)?;
-                let release = entry.release.as_ref()?;
-                // A zip imported from a file comes from the NAS at Play.
-                (!self.has_release(id, release) && !release.url.is_empty()).then(|| (id.clone(), want_of(entry, release).release))
-            })
-            .collect()
+        let mut wanted = Vec::new();
+        let mut ask: Vec<(String, String)> = Vec::new();
+        for (id, step) in &self.share.steps {
+            let Some(entry) = list.get(id).filter(|_| *step == Step::Follow) else { continue };
+            let Some(release) = entry.release.as_ref() else { continue };
+            // A zip imported from a file comes from the NAS at Play.
+            if self.has_release(id, release) || release.url.is_empty() {
+                continue;
+            }
+            let tag = release.tag.as_deref().unwrap_or_default();
+            if let Some(slug) = entry.forge.as_deref().filter(|slug| forge::slug_ok(slug))
+                && self.forge_unknown(slug, tag)
+            {
+                ask.push((slug.to_string(), tag.to_string()));
+            } else if self.share_verdict(entry, release).is_go() {
+                wanted.push((id.clone(), want_of(entry, release).release));
+            }
+        }
+        for (slug, tag) in ask {
+            self.forge_ask_follow(&slug, &tag);
+        }
+        wanted
+    }
+
+    /// SurvivorsForge's verdict here on following an entry's release, by this PC's own cache (the
+    /// list carries nothing of the other PC's word), as for every install.
+    fn share_verdict(&self, entry: &Entry, release: &Shipped) -> Verdict {
+        let slug = self.entry_slug(entry);
+        // An id that isn't a checksum (a record from before checksums were kept) has none to compare.
+        let sha = (!release.sha256.starts_with("tag:")).then_some(release.sha256.as_str());
+        let origin = forge::origin_of(entry.badge, entry.forge.as_deref());
+        self.forge_view().verdict(origin, slug.as_deref(), release.tag.as_deref().unwrap_or_default(), sha)
+    }
+
+    /// The slug SurvivorsForge lists an entry's addon under, here.
+    fn entry_slug(&self, entry: &Entry) -> Option<String> {
+        let catalog_id = (entry.badge == Badge::Verified).then_some(entry.id.as_str());
+        self.forge_view().slug_for(entry.forge.as_deref(), catalog_id, entry.repo.as_deref())
     }
 
     /// Reads the list and decides every addon, then sends what changed here: the addons at any
@@ -812,6 +852,13 @@ impl Worker {
         };
         let mut text = None;
         if !self.has_release(&id, release) {
+            // Only what SurvivorsForge lets in here comes in by itself; its row says why the rest
+            // waits.
+            match self.share_verdict(entry, release) {
+                Verdict::Go => {}
+                Verdict::Ask(_) => return Followed::Waits(format!("{} {} from {from} waits for your OK (Addons)", entry.name, release.shown_version())),
+                Verdict::No(_) => return Followed::Quiet,
+            }
             let want = want_of(entry, release);
             let cache = self.engine.local.addon_cache();
             if release.url.is_empty() {
@@ -832,7 +879,9 @@ impl Worker {
             }
             match self.addons_install(&want) {
                 Ok(done) => text = Some(format!("{done}, as on {from}")),
-                Err(e) => return Followed::Failed(format!("{} {} from {from} wasn't installed: {e}", entry.name, release.shown_version())),
+                Err(Refused::Waits(said)) => return Followed::Waits(said),
+                Err(Refused::Never(said)) => return Followed::Failed(said),
+                Err(Refused::Failed(e)) => return Followed::Failed(format!("{} {} from {from} wasn't installed: {e}", entry.name, release.shown_version())),
             }
         }
         // The switches, as on the other PCs.
@@ -1170,9 +1219,16 @@ impl Worker {
         {
             let text = match &entry.release {
                 None => format!("Removed on {}: it goes from this PC at the next Play", entry.pc),
-                Some(release) if share::identity(record) != release.sha256 => {
-                    format!("{} has {}: it comes here at the next Play", entry.pc, release.shown_version())
-                }
+                Some(release) if share::identity(record) != release.sha256 => match self.share_verdict(entry, release) {
+                    Verdict::Go => format!("{} has {}: it comes here at the next Play", entry.pc, release.shown_version()),
+                    // SurvivorsForge holds it back here, by this PC's own cache.
+                    Verdict::Ask(why) => {
+                        return (format!("{} has {}, which waits for your OK: {}", entry.pc, release.shown_version(), why.text()), 2, String::new());
+                    }
+                    Verdict::No(why) => {
+                        return (format!("{} has {}, which doesn't come here: {}", entry.pc, release.shown_version(), why.text()), 2, String::new());
+                    }
+                },
                 Some(_) => format!("Changed on {}: the same here at the next Play", entry.pc),
             };
             return (text, 1, String::new());
@@ -1194,6 +1250,7 @@ impl Worker {
     /// Rows for the addons the list brings that this PC doesn't have yet.
     pub(super) fn share_incoming(&self) -> Vec<AddonLine> {
         let Some(list) = &self.share.list else { return Vec::new() };
+        let view = self.forge_view();
         self.share
             .steps
             .iter()
@@ -1201,22 +1258,39 @@ impl Worker {
             .filter_map(|(id, _)| {
                 let entry = list.get(id)?;
                 let release = entry.release.as_ref()?;
+                let own = entry.forge.is_some();
                 let (badge, badge_kind) = match entry.badge {
                     Badge::Verified if self.addons.catalog.get(id).is_none() => super::addons::UNLISTED_BADGE,
-                    Badge::Verified => ("Verified", 0),
+                    Badge::Verified => ("Discord Verified", 0),
+                    _ if own => FORGE_BADGE,
                     Badge::Added => ("Added by you", 1),
                     Badge::File => ("From a file", 2),
                 };
+                // SurvivorsForge's word as this PC's own cache has it, never the other PC's.
+                let verdict = self.share_verdict(entry, release);
+                let theirs = forge_badge(&view, self.entry_slug(entry).as_deref(), &verdict, None);
+                let badges: Vec<(String, i32)> =
+                    if own { theirs.into_iter().collect() } else { std::iter::once((badge.to_string(), badge_kind)).chain(theirs).collect() };
+                let (reason, reason_kind) = match &verdict {
+                    Verdict::Go => (String::new(), 0),
+                    // No button here: Browse's Install anyway is the player's OK.
+                    Verdict::Ask(why) => (format!("Waits for your OK: {} · OK it in Browse", why.text()), 1),
+                    Verdict::No(why) => (why.text(), 2),
+                };
+                let comes = verdict.is_go();
                 Some(AddonLine {
                     id: id.clone(),
                     initials: initials(&entry.name),
                     name: entry.name.clone(),
-                    badge: badge.into(),
+                    badge: badges.first().map_or_else(|| badge.to_string(), |(text, _)| text.clone()),
                     badge_kind,
+                    badges,
+                    reason,
+                    reason_kind,
                     author: entry.repo.as_deref().and_then(|r| r.split('/').next()).unwrap_or_default().to_string(),
                     version: release.shown_version(),
-                    state: format!("From {}: it comes here at the next Play", entry.pc),
-                    state_kind: 1,
+                    state: if comes { format!("From {}: it comes here at the next Play", entry.pc) } else { format!("From {}", entry.pc) },
+                    state_kind: if comes { 1 } else { 0 },
                     has_page: entry.repo.is_some(),
                     incoming: true,
                     ..AddonLine::default()

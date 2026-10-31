@@ -3,6 +3,26 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.7.1 (2026-10-31)
+
+SurvivorsForge in the Addons tab, and Browse as cards.
+
+### Added
+- SurvivorsForge, Rezondes' addon registry, is a second source of addons. Its addons install
+  from Browse with one click, and its trust level shows next to every addon it lists. A version
+  it blocks never installs; a version it flags, or hasn't scanned yet, waits for your OK. It can
+  be turned off in Settings, under Addons, Sources.
+- Browse shows addons as cards, with a panel for the details: what the addon does, downloads per
+  version and SurvivorsForge's scan. Filters by list and by tag, sorting by name, last update or
+  popularity, and a Legend that explains every badge.
+- About explains where addons come from.
+
+### Changed
+- The built-in list is now called Discord Verified: the addons confirmed in the game's
+  verified-addons channel on Discord.
+- An update that SurvivorsForge flags, or hasn't scanned yet, waits for your OK instead of going
+  in by itself.
+
 ## 0.7.0 (2026-10-31)
 
 Signed updates, and from GitHub only.

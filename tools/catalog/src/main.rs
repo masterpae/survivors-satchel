@@ -39,6 +39,10 @@ const MAX_RUN: u64 = 2 << 30;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Sources {
+    /// The day the list was last compared with the verified-addons channel (`2026-10-31`),
+    /// copied into the catalog for the Satchel's "checked on".
+    #[serde(default)]
+    discord_checked: Option<String>,
     addon: Vec<Source>,
 }
 
@@ -75,8 +79,10 @@ impl Source {
         }
     }
 
-    /// The entry with this source's own fields, around `latest` and `earlier`.
+    /// The entry with this source's own fields, around `latest` and `earlier`. Its downloads are
+    /// those of the releases it carries, when GitHub counted any.
     fn entry(&self, latest: Release, earlier: Vec<Release>) -> Entry {
+        let downloads = std::iter::once(&latest).chain(&earlier).filter_map(|r| r.downloads).reduce(u64::saturating_add);
         Entry {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -90,6 +96,7 @@ impl Source {
             earlier,
             doesnt_mix_with: self.doesnt_mix_with.clone(),
             notes: self.notes.clone(),
+            downloads,
         }
     }
 }
@@ -118,6 +125,11 @@ fn run(sources_path: &str, out_path: &str, offline: bool) -> Result<bool, String
     let text = fs::read_to_string(sources_path).map_err(|e| format!("{sources_path}: {e}"))?;
     let sources: Sources = toml::from_str(&text).map_err(|e| format!("{sources_path}: {e}"))?;
     check(&sources.addon)?;
+    if let Some(day) = &sources.discord_checked
+        && chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_err()
+    {
+        return Err(format!("{sources_path}: discord_checked must be a day like 2026-10-31, not {day:?}"));
+    }
     let previous: Option<Catalog> = fs::read_to_string(out_path).ok().and_then(|t| serde_json::from_str(&t).ok());
     let old = |source: &Source| previous.as_ref().and_then(|c| c.get(&source.id)).filter(|e| e.repo == source.repo);
     let known: BTreeMap<String, Release> = previous
@@ -176,12 +188,13 @@ fn run(sources_path: &str, out_path: &str, offline: bool) -> Result<bool, String
     }
 
     // Unchanged addons keep the time they were last read with, so the file changes only when an
-    // addon does (the catalog workflow commits only real changes).
+    // addon does (the catalog workflow commits only real changes). New download counts are a
+    // change.
     let generated = match &previous {
         Some(p) if p.addons == addons => p.generated,
         _ => now,
     };
-    let catalog = Catalog { format: 1, generated, addons };
+    let catalog = Catalog { format: 1, generated, discord_checked: sources.discord_checked.clone(), addons };
     let json = serde_json::to_string_pretty(&catalog).map_err(|e| e.to_string())? + "\n";
     fs::write(out_path, json).map_err(|e| format!("{out_path}: {e}"))?;
     println!(
@@ -218,12 +231,13 @@ fn check(sources: &[Source]) -> Result<(), String> {
 
 /// One addon's entry, fresh from GitHub.
 fn build(github: &mut GitHub, source: &Source, known: &BTreeMap<String, Release>) -> Result<Entry, String> {
-    let candidates = if source.by_tag { by_tag(github, source, known)? } else { from_releases(github, source)? };
+    let (candidates, counts) = if source.by_tag { (by_tag(github, source, known)?, BTreeMap::new()) } else { from_releases(github, source)? };
     let (latest, earlier) = select::pick(candidates, MAX_EARLIER).ok_or("no release holds the addon")?;
-    let latest = release(github, source, &latest, known, true)?;
+    let count = |c: &Candidate| counts.get(&c.url).copied();
+    let latest = release(github, source, &latest, count(&latest), known, true)?;
     let mut kept = Vec::new();
     for candidate in &earlier {
-        match release(github, source, candidate, known, false) {
+        match release(github, source, candidate, count(candidate), known, false) {
             Ok(mut release) => {
                 if kept.len() + 1 >= NOTES_KEPT {
                     release.notes = None;
@@ -236,10 +250,13 @@ fn build(github: &mut GitHub, source: &Source, known: &BTreeMap<String, Release>
     Ok(source.entry(latest, kept))
 }
 
-/// The releases holding exactly one file that matches the addon's pattern.
-fn from_releases(github: &mut GitHub, source: &Source) -> Result<Vec<Candidate>, String> {
+/// The releases holding exactly one file that matches the addon's pattern, and that file's
+/// download count by its address (this run's, so a release reused from the last catalog gets
+/// today's count too).
+fn from_releases(github: &mut GitHub, source: &Source) -> Result<(Vec<Candidate>, BTreeMap<String, u64>), String> {
     let asset = source.asset();
     let mut candidates = Vec::new();
+    let mut counts = BTreeMap::new();
     for release in github.releases(&source.repo)? {
         let Some(published) = release.published_at.filter(|_| !release.draft) else { continue };
         let files: Vec<_> = release.assets.iter().filter(|a| asset.matches(&a.name)).collect();
@@ -249,6 +266,9 @@ fn from_releases(github: &mut GitHub, source: &Source) -> Result<Vec<Candidate>,
             }
             continue;
         };
+        if let Some(count) = file.download_count {
+            counts.insert(file.browser_download_url.clone(), count);
+        }
         candidates.push(Candidate {
             tag: release.tag_name.clone(),
             published,
@@ -259,7 +279,7 @@ fn from_releases(github: &mut GitHub, source: &Source) -> Result<Vec<Candidate>,
             notes: release.body.as_deref().and_then(|b| select::trim_notes(b, NOTES_CHARS)),
         });
     }
-    Ok(candidates)
+    Ok((candidates, counts))
 }
 
 /// The newest version tags, each as the source zip of its commit (so a moved tag is a new file).
@@ -290,10 +310,17 @@ fn by_tag(github: &mut GitHub, source: &Source, known: &BTreeMap<String, Release
 
 /// The catalog's record of one release: reused when the last catalog has the same file, else
 /// downloaded, checked against GitHub's own checksum, and read by the Satchel's package code. The
-/// latest release must hold exactly the addon's folders.
-fn release(github: &mut GitHub, source: &Source, c: &Candidate, known: &BTreeMap<String, Release>, latest: bool) -> Result<Release, String> {
+/// latest release must hold exactly the addon's folders. Its download count is this run's.
+fn release(
+    github: &mut GitHub,
+    source: &Source,
+    c: &Candidate,
+    downloads: Option<u64>,
+    known: &BTreeMap<String, Release>,
+    latest: bool,
+) -> Result<Release, String> {
     if let Some(old) = known.get(&c.url).filter(|old| c.sha256.as_ref().is_none_or(|sha| *sha == old.sha256)) {
-        return Ok(Release { tag: c.tag.clone(), published: c.published, prerelease: c.prerelease, notes: c.notes.clone(), ..old.clone() });
+        return Ok(Release { tag: c.tag.clone(), published: c.published, prerelease: c.prerelease, notes: c.notes.clone(), downloads, ..old.clone() });
     }
     let bytes = github.download(&c.url)?;
     let sha256 = fsx::fingerprint(&bytes);
@@ -326,5 +353,45 @@ fn release(github: &mut GitHub, source: &Source, c: &Candidate, known: &BTreeMap
         interface: main.map_or(0, |f| f.toc.interface),
         folders,
         notes: c.notes.clone(),
+        downloads,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn counted(tag: &str, downloads: Option<u64>) -> Release {
+        Release {
+            tag: tag.into(),
+            version: None,
+            published: Utc::now(),
+            prerelease: false,
+            file: format!("A-{tag}.zip"),
+            url: format!("https://github.com/o/a/releases/download/{tag}/A-{tag}.zip"),
+            sha256: "x".into(),
+            size: 1,
+            interface: 11200,
+            folders: BTreeMap::new(),
+            notes: None,
+            downloads,
+        }
+    }
+
+    #[test]
+    fn the_list_in_the_repository_reads_with_its_channel_date() {
+        let sources: Sources = toml::from_str(include_str!("../../../catalog/sources.toml")).unwrap();
+        check(&sources.addon).unwrap();
+        let day = sources.discord_checked.expect("sources.toml says when the channel was last compared");
+        assert!(chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d").is_ok(), "{day}");
+        assert!(toml::from_str::<Sources>("checked = '2026-10-31'\naddon = []\n").is_err(), "an unknown key is refused");
+    }
+
+    #[test]
+    fn an_addons_downloads_are_its_releases() {
+        let source: Source = toml::from_str("id = 'a'\nname = 'A'\nrepo = 'o/a'\ngroup = 'g'\nsummary = 's'\nfolders = ['A']\nasset = 'A-*.zip'\n").unwrap();
+        let entry = source.entry(counted("v2", Some(30)), vec![counted("v1", Some(12)), counted("v0", None)]);
+        assert_eq!(entry.downloads, Some(42));
+        assert_eq!(source.entry(counted("v2", None), Vec::new()).downloads, None, "GitHub counted none");
+    }
 }

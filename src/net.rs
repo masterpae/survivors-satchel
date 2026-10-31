@@ -1,8 +1,9 @@
 //! The network, on its own thread, so a slow answer never holds up the worker's checkpoints:
 //! what's new on GitHub for the installed addons, downloads into the addon cache, the one-off
-//! lookup behind "Add from a link", and the Satchel's own newest release once its repository is
-//! public. Jobs come from the worker and the answers go back to it as `Command::Net`. Nothing here
-//! touches AddOns.
+//! lookup behind "Add from a link", the Satchel's own newest release once its repository is
+//! public, and SurvivorsForge's registry and an addon's details, versions and findings there.
+//! Jobs come from the worker and the answers go back to it as `Command::Net`, one job at a time.
+//! Nothing here touches AddOns.
 //!
 //! What's new is read from two plain GitHub pages that don't count against the 60 API calls an
 //! hour (the `/releases/latest` redirect and a release's assets page, with its checksums). Only
@@ -14,6 +15,7 @@ use crate::win;
 use crate::worker::Command;
 use chrono::{DateTime, Utc};
 use satchel_core::addons::catalog::Release;
+use satchel_core::addons::forge;
 use satchel_core::addons::github::{self, Pick, RestRelease, RestRepo, RestTag};
 use satchel_core::addons::overview::{Watch, plain};
 use satchel_core::addons::package;
@@ -30,7 +32,9 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 // not enabled"). This type exists only with that feature, so a build without it stops here.
 const _: Option<ureq::unversioned::transport::NativeTlsConnector> = None;
 
-const USER_AGENT: &str = concat!("SurvivorsSatchel/", env!("CARGO_PKG_VERSION"));
+/// Every request names the Satchel, its version and where it lives, as SurvivorsForge's rules for
+/// launchers ask (GitHub doesn't mind the address after it).
+const USER_AGENT: &str = concat!("SurvivorsSatchel/", env!("CARGO_PKG_VERSION"), " (+https://github.com/masterpae/survivors-satchel)");
 const API: &str = "https://api.github.com";
 /// The largest addon file downloaded, counted by the bytes actually streamed.
 const MAX_FILE: u64 = 128 << 20;
@@ -51,6 +55,14 @@ pub enum Job {
     /// The Satchel's newest release in `repo` (or the release of `want`, the version a newer
     /// Satchel stamped on the shared files), downloaded into `dir` when it's newer than this one.
     Satchel { repo: String, dir: PathBuf, want: Option<String> },
+    /// SurvivorsForge's registry, with the ETag of the one kept (`If-None-Match`).
+    ForgeRegistry { etag: Option<String> },
+    /// A SurvivorsForge addon's details, by its slug.
+    ForgeDetails(String),
+    /// A SurvivorsForge addon's versions, by its slug.
+    ForgeVersions(String),
+    /// What SurvivorsForge's scan found in one version of an addon.
+    ForgeFindings { slug: String, tag: String },
 }
 
 pub enum Answer {
@@ -61,6 +73,26 @@ pub enum Answer {
     LookedUp(Result<Lookup, String>),
     /// A newer Satchel from GitHub, downloaded and checked; `None` when there's none.
     Satchel(Result<Option<Offer>, String>),
+    ForgeRegistry(ForgeAnswer),
+    ForgeDetails { slug: String, answer: ForgeAnswer },
+    ForgeVersions { slug: String, answer: ForgeAnswer },
+    ForgeFindings { slug: String, tag: String, answer: ForgeAnswer },
+}
+
+/// How SurvivorsForge answered one request. A body goes to the cache as it came
+/// (`forge::Cache`), which reads it.
+pub enum ForgeAnswer {
+    /// 200: the body, and its ETag (the registry's).
+    Body { text: String, etag: Option<String> },
+    /// 304: the registry kept is still the one.
+    NotModified,
+    /// 404: nothing by that name (an addon deleted there).
+    NotFound,
+    /// 429: asked too often.
+    Limited,
+    /// Nothing to read: a 5xx (Cloudflare's 52x too) or another status, the network, a body cut
+    /// short or too long. Why, for the log.
+    Down(String),
 }
 
 /// What "Look up" found.
@@ -109,6 +141,10 @@ fn run(jobs: Receiver<Job>, cache: &Path, commands: &Sender<Command>) {
             Job::Fetch { id, tag, url, sha256 } => Answer::Fetched { sha256: guarded(|| net.fetch(&url, sha256.as_deref(), cache)), id, tag },
             Job::Lookup(input) => Answer::LookedUp(guarded(|| net.lookup(&input, cache))),
             Job::Satchel { repo, dir, want } => Answer::Satchel(guarded(|| net.satchel(&repo, &dir, want.as_deref()))),
+            Job::ForgeRegistry { etag } => Answer::ForgeRegistry(net.forge(Some(forge_url("/v1/registry")), etag.as_deref())),
+            Job::ForgeDetails(slug) => Answer::ForgeDetails { answer: net.forge(forge_addon_url(&slug, ""), None), slug },
+            Job::ForgeVersions(slug) => Answer::ForgeVersions { answer: net.forge(forge_addon_url(&slug, "/versions"), None), slug },
+            Job::ForgeFindings { slug, tag } => Answer::ForgeFindings { answer: net.forge(forge_findings_url(&slug, &tag), None), slug, tag },
         };
         if commands.send(Command::Net(answer)).is_err() {
             break;
@@ -176,6 +212,31 @@ fn segment(text: &str) -> String {
         .collect()
 }
 
+/// An address on SurvivorsForge's API: its own host and a path made here, nothing else.
+fn forge_url(path: &str) -> String {
+    format!("{}{path}", forge::API)
+}
+
+/// An addon's endpoint on SurvivorsForge's API, `rest` after its slug. A slug SurvivorsForge
+/// couldn't have given (`forge::slug_ok`) is refused and logged: it never becomes a request.
+fn forge_addon_url(slug: &str, rest: &str) -> Option<String> {
+    if !forge::slug_ok(slug) {
+        log!("SurvivorsForge: {slug:?} isn't one of its slugs, so it wasn't asked about");
+        return None;
+    }
+    Some(forge_url(&format!("/v1/addons/{slug}{rest}")))
+}
+
+/// What SurvivorsForge's scan found in version `tag` of an addon; the tag, which can hold
+/// anything, percent-encoded.
+fn forge_findings_url(slug: &str, tag: &str) -> Option<String> {
+    if tag.is_empty() {
+        log!("SurvivorsForge: no version named for {slug:?}'s findings, so it wasn't asked");
+        return None;
+    }
+    forge_addon_url(slug, &format!("/versions/{}/findings", segment(tag)))
+}
+
 impl Net {
     fn new() -> Net {
         // Windows' own TLS and certificate store; ureq's built-in root list goes unused.
@@ -230,6 +291,48 @@ impl Net {
         }
         let text = response.body_mut().with_config().limit(MAX_PAGE).read_to_string().map_err(|e| ApiError::Other(no_answer(&url, e)))?;
         serde_json::from_str(&text).map_err(|e| ApiError::Other(format!("GitHub's answer for {path} wasn't understood: {e}")))
+    }
+
+    /// A SurvivorsForge request, in a job of its own: one that panics answers as no answer.
+    fn forge(&self, url: Option<String>, etag: Option<&str>) -> ForgeAnswer {
+        guarded(|| Ok(self.forge_json(url, etag))).unwrap_or_else(ForgeAnswer::Down)
+    }
+
+    /// One request to SurvivorsForge's API (`forge_url`): JSON, within the page cap and the page
+    /// time; the registry's with the ETag of the one kept. A redirect isn't followed, so only its
+    /// API's own addresses are ever read.
+    fn forge_json(&self, url: Option<String>, etag: Option<&str>) -> ForgeAnswer {
+        let Some(url) = url else { return ForgeAnswer::Down("not an address on SurvivorsForge's API".into()) };
+        let mut request = self.agent.get(url.as_str()).header("Accept", "application/json");
+        if let Some(etag) = etag {
+            request = request.header("If-None-Match", etag);
+        }
+        let mut response = match request.config().max_redirects(0).build().call() {
+            Ok(response) => response,
+            Err(e) => {
+                log!("{url}: {e}");
+                return ForgeAnswer::Down(e.to_string());
+            }
+        };
+        match response.status().as_u16() {
+            200 => {
+                let etag = response.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_string);
+                match response.body_mut().with_config().limit(MAX_PAGE).read_to_string() {
+                    Ok(text) => ForgeAnswer::Body { text, etag },
+                    Err(e) => {
+                        log!("{url}: {e}");
+                        ForgeAnswer::Down(e.to_string())
+                    }
+                }
+            }
+            304 => ForgeAnswer::NotModified,
+            404 => ForgeAnswer::NotFound,
+            429 => ForgeAnswer::Limited,
+            status => {
+                log!("{url}: SurvivorsForge answered {status}");
+                ForgeAnswer::Down(format!("SurvivorsForge answered {status}"))
+            }
+        }
     }
 
     /// The bytes behind `url`, refused past the size cap.

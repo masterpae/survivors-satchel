@@ -13,6 +13,10 @@ use std::collections::BTreeMap;
 pub struct Catalog {
     pub format: u32,
     pub generated: DateTime<Utc>,
+    /// The day the list was last compared with the game Discord's verified-addons channel
+    /// (`2026-10-31`), for "checked on"; catalogs from before have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discord_checked: Option<String>,
     pub addons: Vec<Entry>,
 }
 
@@ -39,6 +43,9 @@ pub struct Entry {
     pub doesnt_mix_with: Vec<String>,
     #[serde(default)]
     pub notes: Vec<String>,
+    /// GitHub's download counts, summed over the releases listed here: Browse's popularity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloads: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -95,6 +102,9 @@ pub struct Release {
     /// The author's release notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// How many times GitHub had served its file when the catalog was built.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloads: Option<u64>,
 }
 
 impl Release {
@@ -180,6 +190,7 @@ pub fn adopt(catalog: &Catalog, game: &GameAddons, store: &Store, found: &[Found
                 local_only: false,
                 settings_per_pc: false,
                 earlier: Vec::new(),
+                forge: None,
             });
         }
     }
@@ -228,9 +239,12 @@ pub fn state(record: &Record, releases: &[Release], on_disk: &BTreeMap<String, O
         None => releases.first().filter(|latest| latest.published > record.installed),
     }
     .cloned();
+    // Our list's addons and SurvivorsForge's own go in by themselves (SurvivorsForge's verdict and
+    // the caller's conditions still apply); anything else waits for the player.
+    let by_itself = (record.badge == Badge::Verified || record.forge.is_some()) && !record.ask;
     match (record.pinned, newer) {
         (true, newer) => State::Kept { newer },
-        (false, Some(to)) => State::Update { by_itself: record.badge == Badge::Verified && !record.ask, to },
+        (false, Some(to)) => State::Update { by_itself, to },
         (false, None) => State::Current,
     }
 }
@@ -255,6 +269,7 @@ mod tests {
             interface: 11200,
             folders: prints.iter().map(|(f, p)| (f.to_string(), p.to_string())).collect(),
             notes: None,
+            downloads: None,
         }
     }
 
@@ -277,6 +292,7 @@ mod tests {
             local_only: false,
             settings_per_pc: false,
             earlier: Vec::<Kept>::new(),
+            forge: None,
         }
     }
 
@@ -339,6 +355,37 @@ mod tests {
     }
 
     #[test]
+    fn our_list_and_survivorsforge_alone_update_by_themselves() {
+        let releases = [release("v3", &[("A", "p3")]), release("v2", &[("A", "p2")])];
+        let here = disk(&[("A", Some("p2"))]);
+        let mut forged = record("v2", &[("A", "p2")]);
+        (forged.badge, forged.forge) = (Badge::Added, Some("a-forge".into()));
+        assert!(matches!(state(&forged, &releases, &here), State::Update { by_itself: true, .. }), "installed from SurvivorsForge alone");
+        forged.ask = true;
+        assert!(matches!(state(&forged, &releases, &here), State::Update { by_itself: false, .. }));
+        let mut linked = record("v2", &[("A", "p2")]);
+        linked.badge = Badge::Added;
+        assert!(matches!(state(&linked, &releases, &here), State::Update { by_itself: false, .. }), "added by link: as before");
+    }
+
+    #[test]
+    fn a_catalog_from_before_popularity_and_the_channel_date_reads() {
+        let before = r#"{"format": 1, "generated": "2026-10-31T10:54:01Z", "addons": [{"id": "a", "name": "A", "repo": "o/a",
+            "author": "o", "summary": "s", "group": "g", "folders": ["A"], "asset": {"kind": "file", "pattern": "A-*.zip"},
+            "latest": {"tag": "v1", "published": "2026-10-29T12:00:00Z", "file": "A-v1.zip",
+                       "url": "https://github.com/o/a/releases/download/v1/A-v1.zip", "sha256": "x", "size": 1, "interface": 11200}}]}"#;
+        let catalog: Catalog = serde_json::from_str(before).unwrap();
+        assert_eq!((catalog.discord_checked.as_deref(), catalog.addons[0].downloads, catalog.addons[0].latest.downloads), (None, None, None));
+        let written = serde_json::to_string(&catalog).unwrap();
+        assert!(!written.contains("discord_checked") && !written.contains("downloads"), "{written}");
+        let mut counted = Catalog { discord_checked: Some("2026-10-31".into()), ..catalog };
+        counted.addons[0].downloads = Some(4_700);
+        counted.addons[0].latest.downloads = Some(1_668);
+        let back: Catalog = serde_json::from_str(&serde_json::to_string(&counted).unwrap()).unwrap();
+        assert_eq!(back, counted);
+    }
+
+    #[test]
     fn copies_installed_by_hand_are_recognised_by_their_files() {
         let dir = tempfile::tempdir().unwrap();
         let game = GameAddons::of(dir.path(), None);
@@ -351,6 +398,7 @@ mod tests {
         let catalog = Catalog {
             format: 1,
             generated: Utc::now(),
+            discord_checked: None,
             addons: vec![Entry {
                 id: "lucky-odds".into(),
                 name: "LuckyOdds".into(),
@@ -364,6 +412,7 @@ mod tests {
                 earlier: vec![entry_release],
                 doesnt_mix_with: Vec::new(),
                 notes: Vec::new(),
+                downloads: None,
             }],
         };
         let found = super::super::scan(&game.addons).unwrap();

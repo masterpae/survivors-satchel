@@ -24,9 +24,12 @@ network; it counts your playtime; and it installs and updates addons from a list
   and you pick. A PC that crashed during a session leaves a checkpoint the next PC carries on from.
   A damaged or empty save never travels. Nothing is replaced without a backup, and addons you
   remove go to the Recycle Bin.
-- **Addons.** The verified addons are listed in the app: install, update (by themselves before
-  Play, if you like), go back a version, keep one at its version, turn on and off, remove. Any
-  other addon comes in by its GitHub link or as a zip, and is marked as not reviewed.
+- **Addons.** Two lists in the app: Discord Verified, the addons confirmed in the game's
+  verified-addons channel on Discord, and [SurvivorsForge](https://forge.rezondes.net), Rezondes'
+  addon registry, which scans every version (its trust level shows next to each addon, and a
+  version it flags, or hasn't scanned yet, waits for your OK). Install, update (by themselves
+  before Play, if you like), go back a version, keep one at its version, turn on and off, remove.
+  Any other addon comes in by its GitHub link or as a zip, and is marked as not reviewed.
 - **The game updating itself** is noticed: a restart of the game is still one session.
 - **Playtime** per PC, today, this week and in all.
 - **Updates itself**: a newer release here is one click away (Update now). A release build looks
@@ -35,8 +38,9 @@ network; it counts your playtime; and it installs and updates addons from a list
   [Checking a download](#checking-a-download)). Updates come only from here, never from the
   network folder.
 
-The Satchel connects only to GitHub, to read releases and download addons, and to the network
-folder you chose. It sends nothing about you anywhere.
+The Satchel connects to GitHub, to read releases and download addons; to SurvivorsForge, for its
+addon list and details (you can turn that off in Settings); and to the network folder you chose.
+It sends nothing about you anywhere.
 
 ## Getting started
 
@@ -122,8 +126,11 @@ opens a new issue with the Satchel's version already filled in.
 - Built with [Slint](https://slint.dev), under the Slint Royalty-free License 2.0.
 - The game runs on [benilla](https://github.com/samwhosung/benilla), whose source showed where the
   game keeps its settings and addon data.
-- The verified addons are the ones confirmed in the game's Discord; each belongs to its author,
-  and the Satchel downloads them from the author's own GitHub releases.
+- The Discord Verified addons are the ones confirmed in the game's Discord; each belongs to its
+  author, and the Satchel downloads them from the author's own GitHub releases.
+- Addon descriptions, more addons and trust levels come from SurvivorsForge
+  ([repository](https://github.com/Rezondes/SurvivorsForge), [website](https://forge.rezondes.net)),
+  when its switch in Settings is on.
 
 ## License
 

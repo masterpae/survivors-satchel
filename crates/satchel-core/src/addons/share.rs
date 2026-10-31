@@ -97,6 +97,11 @@ pub struct Entry {
     /// Who changed it last, and when.
     pub pc: String,
     pub at: DateTime<Utc>,
+    /// Installed from SurvivorsForge alone: its slug there, and nothing else from SurvivorsForge;
+    /// each PC asks SurvivorsForge itself. A field rather than a badge: a Satchel from before reads
+    /// the list by skipping it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forge: Option<String>,
 }
 
 impl Entry {
@@ -835,6 +840,7 @@ mod tests {
             pcs: pcs.iter().map(|p| p.to_string()).collect(),
             pc: pcs.first().unwrap_or(&"PC 1").to_string(),
             at: Utc::now(),
+            forge: None,
         }
     }
 
@@ -858,7 +864,21 @@ mod tests {
             local_only: false,
             settings_per_pc: false,
             earlier: Vec::new(),
+            forge: None,
         }
+    }
+
+    #[test]
+    fn an_entry_carries_survivorsforge_as_a_field_a_satchel_from_before_skips() {
+        let before = serde_json::to_string(&entry("lucky-odds", &["PC 1"])).unwrap();
+        assert!(!before.contains("forge"), "written as before");
+        assert_eq!(serde_json::from_str::<Entry>(&before).unwrap().forge, None);
+        let forged = Entry { badge: Badge::Added, forge: Some("totems".into()), ..entry("forge:totems", &["PC 1"]) };
+        let text = serde_json::to_string(&forged).unwrap();
+        assert!(text.contains(r#""forge":"totems""#) && text.contains(r#""badge":"added""#), "{text}");
+        assert_eq!(serde_json::from_str::<Entry>(&text).unwrap(), forged);
+        // What every PC must agree on doesn't include it.
+        assert_eq!(forged.agreed(), Entry { forge: None, ..forged.clone() }.agreed());
     }
 
     #[test]

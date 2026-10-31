@@ -2,13 +2,15 @@
 //! on screen on the UI thread, touching lists only when they changed.
 
 use crate::{
-    AddonRow, CardLine, ChangelogBlock, ChangelogEntry, MainWindow, OfferRow, PcTime, PlayCard, RecentLine, RemovedRow, SatchelTray,
-    SettingsForm, TrayState, about, win,
+    AddonRow, BadgeRow, BarRow, CardLine, ChangelogBlock, ChangelogEntry, MainWindow, OfferRow, PanelRow, PcTime, PlayCard, RecentLine,
+    RemovedRow, SatchelTray, SettingsForm, TagRow, TrayState, about, win,
 };
+use satchel_core::addons::forge;
 use satchel_core::changelog::Block;
 use satchel_core::activity::Kind;
-use slint::{ComponentHandle, ModelRc, SharedString, StandardListViewItem, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, StandardListViewItem, VecModel};
 use std::cell::{Cell, RefCell};
+use std::cmp::Ordering;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tray {
@@ -116,6 +118,22 @@ pub struct AddonsView {
     pub message: String,
     pub offers: Vec<OfferLine>,
     pub browse_note: String,
+    /// The panel's content for the id of the last `BrowseOpen` (None after `BrowseClose`), kept
+    /// current as its details, versions and findings come in. The window shows it only while that
+    /// id is the open one, so a late answer for a panel since closed does no harm.
+    pub panel: Option<PanelLine>,
+    /// Browse's status line under the top row, only when there is something to say: "Checking
+    /// SurvivorsForge…" (the first request on this PC), "SurvivorsForge isn't answering · last
+    /// answer 14:40" (or "· no answer yet on this PC"). Empty when it answers, and with its switch off.
+    pub forge_status: String,
+    /// Settings' line under the SurvivorsForge switch: "Last answer 14:40", "Isn't answering since
+    /// 14:40", "Off".
+    pub forge_answer: String,
+    /// SurvivorsForge hasn't answered for an hour (switch on): both lines above in amber.
+    pub forge_offline: bool,
+    /// The day the built-in list was last compared with the game's verified-addons channel, as
+    /// shown ("31 Oct 2026"), for the Legend, Settings and About; empty when the catalog doesn't say.
+    pub discord_checked: String,
     pub link: LinkView,
     /// The Removed list, newest first.
     pub removed: Vec<RemovedLine>,
@@ -144,9 +162,24 @@ pub struct AddonLine {
     pub id: String,
     pub initials: String,
     pub name: String,
+    /// Its one badge, shown when `badges` is empty.
     pub badge: String,
-    /// 0 verified, 1 added by link, 2 from a file, 3 installed by hand.
+    /// The Initials' colour: 0 Discord Verified, 1 added by link, 2 from a file, 3 installed by
+    /// hand, 4 SurvivorsForge only.
     pub badge_kind: i32,
+    /// Every badge that applies, in order, with its kind as on `OfferLine::badges`: our badge
+    /// ("Discord Verified", "Added by you", …) and "SurvivorsForge · <level>". Shown in place of
+    /// `badge`.
+    pub badges: Vec<(String, i32)>,
+    /// SurvivorsForge's word against its update or its version, as a whole sentence:
+    /// "Waits for your OK: SurvivorsForge hasn't scanned this version yet", "SurvivorsForge
+    /// blocked it: <reason>. It stays as you have it; no updates.", or for a SurvivorsForge-only
+    /// addon while it's silent, "SurvivorsForge isn't answering: no updates until it's back".
+    /// Empty when nothing stands in the way. Shown under the state line, so `state` needn't say it.
+    pub reason: String,
+    /// 0 none; 1 Ask: amber, and the row's update button reads Update anyway (`AddonUpdateAnyway`);
+    /// 2 No: red, and neither Update now nor Replace shows.
+    pub reason_kind: i32,
     pub author: String,
     pub version: String,
     /// "released 3 days ago", or empty when the date isn't known.
@@ -185,20 +218,89 @@ pub struct AddonLine {
     pub incoming: bool,
 }
 
+/// An addon on offer in Browse: one card. The worker sends every offer; Browse searches, filters
+/// and sorts them on the UI thread (`filter_offers`) by the keys here, so typing never waits.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OfferLine {
+    /// What Install, Install anyway and the panel name it by: the catalog id for an addon in our
+    /// list, the id its record gets for one only on SurvivorsForge (`forge:<slug>`).
     pub id: String,
     pub initials: String,
     pub name: String,
     pub author: String,
+    /// Two lines on the card: our catalog's summary, or the registry's description for an addon
+    /// only on SurvivorsForge.
     pub summary: String,
-    pub group: String,
+    /// Every badge that applies, in order, each with its kind (its colour, `Look.badge-ink`):
+    /// 0 Discord Verified; 1 added by link, or no longer listed; 2 from a file; 3 by hand;
+    /// 4 SurvivorsForge lets it in ("SurvivorsForge · verified", "· scanned"); 5 it waits for the
+    /// player's OK ("· flagged", "· unscanned", no longer listed there); 6 never ("· blocked").
+    /// Browse shows exactly these: nothing is hard-coded there.
+    pub badges: Vec<(String, i32)>,
+    /// Our group and SurvivorsForge's category ("Meters and HUDs", "Combat"): the filters offer
+    /// every tag of every line, and the search looks in them.
+    pub tags: Vec<String>,
+    /// 0 our list only, 1 both lists, 2 SurvivorsForge only: the filters' list choice.
+    pub origin: i32,
+    /// The version shown ("3.0.48").
     pub version: String,
-    pub installed: bool,
-    /// Its install is under way.
-    pub installing: bool,
+    /// Its publish date as the card says it ("today", "3 days ago"); empty unless it is a real
+    /// publish date (a release seen only on GitHub's page has none).
+    pub date: String,
+    /// The Last updated sort: the newest publish time, Unix seconds. `None` sorts last.
+    pub sort_date: Option<i64>,
+    /// The Popularity sort: downloads over its releases. `None` sorts last.
+    pub downloads: Option<u64>,
+    /// The count as the card says it ("8,382 downloads"); empty when unknown.
+    pub downloads_text: String,
+    /// The card's button: 0 Install; 1 Install… (it asks first: the panel opens, with `reason` and
+    /// Install anyway); 2 Installing…; 3 Installed. Its install shows as under way at once
+    /// (`installing`), until the worker's answer.
+    pub action: i32,
+    /// Why it waits for the player's OK, for action 1: "SurvivorsForge hasn't scanned this version
+    /// yet". Empty otherwise.
+    pub reason: String,
+    /// It doesn't mix with an addon this PC has; shown only while it isn't installed.
     pub warning: String,
+}
+
+/// The panel Browse slides in for one addon, its content only: the name, author,
+/// badges, version and date come from the addon's `OfferLine`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PanelLine {
+    /// The `OfferLine::id` it is for.
+    pub id: String,
+    /// SurvivorsForge says an admin verified the author: "verified author" beside the name.
+    pub verified_author: bool,
+    /// About, shown at once: SurvivorsForge's summary, else our catalog's summary.
+    pub about: String,
+    /// The longer description behind "more" (`forge::about_text`); empty when there is none.
+    pub about_more: String,
+    /// "What's new in 0.8.0" and the notes; both empty unless the notes belong to the version shown.
+    pub notes_title: String,
     pub notes: String,
+    /// Downloads per version, newest first: the version ("v0.8.0"), its count, and its share of the
+    /// largest count (0 to 1) for the bar's length. Empty: the section hides.
+    pub bars: Vec<(String, u64, f32)>,
+    /// The scan in one line: "verified: an admin approved this file", "scanned: nothing found",
+    /// "1 warning"; empty when SurvivorsForge doesn't list it.
+    pub scan: String,
+    /// The scan found something not fetched yet: "Show what it found" sends `ForgeShowScan`.
+    pub scan_more: bool,
+    /// What it found, worst first, five at most: "lua.api_override · BordoUI/ThemeUI.lua, line
+    /// 2627: Replaces the game function ChatEdit_SendText".
+    pub findings: Vec<String>,
+    /// The folders it installs.
+    pub folders: Vec<String>,
+    /// The button: 0 Install, 1 Install anyway, 2 Installing…, 3 Installed, 4 Update (an installed
+    /// addon with a newer version; `AddonUpdate`), 5 Update anyway (`AddonUpdateAnyway`).
+    pub action: i32,
+    /// Why it waits for the player's OK, shown above the button for 1 and 5.
+    pub reason: String,
+    /// Details or versions are on their way: a small spinner.
+    pub loading: bool,
+    /// "SurvivorsForge didn't answer; try again in a minute"; empty otherwise.
+    pub error: String,
 }
 
 /// "Add from a link": 0 nothing yet, 1 looking, 2 found, 3 failed.
@@ -236,6 +338,8 @@ pub struct Form {
     pub notifications: bool,
     pub addons_auto: bool,
     pub addons_shared: bool,
+    /// SurvivorsForge's switch (Settings → Addons → Sources).
+    pub addons_forge: bool,
     pub pause_when_away: bool,
     /// 0 System, 1 Light, 2 Dark.
     pub theme: i32,
@@ -297,6 +401,8 @@ impl Ui {
 
 thread_local! {
     static SHOWN: RefCell<Option<View>> = const { RefCell::new(None) };
+    // The panel content the window holds: it is set again only when the content differs.
+    static PANEL: RefCell<Option<PanelLine>> = const { RefCell::new(None) };
     // How many times Check for updates was clicked (`View::checks` counts those taken up).
     static CHECKS_ASKED: Cell<u32> = const { Cell::new(0) };
 }
@@ -314,6 +420,10 @@ pub fn set_about(window: &MainWindow) {
     window.set_app_build(text(&about::build()));
     window.set_repo_url(text(&about::repository_url().unwrap_or_default()));
     window.set_issue_url(text(&about::issue_url().unwrap_or_default()));
+    // SurvivorsForge's credit links, in Settings and About; the app opens only these two (and
+    // GitHub repositories) for `open-link`.
+    window.set_forge_repo_url(text(forge::REPO));
+    window.set_forge_site_url(text(forge::SITE));
     let entries: Vec<ChangelogEntry> = about::versions()
         .iter()
         .map(|v| ChangelogEntry {
@@ -363,6 +473,10 @@ fn kind_icon(kind: Kind) -> i32 {
     }
 }
 
+fn badges(values: &[(String, i32)]) -> ModelRc<BadgeRow> {
+    ModelRc::new(VecModel::from(values.iter().map(|(t, kind)| BadgeRow { text: text(t), kind: *kind }).collect::<Vec<_>>()))
+}
+
 fn addon_row(line: &AddonLine) -> AddonRow {
     AddonRow {
         id: text(&line.id),
@@ -370,6 +484,7 @@ fn addon_row(line: &AddonLine) -> AddonRow {
         name: text(&line.name),
         badge: text(&line.badge),
         badge_kind: line.badge_kind,
+        badges: badges(&line.badges),
         author: text(&line.author),
         version: text(&line.version),
         released: text(&line.released),
@@ -396,6 +511,8 @@ fn addon_row(line: &AddonLine) -> AddonRow {
         settings_per_pc: line.settings_per_pc,
         ask_pc: text(&line.ask_pc),
         incoming: line.incoming,
+        reason: text(&line.reason),
+        reason_kind: line.reason_kind,
     }
 }
 
@@ -414,33 +531,109 @@ fn removed_row(line: &RemovedLine) -> RemovedRow {
     }
 }
 
+/// The card's summary is two lines at most (Slint elides the rest); a SurvivorsForge description
+/// can be long, so it is cut here too, at a word.
+fn card_summary(summary: &str) -> String {
+    const MOST: usize = 160;
+    if summary.chars().count() <= MOST {
+        return summary.to_string();
+    }
+    let cut: String = summary.chars().take(MOST).collect();
+    let cut = cut.rfind(' ').map_or(cut.as_str(), |at| &cut[..at]);
+    format!("{}…", cut.trim_end())
+}
+
 fn offer_row(offer: &OfferLine) -> OfferRow {
     OfferRow {
         id: text(&offer.id),
         initials: text(&offer.initials),
+        // The colour of where it comes from: our list's green, SurvivorsForge's violet.
+        initials_kind: if offer.origin == ORIGIN_FORGE { 4 } else { 0 },
         name: text(&offer.name),
         author: text(&offer.author),
-        summary: text(&offer.summary),
-        group: text(&offer.group),
+        downloads: text(&offer.downloads_text),
+        summary: text(&card_summary(&offer.summary)),
+        badges: badges(&offer.badges),
         version: text(&offer.version),
-        installed: offer.installed,
-        installing: offer.installing,
+        date: text(&offer.date),
+        action: offer.action,
+        reason: text(&offer.reason),
         warning: text(&offer.warning),
-        notes: text(&offer.notes),
     }
 }
 
+/// 2,870: a count as people read it.
+fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+fn panel_row(panel: &PanelLine) -> PanelRow {
+    let folders = match panel.folders.as_slice() {
+        [] => String::new(),
+        [one] => format!("Folder: {one}"),
+        many => format!("Folders: {}", many.join(", ")),
+    };
+    let bars: Vec<BarRow> = panel
+        .bars
+        .iter()
+        .map(|(label, count, share)| BarRow { label: text(label), count: text(&thousands(*count)), share: share.clamp(0.0, 1.0) })
+        .collect();
+    PanelRow {
+        id: text(&panel.id),
+        verified_author: panel.verified_author,
+        about: text(&panel.about),
+        about_more: text(&panel.about_more),
+        notes_title: text(&panel.notes_title),
+        notes: text(&panel.notes),
+        bars: ModelRc::new(VecModel::from(bars)),
+        scan: text(&panel.scan),
+        scan_more: panel.scan_more,
+        findings: strings(&panel.findings),
+        folders: text(&folders),
+        action: panel.action,
+        reason: text(&panel.reason),
+        loading: panel.loading,
+        error: text(&panel.error),
+    }
+}
+
+/// The panel's content, when it is for the addon open now and the window holds something else.
+fn push_panel(window: &MainWindow, panel: Option<&PanelLine>) {
+    let open = window.get_browse_panel_id();
+    let Some(panel) = panel.filter(|p| !p.id.is_empty() && p.id == open.as_str()) else { return };
+    PANEL.with(|held| {
+        let mut held = held.borrow_mut();
+        if held.as_ref() != Some(panel) {
+            window.set_panel(panel_row(panel));
+            *held = Some(panel.clone());
+        }
+    });
+}
+
 /// An install asked for in the window shows as under way at once, before the worker takes it
-/// up: `Some(id)` for an addon's Install, Update now or Replace button, `None` for "Add from a
-/// link". The worker always answers an install with a fresh view, which shows where it stands.
+/// up: `Some(id)` for an addon's Install, Install anyway, Update now, Update anyway or Replace
+/// button (on its card, in its panel or on its row), `None` for "Add from a link". The worker
+/// always answers an install with a fresh view, which shows where it stands.
 pub fn installing(window: &MainWindow, id: Option<&str>) {
     SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
         let Some(view) = shown.as_mut() else { return };
         match id {
             Some(id) => {
-                view.addons.offers.iter_mut().filter(|o| o.id == id).for_each(|o| o.installing = true);
+                // Install or Install… becomes Installing…; an installed one stays Installed.
+                view.addons.offers.iter_mut().filter(|o| o.id == id && o.action < 2).for_each(|o| o.action = 2);
                 view.addons.rows.iter_mut().filter(|r| r.id == id).for_each(|r| r.installing = true);
+                if let Some(panel) = view.addons.panel.as_mut().filter(|p| p.id == id && matches!(p.action, 0 | 1 | 4 | 5)) {
+                    panel.action = 2;
+                }
                 window.set_addon_rows(ModelRc::new(VecModel::from(view.addons.rows.iter().map(addon_row).collect::<Vec<_>>())));
             }
             None => {
@@ -460,37 +653,135 @@ pub fn checking(window: &MainWindow) {
     window.set_checking(true);
 }
 
-/// The groups Browse offers, in the catalog's order.
-fn groups(offers: &[OfferLine]) -> Vec<String> {
-    let mut groups: Vec<String> = Vec::new();
-    for offer in offers {
-        if !groups.contains(&offer.group) {
-            groups.push(offer.group.clone());
-        }
-    }
-    groups
+/// `OfferLine::origin`: our list only, both lists, SurvivorsForge only.
+const ORIGIN_OURS: i32 = 0;
+const ORIGIN_FORGE: i32 = 2;
+
+/// Every tag of the lines, once each, A to Z.
+fn tags(offers: &[OfferLine]) -> Vec<String> {
+    let mut tags: Vec<String> = offers.iter().flat_map(|o| o.tags.iter().cloned()).collect();
+    tags.sort_by_key(|t| t.to_lowercase());
+    tags.dedup();
+    tags
 }
 
-/// Browse's rows for the search text and the group picked (0: all), on the UI thread: typing
-/// never waits for the worker.
+/// The tag chips line by line: Slint has no layout that wraps, so the lines are made here, for the
+/// narrowest window (540 px), from a generous guess at each chip's width (12 px text, its padding
+/// and the gap after it). A wider window just has room to spare.
+fn tag_lines(tags: &[String]) -> Vec<Vec<String>> {
+    const ROOM: usize = 470;
+    let mut lines: Vec<Vec<String>> = Vec::new();
+    let mut used = 0;
+    for tag in tags {
+        let width = tag.chars().count() * 7 + 24;
+        match lines.last_mut() {
+            Some(line) if used + width <= ROOM => {
+                line.push(tag.clone());
+                used += width;
+            }
+            _ => {
+                lines.push(vec![tag.clone()]);
+                used = width;
+            }
+        }
+    }
+    lines
+}
+
+/// The tags the player has on.
+fn tags_on(window: &MainWindow) -> Vec<String> {
+    let lines = window.get_browse_tags();
+    lines.iter().flat_map(|line| line.iter().filter(|t| t.on).map(|t| t.text.to_string()).collect::<Vec<_>>()).collect()
+}
+
+/// When the offers change: the list choice's counts, the tag chips (those still offered keep
+/// being on) and the Legend's tag line.
+fn set_browse_lists(window: &MainWindow, offers: &[OfferLine]) {
+    let on = tags_on(window);
+    let tags = tags(offers);
+    let lines: Vec<ModelRc<TagRow>> = tag_lines(&tags)
+        .iter()
+        .map(|line| {
+            let chips: Vec<TagRow> = line.iter().map(|t| TagRow { text: text(t), on: on.contains(t) }).collect();
+            ModelRc::new(VecModel::from(chips))
+        })
+        .collect();
+    window.set_browse_tags(ModelRc::new(VecModel::from(lines)));
+    window.set_browse_tag_line(text(&tags.join(" · ")));
+    window.set_browse_count_all(offers.len() as i32);
+    window.set_browse_count_ours(offers.iter().filter(|o| o.origin != ORIGIN_FORGE).count() as i32);
+    window.set_browse_count_forge(offers.iter().filter(|o| o.origin != ORIGIN_OURS).count() as i32);
+}
+
+/// A name as Browse sorts it: case aside, and a leading "[KMA] " sorts under K.
+fn sort_name(name: &str) -> String {
+    name.trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase()
+}
+
+/// The larger first; unknown last.
+fn larger_first<T: Ord>(a: Option<T>, b: Option<T>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => b.cmp(&a),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+/// Browse's order for `browse-sort`: 0 name, A to Z; 1 last updated, newest first; 2 popularity,
+/// most downloads first. Unknown dates and counts go last; ties go by name.
+fn order(a: &OfferLine, b: &OfferLine, sort: i32) -> Ordering {
+    let first = match sort {
+        1 => larger_first(a.sort_date, b.sort_date),
+        2 => larger_first(a.downloads, b.downloads),
+        _ => Ordering::Equal,
+    };
+    first.then_with(|| sort_name(&a.name).cmp(&sort_name(&b.name))).then_with(|| a.id.cmp(&b.id))
+}
+
+/// Browse's cards for the search (name, summary, author, tags), the list, the tags that are on
+/// (any of them; none on: all) and the sort, on the UI thread: typing never waits for the worker.
+/// The open panel's card is kept current, and its content shown when the window doesn't hold it
+/// yet (a panel opened again); a panel whose addon is no longer offered closes.
 pub fn filter_offers(window: &MainWindow) {
     let search = window.get_browse_search().to_lowercase();
-    let group = window.get_browse_group();
+    // With SurvivorsForge off (as saved), its choice is greyed: the list falls back to all.
+    if window.get_browse_origin() == ORIGIN_FORGE && !window.get_saved_form().addons_forge {
+        window.set_browse_origin(0);
+    }
+    let origin = window.get_browse_origin();
+    let sort = window.get_browse_sort();
+    let on = tags_on(window);
+    window.set_browse_tags_on(on.len() as i32);
     SHOWN.with(|shown| {
         let shown = shown.borrow();
         let Some(view) = shown.as_ref() else { return };
         let offers = &view.addons.offers;
-        let picked = usize::try_from(group).ok().and_then(|g| g.checked_sub(1)).and_then(|g| groups(offers).get(g).cloned());
-        let rows: Vec<OfferRow> = offers
+        let mut picked: Vec<&OfferLine> = offers
             .iter()
-            .filter(|o| picked.as_ref().is_none_or(|g| *g == o.group))
-            .filter(|o| {
-                search.is_empty()
-                    || [&o.name, &o.summary, &o.author, &o.group].iter().any(|field| field.to_lowercase().contains(search.as_str()))
+            .filter(|o| match origin {
+                1 => o.origin != ORIGIN_FORGE,
+                2 => o.origin != ORIGIN_OURS,
+                _ => true,
             })
-            .map(offer_row)
+            .filter(|o| on.is_empty() || o.tags.iter().any(|t| on.contains(t)))
+            .filter(|o| {
+                let hit = |field: &String| field.to_lowercase().contains(search.as_str());
+                search.is_empty() || hit(&o.name) || hit(&o.summary) || hit(&o.author) || o.tags.iter().any(hit)
+            })
             .collect();
-        window.set_offer_rows(ModelRc::new(VecModel::from(rows)));
+        picked.sort_by(|a, b| order(a, b, sort));
+        window.set_offer_rows(ModelRc::new(VecModel::from(picked.into_iter().map(offer_row).collect::<Vec<_>>())));
+        let open = window.get_browse_panel_id();
+        if !open.is_empty() {
+            match offers.iter().find(|o| o.id == open.as_str()) {
+                Some(offer) => {
+                    window.set_panel_offer(offer_row(offer));
+                    push_panel(window, view.addons.panel.as_ref());
+                }
+                None => window.set_browse_panel_id("".into()),
+            }
+        }
     });
 }
 
@@ -598,6 +889,10 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
         window.set_addons_notice(text(&addons.notice));
         window.set_addons_message(text(&addons.message));
         window.set_browse_note(text(&addons.browse_note));
+        window.set_forge_status(text(&addons.forge_status));
+        window.set_forge_answer(text(&addons.forge_answer));
+        window.set_forge_offline(addons.forge_offline);
+        window.set_discord_checked(text(&addons.discord_checked));
         let link = &addons.link;
         window.set_link_state(link.state);
         window.set_link_message(text(&link.message));
@@ -661,12 +956,14 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
 
         let offers_changed = old.is_none_or(|o| o.addons.offers != addons.offers);
         if offers_changed {
-            window.set_browse_groups(strings(&groups(&addons.offers)));
+            set_browse_lists(window, &addons.offers);
         }
         *shown.borrow_mut() = Some(view.clone());
         if offers_changed {
             filter_offers(window);
         }
+        // The panel, when it's for the addon open now (a late answer for another one waits).
+        push_panel(window, addons.panel.as_ref());
     });
 }
 
@@ -684,6 +981,7 @@ pub fn apply_form(window: &MainWindow, view: &FormView) {
     window.set_notifications(form.notifications);
     window.set_addons_auto(form.addons_auto);
     window.set_addons_shared(form.addons_shared);
+    window.set_addons_forge(form.addons_forge);
     window.set_pause_when_away(form.pause_when_away);
     window.set_theme(form.theme);
     window.set_game_shared(form.game_shared);
@@ -699,6 +997,7 @@ pub fn apply_form(window: &MainWindow, view: &FormView) {
         notifications: saved.notifications,
         addons_auto: saved.addons_auto,
         addons_shared: saved.addons_shared,
+        addons_forge: saved.addons_forge,
         pause_when_away: saved.pause_when_away,
         theme: saved.theme,
         game_shared: saved.game_shared,
@@ -716,6 +1015,7 @@ pub fn read_form(window: &MainWindow) -> Form {
         notifications: window.get_notifications(),
         addons_auto: window.get_addons_auto(),
         addons_shared: window.get_addons_shared(),
+        addons_forge: window.get_addons_forge(),
         pause_when_away: window.get_pause_when_away(),
         theme: window.get_theme(),
         game_shared: window.get_game_shared(),

@@ -15,6 +15,11 @@
 # Each addon here has its post in the verified channel, and its repo is that post's author's own
 # (read 29 and 31 Oct 2026). An addon whose post leaves the channel leaves this list (31 Oct 2026:
 # BordoUI).
+#
+# discord_checked, above the addons: the day this list was last compared with the channel, by
+# hand. The Satchel shows it ("checked on"); change it at each comparison.
+
+discord_checked = "2026-10-31"
 
 # Full interfaces
 

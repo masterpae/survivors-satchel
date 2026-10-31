@@ -13,7 +13,7 @@ use super::GameAddons;
 use crate::paths::Local;
 use crate::{fsx, log, names};
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -33,6 +33,8 @@ pub enum AddonError {
     NotInstalled(String),
     /// No earlier version is kept for it.
     NothingEarlier(String),
+    /// The zip's addon folders aren't the ones its listing names.
+    Folders { listed: Vec<String>, found: Vec<String> },
     Io(io::Error),
 }
 
@@ -56,6 +58,9 @@ impl fmt::Display for AddonError {
             AddonError::Clash { folder, owner } => write!(f, "{owner} already uses the folder {folder}; two addons can't share one"),
             AddonError::NotInstalled(id) => write!(f, "{id} isn't installed"),
             AddonError::NothingEarlier(name) => write!(f, "no earlier version of {name} is kept"),
+            AddonError::Folders { listed, found } => {
+                write!(f, "its zip holds {}, not the folders it's listed with ({}), so it wasn't installed", found.join(", "), listed.join(", "))
+            }
             AddonError::Io(e) => write!(f, "{e}"),
         }
     }
@@ -81,6 +86,11 @@ pub struct Incoming {
     pub released: Option<DateTime<Utc>>,
     /// Where it was downloaded from; `None` for an imported file.
     pub url: Option<String>,
+    /// Installed from SurvivorsForge alone: its slug there, which the record keeps.
+    pub forge: Option<String>,
+    /// The addon folders the zip must hold, exactly (names without case): SurvivorsForge lists
+    /// every folder an addon installs, and a zip that holds others isn't its file. `None`: any.
+    pub expected_folders: Option<Vec<String>>,
 }
 
 /// What an install did.
@@ -110,6 +120,13 @@ impl Addons<'_> {
             return Err(AddonError::Checksum { expected: expected.clone(), got });
         }
         let package = package::inspect(&incoming.zip)?;
+        if let Some(listed) = &incoming.expected_folders {
+            let found: Vec<String> = package.folders.iter().map(|f| f.name.clone()).collect();
+            let names = |names: &[String]| names.iter().map(|n| n.to_ascii_lowercase()).collect::<BTreeSet<String>>();
+            if names(listed) != names(&found) {
+                return Err(AddonError::Folders { listed: listed.clone(), found });
+            }
+        }
         for folder in &package.folders {
             if let Some(owner) = self.store.owner_of(&folder.name)
                 && owner.id != incoming.id
@@ -183,11 +200,15 @@ impl Addons<'_> {
             installed: now,
             released: incoming.released,
             pinned: false,
-            ask: previous.as_ref().map_or(incoming.badge != Badge::Verified, |p| p.ask),
+            // A first install asks first, unless it is from our list or SurvivorsForge's own (whose
+            // verdict decides); later the record keeps what it had.
+            ask: previous.as_ref().map_or(incoming.badge != Badge::Verified && incoming.forge.is_none(), |p| p.ask),
             url: incoming.url,
             local_only: previous.as_ref().is_some_and(|p| p.local_only),
             settings_per_pc: previous.as_ref().is_some_and(|p| p.settings_per_pc),
             earlier,
+            // An update that doesn't say keeps where the addon came from.
+            forge: incoming.forge.or_else(|| previous.as_ref().and_then(|p| p.forge.clone())),
         };
         let left_out = match package.left_out.len() {
             0 => "nothing left out".to_string(),
@@ -434,6 +455,31 @@ mod tests {
             version: Some(version.into()),
             released: None,
             url: None,
+            forge: None,
+            expected_folders: None,
+        }
+    }
+
+    /// An addon from SurvivorsForge alone, with these folders in its zip; SurvivorsForge lists one.
+    fn totems(folders: &[&str], version: &str) -> Incoming {
+        let files: Vec<(String, String)> =
+            folders.iter().map(|f| (format!("{f}/{f}.toc"), format!("## Interface: 11200\n## Version: {version}\n"))).collect();
+        let entries: Vec<(&str, &[u8])> = files.iter().map(|(path, text)| (path.as_str(), text.as_bytes())).collect();
+        let zip = zip_of(&entries);
+        Incoming {
+            sha256: Some(fsx::fingerprint(&zip)),
+            zip,
+            id: "forge:totems".into(),
+            name: "Totems".into(),
+            badge: Badge::Added,
+            repo: Some("sam/Totems".into()),
+            tag: Some(format!("v{version}")),
+            file: Some("Totems.zip".into()),
+            version: None,
+            released: None,
+            url: Some(format!("https://github.com/sam/Totems/releases/download/v{version}/Totems.zip")),
+            forge: Some("totems".into()),
+            expected_folders: Some(vec!["totems".into()]),
         }
     }
 
@@ -461,6 +507,53 @@ mod tests {
         assert_eq!(fs::read_to_string(kept.join("saved").join("LuckyOdds.lua")).unwrap(), "LuckyOddsDB = {}");
         assert!(!pc.local.addon_staging().join(names::stamp(t(10))).exists(), "no staging left");
         assert_eq!(Store::load(&pc.local.addon_store()).unwrap(), pc.store, "the record is on disk");
+    }
+
+    #[test]
+    fn a_survivorsforge_install_holds_exactly_its_listed_folders() {
+        let mut pc = pc();
+        // Two folders where SurvivorsForge lists one: refused, and nothing written.
+        let err = pc.addons().install(totems(&["Totems", "Extra"], "1.1"), t(0)).unwrap_err();
+        assert!(matches!(err, AddonError::Folders { .. }), "{err}");
+        assert!(!pc.game.addons.join("Totems").exists() && pc.store.addons.is_empty());
+        // Its one folder (names compare without case): in, and it updates by itself, as SurvivorsForge's.
+        let done = pc.addons().install(totems(&["Totems"], "1.1"), t(1)).unwrap();
+        assert_eq!((done.record.forge.as_deref(), done.record.badge, done.record.ask), (Some("totems"), Badge::Added, false));
+        assert_eq!(done.record.url.as_deref(), Some("https://github.com/sam/Totems/releases/download/v1.1/Totems.zip"));
+        // An update that doesn't name it keeps where it came from.
+        let mut update = totems(&["Totems"], "1.2");
+        (update.forge, update.expected_folders) = (None, None);
+        let done = pc.addons().install(update, t(2)).unwrap();
+        assert_eq!((done.record.forge.as_deref(), done.record.ask, done.record.version.as_deref()), (Some("totems"), false, Some("1.2")));
+        // Added by link: asks first, as before.
+        let mut linked = lucky("0.6.0");
+        (linked.id, linked.badge) = ("cadoky/LuckyOdds".into(), Badge::Added);
+        assert!(pc.addons().install(linked, t(3)).unwrap().record.ask);
+    }
+
+    #[test]
+    fn a_tag_zips_wrapper_folder_installs_under_its_tocs_name() {
+        let mut pc = pc();
+        // GitHub's zip of a tag wraps the addon in "<repo>-<tag>/"; SurvivorsForge lists "KMA".
+        let zip = zip_of(&[("KMA-1/KMA.toc", b"## Interface: 11200\n## Title: KMA\n"), ("KMA-1/KMA.lua", b"-- the arrow")]);
+        let incoming = Incoming {
+            sha256: Some(fsx::fingerprint(&zip)),
+            zip,
+            id: "forge:kma".into(),
+            name: "KMA".into(),
+            badge: Badge::Added,
+            repo: Some("sam/KMA".into()),
+            tag: Some("1".into()),
+            file: Some("KMA-1.zip".into()),
+            version: None,
+            released: None,
+            url: Some("https://codeload.github.com/sam/KMA/zip/refs/tags/1".into()),
+            forge: Some("kma".into()),
+            expected_folders: Some(vec!["KMA".into()]),
+        };
+        let done = pc.addons().install(incoming, t(0)).unwrap();
+        assert_eq!(done.record.folders.keys().collect::<Vec<_>>(), ["KMA"]);
+        assert!(pc.game.addons.join("KMA").join("KMA.lua").is_file() && !pc.game.addons.join("KMA-1").exists());
     }
 
     #[test]

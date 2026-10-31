@@ -73,6 +73,11 @@ impl Local {
     pub fn addon_cache(&self) -> PathBuf {
         self.local_dir.join("addon-cache")
     }
+    /// SurvivorsForge's answers, kept on this PC: its registry, and the details, versions and scans
+    /// of addons opened here (`addons::forge::Cache`).
+    pub fn forge_dir(&self) -> PathBuf {
+        self.local_dir.join("forge")
+    }
     /// A newer Satchel downloaded from its GitHub release, waiting for Update now.
     pub fn satchel_download(&self) -> PathBuf {
         self.local_dir.join("update")
@@ -285,6 +290,13 @@ mod tests {
         assert_eq!(problem(r"E:\"), drive);
         assert_eq!(problem("E:"), drive);
         assert_eq!(problem(r"\\?\E:\"), drive);
+    }
+
+    #[test]
+    fn survivorsforges_cache_belongs_to_this_pc_beside_the_addon_downloads() {
+        let local = player();
+        assert_eq!(local.forge_dir(), local.local_dir.join("forge"));
+        assert_eq!(local.forge_dir().parent(), local.addon_cache().parent());
     }
 
     #[test]
