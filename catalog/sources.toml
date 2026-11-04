@@ -13,13 +13,13 @@
 #   notes               shown before installing
 #
 # Each addon here has its post in the verified channel, and its repo is that post's author's own
-# (read 29 and 31 Oct 2026). An addon whose post leaves the channel leaves this list (31 Oct 2026:
-# BordoUI).
+# (read 29 and 31 Oct and 4 Nov 2026). An addon whose post leaves the channel leaves this list, and
+# comes back with its post (BordoUI: out on 31 Oct 2026, back on 4 Nov 2026 under Older Posts).
 #
 # discord_checked, above the addons: the day this list was last compared with the channel, by
 # hand. The Satchel shows it ("checked on"); change it at each comparison.
 
-discord_checked = "2026-10-31"
+discord_checked = "2026-11-04"
 
 # Full interfaces
 
@@ -85,6 +85,25 @@ asset = "SurvivorsDragonUi.zip"
 # Meters and HUDs
 
 [[addon]]
+id = "bordo-ui"
+name = "BordoUI"
+repo = "threenox/BordoUI"
+group = "Full interfaces"
+summary = "A modern interface suite with a centered combat HUD"
+folders = ["BordoUI"]
+asset = "BordoUI.zip"
+
+[[addon]]
+id = "creed-ui"
+name = "CreedUI"
+repo = "CreedASui/CreedUI-for-AS-"
+group = "Full interfaces"
+summary = "A full HUD in one look: dark glass, gold rails, polished metal"
+folders = ["CreedUI"]
+# Its author publishes a tag with no file attached; the tag's archive holds CreedUI.toc at its top.
+by_tag = true
+
+[[addon]]
 id = "azeroth-fieldkit"
 name = "Azeroth FieldKit"
 repo = "Maidenquinn/azeroth-fieldkit"
@@ -143,6 +162,42 @@ asset = "AZSMoveAnything-*.zip"
 # Cursors
 
 [[addon]]
+id = "as-tiny-plates"
+name = "ASTinyPlates"
+repo = "Valorless/ASTinyPlates"
+group = "Meters and HUDs"
+summary = "Smaller nameplates for regular enemies; bosses and guardians stay easy to read"
+folders = ["ASTinyPlates"]
+asset = "ASTinyPlates-v*.zip"
+
+[[addon]]
+id = "as-drops"
+name = "ASDrops"
+repo = "Valorless/ASDrops"
+group = "Meters and HUDs"
+summary = "An icon bar of the loot you got this run, and the zone's items you haven't collected yet"
+folders = ["ASDrops"]
+asset = "ASDrops-v*.zip"
+
+[[addon]]
+id = "azs-max-hit"
+name = "AZS Max Hit"
+repo = "ghoulcompiler/AZSMaxHit"
+group = "Meters and HUDs"
+summary = "Each ability's biggest hit, biggest crit and best one-second burst; a party tab in co-op"
+folders = ["AZSMaxHit"]
+asset = "AZSMaxHit-*.zip"
+
+[[addon]]
+id = "vulchans-combat-text"
+name = "Vulchan's Combat Text"
+repo = "Vulchan/Vulchan-s-Combat-Text"
+group = "Meters and HUDs"
+summary = "Condenses the floating combat text into a readable form"
+folders = ["VulchansCombatText"]
+asset = "VulchansCombatText.zip"
+
+[[addon]]
 id = "azeroth-cursor"
 name = "Azeroth Cursor"
 repo = "Maidenquinn/AzerothCursor"
@@ -198,3 +253,14 @@ summary = "Run history and build statistics, kept across sessions"
 folders = ["AzerothStats"]
 # Each release also carries a source-review zip, whose name has no dots before .zip.
 asset = "AzerothStats-*.*.*.zip"
+
+# Tools
+
+[[addon]]
+id = "azeroth-hub"
+name = "Azeroth Hub"
+repo = "Maidenquinn/AzerothHub"
+group = "Tools"
+summary = "One place to open your addons, tweak what they expose and switch between saved setups"
+folders = ["AzerothHub"]
+asset = "AzerothHub*.zip"

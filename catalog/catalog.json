@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "generated": "2026-11-04T12:12:34.736916847Z",
-  "discord_checked": "2026-10-31",
+  "generated": "2026-11-04T13:07:01.451895343Z",
+  "discord_checked": "2026-11-04",
   "addons": [
     {
       "id": "aether-hud",
@@ -31,7 +31,7 @@
           "AetherHUD": "76669716061d7adbc522392b792d5c9c0b03da2abd9e25e0c7c0a907e650af9d"
         },
         "notes": "Boss warnings, run records with personal bests, and pointers to downed party members.\n\n## New\n\n- **Boss warnings:** the last 10 seconds before each boss show as a big countdown over your hero, with the boss's name (red, or gold for the final boss) and the raid-warning sound as it starts. A boss that turns enraged flashes ENRAGED for a moment.\n- **Run records:** when a run ends, a record opens with the result and 12 numbers: time, level, kills, damage per second, damage, gold, bosses, elites, guardians, caches, damage taken and magnets. Under each is your best for that zone and class, or a gold **NEW BEST** where you beat it. Time counts the fastest win, or in a run you lost, the longest you lasted. Your last 30 runs are listed on the right. `/aether runs` opens it any time.\n- **Downed allies (co-op):** when a party member goes down, a plate names them with how far they are (in reach, close, in sight, far) or how far along your revive is. A pulsing red gem on the minimap's ring and a small compass on their party frame point to where they lie (north-up, like the minimap).\n- `/aether` has two more switches: the boss-warning sound, and whether the run record opens by itself when a run ends. There's also a **Run records** button.\n\n## Notes\n\n- Bests are kept per zone and class (endless runs separately), shared by every hero on your account, and saved when you leave the world.\n- Every new part can be switched off in `/aether`, and moved with `/aether unlock`.\n\n## Install\n\n1. Download `AetherHUD.zip` below.\n2. Delete the old `AetherHUD` folder from `benilla-config/AddOns/`, then unzip the new one there, so you end up with `benilla-config/AddOns/AetherHUD/AetherHUD.toc`.\n   **Browser:** Options → AddOns → install the zip.\n\nYour settings and frame positions carry over.\n\nSHA-256 of `AetherHUD.zip`: `11f2955a1706b84bb427f148de792d27d305b78a52a9190b089cf00a3481265e`",
-        "downloads": 1122
+        "downloads": 1128
       },
       "earlier": [
         {
@@ -69,7 +69,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1158
+      "downloads": 1164
     },
     {
       "id": "blackwell-ui",
@@ -99,7 +99,7 @@
           "BlackwellUI": "f5e227e4370609ca8c662d2a1d2f7410606e56c09ec0172a477b17e915fec783"
         },
         "notes": "Two requests from the Discord, thanks for the feedback!\n\n## Raid markers from the unit frames\n\n- **Right click** the hero, target, pet or party frames to open the game's unit menu, including **Raid Target Icon**.\n- **Left click** targets the unit (target of target is clickable too).\n- Raid target icons now show on the hero, target and party frames.\n\n## Revive bar\n\n- New round bar for party revives: how far a friend is bringing you back, or how far you are bringing a friend back, in the game's own wording for your language.\n- It replaces the game's revive bar while it is on. Switch it off, set its width and colour under `/bw` → Cast Bar → Revive bar. Move it with `/bw unlock`.\n\n## Install\n\nDownload `BlackwellUI.zip` below and extract it to `AzerothSurvivors\\benilla-config\\AddOns\\` (replace the old `BlackwellUI` folder). Your settings are kept.",
-        "downloads": 422
+        "downloads": 425
       },
       "earlier": [
         {
@@ -355,7 +355,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 3470
+      "downloads": 3473
     },
     {
       "id": "keijin-ui",
@@ -385,7 +385,7 @@
           "KeijinUI": "fafa279796093d31520f9f3ecf4661a9eb2dd8133aadd61babc0bca19765a119"
         },
         "notes": "# KeijinUI 5.0.1\n\n## English\n\n* Build bar: the target count now has its own row \"Targets\" below the spell icons, and the cooldown row is labelled \"CD\". Thanks to AvA for the idea.\n\n## Deutsch\n\n* Buildleiste: Die Zielanzahl hat jetzt eine eigene Zeile \"Ziele\" unter den Zaubersymbolen, und die Abklingzeitzeile ist mit \"CD\" beschriftet. Danke an AvA für die Idee.\n\n**Install:** download `KeijinUI-5.0.1.zip` below (not \"Source code\") and unpack it into your AddOns folder so that `AddOns/KeijinUI/KeijinUI.toc` exists, then restart the game. Settings and positions stay.\n\n**Installation:** `KeijinUI-5.0.1.zip` unten herunterladen (nicht \"Source code\") und in den AddOns Ordner entpacken, sodass `AddOns/KeijinUI/KeijinUI.toc` existiert, dann das Spiel neu starten. Einstellungen und Positionen bleiben.\n\nFull history / Vollständiger Verlauf: [CHANGELOG.md](https://github.com/KeijinDE/KeijinUI_modern-as-ui/blob/v5.0.1/KeijinUI/CHANGELOG.md)",
-        "downloads": 401
+        "downloads": 433
       },
       "earlier": [
         {
@@ -402,7 +402,7 @@
             "KeijinUI": "0955b4d96d5b737ee2ada1117e7973afa340976e54299149c10d304db14a128a"
           },
           "notes": "# KeijinUI 5.0.0\n\n## English\n\n* **World markers:** A symbol with the distance in yards now floats above chests, guardian lairs and guardians in the game world. Chests, lairs and guardians can be switched on separately on the new settings page \"World markers\" (Run & Map), and you can set a maximum distance.\n* **Downed party members:** Fallen party members get a marker with name and distance in the world, and show as \"Downed\" in the party window. This can be switched off on the same page.\n* **Target count on the build bar:** A small number at the bottom left of a spell icon shows how many enemies the spell hits, read from its tooltip. This also works for abilities without a spellbook slot, such as Rockbiter Weapon. Option \"Show target count\".\n* **Diagnostic command:** `/kui probe` writes client data into the saved variables so bug reports can include it.\n* **Jewelry collection:** The window can be moved and its position is saved. It sits correctly above or below the settings window and no longer redraws constantly, which fixes the FPS loss while it is open.\n* **Loot display:** \"Only new loot\" now filters the display only. Switching it takes effect immediately on the loot of the current run, also in message mode. \"(already collected)\" is recognised more reliably.\n* **Names with special characters:** Names such as those with ß are now recognised regardless of the system language.\n\n## Deutsch\n\n* **Weltmarker:** Über Truhen, Wächterhorten und Wächtern schwebt jetzt ein Symbol mit der Entfernung in Yards. Truhen, Horte und Wächter lassen sich auf der neuen Einstellungsseite \"Weltmarker\" (Run & Karte) einzeln schalten, außerdem gibt es eine größte Entfernung.\n* **Gefallene Mitspieler:** Gefallene Mitspieler bekommen in der Welt einen Marker mit Name und Entfernung und erscheinen im Partyfenster als \"Am Boden\". Das lässt sich auf derselben Seite abschalten.\n…",
-          "downloads": 35
+          "downloads": 36
         },
         {
           "tag": "v4.7.1",
@@ -1157,7 +1157,7 @@
         "KeijinAchievements"
       ],
       "notes": [],
-      "downloads": 8823
+      "downloads": 8856
     },
     {
       "id": "survivor-ui",
@@ -1189,7 +1189,7 @@
           "SurvivorUI": "22f9473d8863fb2eef9469e170bf91ecc5c837be016490431ce311e145a10999"
         },
         "notes": "**A tab of their own for the minimap buttons, with your order, your colors and a live preview, and your friends' buffs on any side of the party frames.**\n\n**Minimap buttons**\n- **A tab of their own:** the options' new **Minimap buttons** tab, after Minimap, holds the squares beside the minimap: a live preview of them by a corner of the minimap, then a row for each with its switch, two arrows to move it in the order and, for the spell effects, sound effects and range ring, its key. The switches and keys left the Minimap tab for it.\n- **Your order:** any of them can come first, the [S] too, and each one shown or hidden. Hide the [S] and `/sui` still opens the options.\n- **Your colors:** each one in the class's color (as before) or one of nine others: gold, white, red, orange, green, teal, blue, purple or pink. The Guide's square starts gold as before. **All in this color** paints every button the same.\n- **Line up, size and gap:** a column up (as before) or down, or a row to the left or the right; the squares from 12 to 28 (16 as before) and the gap between them from 0 to 12.\n- **They move as one:** in move mode they are now one piece, **Minimap buttons**, so the whole line moves together; a place you set before stays.\n\n**Party frames**\n- **Buffs on any side:** your friends' buffs can go left of their frames (as before), right of them, over them or under them. Over or under, the frames stand a line of buffs further apart; on the right, until you move them, the frames stand further left of yours so the buffs fit. The Party tab: **Buffs**.\n- **Layout preview:** the Party tab draws a full party beside your frame as it will look: the order, the buffs' side, a friend down and one far away. The samples you see while placing the frames show some buffs too.\n\nUnzip `SurvivorUI-v3.0.55.zip` into the game's AddOns folder, or let the launcher do it: `SurvivorUI-Installer.zip`, below (launcher 1.9.0; a launcher from 1.6.1 takes it by itself).",
-        "downloads": 1751
+        "downloads": 1860
       },
       "earlier": [
         {
@@ -1207,7 +1207,7 @@
             "SurvivorUI": "318bb55c09a7b8462d59f9e3f686c247b5ddf56b63af5ea2a8c287afacde33cc"
           },
           "notes": "**Bosses and awake guardians that move on the minimap, your shield in your health numbers, your friends' buffs and distance on the party frames, debuffs inside the nameplates and a button for your range ring.**\n\n**Minimap**\n- **On the move** (asked by ZA5TEESH): an awake guardian's lair pin follows the guardian while it fights, and goes back to its lair once it is slain. Each boss gets a horned skull that goes where it goes, the final boss in an orange glow. Elites can get a bone skull too (off). The options' Minimap tab: **Lairs follow their guardian**, **Bosses** and **Elites**.\n- **Range ring button** (asked by Silveryxd and sh1Neee): a ring over the sound button hides your range ring, on the minimap and round you, in a click; the next click brings back the rings you had on. A key of its own too, none by default. The options' Minimap tab: **Range ring button** and **Range ring key**.\n\n**Nameplates** (Survivor Plates)\n- **Debuffs inside:** on elites, guardians and bosses, our debuffs in small icons inside the bar, from left to right. Your target among the rank and file keeps them over its plate. Off with **Debuffs inside the plates** (Nameplates, Look).\n\n**Unit frames**\n- **Your shield in the numbers:** while a shield is on you, your health numbers count it too, in light blue, the share going past 100%: `878 | 155%`. Off with **Shield in the health text** (Unit frames).\n\n**Party frames** (asked by Jocke and ebgl_menios)\n- **Buffs:** each friend's buffs in small icons beside their frame; hover one for what it is.\n- **Distance:** past 30 yards a friend's frame fades and says how far (`33 yd | 73%`); hover it for the yards. Heals and shields in this game are only your own, so this is to keep the party together. The Party tab: **Party buffs** and **Party distance**.\n\n**Cards**\n- **Stats panel over the cards:** the Stats panel can stay in sight while you choose a level's cards (the options' **While choosing cards**).\n…",
-          "downloads": 332
+          "downloads": 333
         },
         {
           "tag": "v3.0.53",
@@ -1258,7 +1258,7 @@
             "SurvivorUI": "e233871c2481e5aa2b0c16e76e15ccfb29e2fbcb344bfcc90e8c9b02384ce280"
           },
           "notes": "**A fix for v3.0.50. Thanks to N3x and Amarolk for the report.**\n\n**Fixed**\n- **The options button on the minimap:** after the first level's cards it stayed invisible until the next reload, though a click and the tooltip still found it. It now comes back with the rest of the minimap.\n\nUnzip `SurvivorUI-v3.0.51.zip` into the game's AddOns folder, or let the launcher do it: `SurvivorUI-Installer.zip`, below (launcher 1.9.0; a launcher from 1.6.1 takes it by itself).",
-          "downloads": 832
+          "downloads": 833
         },
         {
           "tag": "v3.0.50",
@@ -2005,7 +2005,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 30698
+      "downloads": 30809
     },
     {
       "id": "survivor-ui-classic",
@@ -2035,7 +2035,7 @@
           "SurvivorUIClassic": "7d5e0c780fe20f5369095f410c6fba5dde4246df2193124cf0b4165812a8b4ce"
         },
         "notes": "**A Stats panel of your own, boss bars in the nameplates' look, debuffs inside the plates, bosses and awake guardians that move on the minimap, and your shields on your health bar.**\n\n**Stats panel** (new)\n- **Your numbers in a panel:** the run's stats in a panel of the same make as the others, on the left of the screen. Ten show at first.\n- **Yours to choose:** a new **Stats panel** tab ticks each of the 22 stats on or off and gives each number one of 15 colors. It can also stay in sight while you choose cards (**Card choice**).\n\n**Boss bars**\n- **In the nameplates' look:** the name over the bar on the left, the plate's rounded bar in the kind's color, a white rim (gold on your target), a soft glow under the mouse, the share on the right and the boss's debuffs inside on the left.\n\n**Nameplates**\n- **Debuffs inside:** on elites, guardians and bosses, our debuffs in small icons inside the bar, from left to right. A guardian's and a boss's come from the game, with their stacks; an elite's show while it is your target or under the mouse, as the game shares no elite's. Off with **Debuffs inside the plates** (Nameplates).\n\n**Minimap**\n- **On the move:** an awake guardian's skull follows the guardian, blinking orange, and goes back to its lair once it is slain. Each boss gets a horned skull that goes where it goes, the final boss in an orange glow. Elites can get a bone skull too (off). The Minimap tab: **Lairs follow their guardian**, **Bosses** and **Elites**.\n\n**Unit frames**\n- **Your shields:** striped light blue on your health bar, as in Survivor UI, and your health numbers count them too, in light blue, the share going past 100%. Off with **Shields on your health** (Unit frames).\n\n**Also**\n- **Jewelry:** a piece with many effects takes as many lines as it needs, each effect whole; it used to be cut in the middle and cover the piece below.\n- **Damage meter:** a new install no longer folds the small lines into Others.\n…",
-        "downloads": 633
+        "downloads": 667
       },
       "earlier": [
         {
@@ -2216,7 +2216,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 5200
+      "downloads": 5234
     },
     {
       "id": "survivors-dragon-ui",
@@ -2233,22 +2233,38 @@
         "pattern": "SurvivorsDragonUi.zip"
       },
       "latest": {
-        "tag": "build-94161ad53981307b09a13e668196a75167fe4466",
-        "version": "3.2.88-survivors",
-        "published": "2026-11-03T19:37:14Z",
+        "tag": "build-40c4157cc491ef11559409b9fe9a8af956bc35d0",
+        "version": "3.2.89-survivors",
+        "published": "2026-11-04T12:41:27Z",
         "prerelease": false,
         "file": "SurvivorsDragonUi.zip",
-        "url": "https://github.com/migwynkriid13/SurvivorsDragonUi/releases/download/build-94161ad53981307b09a13e668196a75167fe4466/SurvivorsDragonUi.zip",
-        "sha256": "b2f9d0a98f4789d9db41d2a3bcbe0e5becad6ac534bd646c8c304776ec792dd0",
-        "size": 2750303,
+        "url": "https://github.com/migwynkriid13/SurvivorsDragonUi/releases/download/build-40c4157cc491ef11559409b9fe9a8af956bc35d0/SurvivorsDragonUi.zip",
+        "sha256": "1152a3852d4444daa4bf14c00702fe73048412f46173e07f41cdc38360de62d8",
+        "size": 2842309,
         "interface": 11200,
         "folders": {
-          "SurvivorsDragonUi": "9b7a0c1272415b23c46b8eba746332f6499aadca05f1ae93dce1225e79be7fde"
+          "SurvivorsDragonUi": "68ade8a9cdd0bb2e81b42d974141ec783b0ad9929734eb4a4e86feaa1becd363"
         },
-        "notes": "Addon package for **SurvivorsDragonUi 3.2.88**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
-        "downloads": 5115
+        "notes": "Addon package for **SurvivorsDragonUi 3.2.89**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
+        "downloads": 167
       },
       "earlier": [
+        {
+          "tag": "build-94161ad53981307b09a13e668196a75167fe4466",
+          "version": "3.2.88-survivors",
+          "published": "2026-11-03T19:37:14Z",
+          "prerelease": false,
+          "file": "SurvivorsDragonUi.zip",
+          "url": "https://github.com/migwynkriid13/SurvivorsDragonUi/releases/download/build-94161ad53981307b09a13e668196a75167fe4466/SurvivorsDragonUi.zip",
+          "sha256": "b2f9d0a98f4789d9db41d2a3bcbe0e5becad6ac534bd646c8c304776ec792dd0",
+          "size": 2750303,
+          "interface": 11200,
+          "folders": {
+            "SurvivorsDragonUi": "9b7a0c1272415b23c46b8eba746332f6499aadca05f1ae93dce1225e79be7fde"
+          },
+          "notes": "Addon package for **SurvivorsDragonUi 3.2.88**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
+          "downloads": 5283
+        },
         {
           "tag": "build-1ca877cb9eb27763d0a98ad71b8c7ace598d911a",
           "version": "3.2.87-survivors",
@@ -2406,7 +2422,6 @@
           "folders": {
             "SurvivorsDragonUi": "301e684ca44f55f716020597b76b1f92366903940f0ec116f2fb19e66bf63cf3"
           },
-          "notes": "Addon package for **SurvivorsDragonUi 3.2.78**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
           "downloads": 1084
         },
         {
@@ -2993,26 +3008,268 @@
             "SurvivorsDragonUi": "bb8d0050c7d734a323f2d06817685ff1826cd6037ae2618ef10b2455418742f7"
           },
           "downloads": 37
-        },
-        {
-          "tag": "build-becd7693a1a0db8a90c9fbf0f422ad14abe76457",
-          "version": "3.2.30-survivors",
-          "published": "2026-10-23T16:14:21Z",
-          "prerelease": false,
-          "file": "SurvivorsDragonUi.zip",
-          "url": "https://github.com/migwynkriid13/SurvivorsDragonUi/releases/download/build-becd7693a1a0db8a90c9fbf0f422ad14abe76457/SurvivorsDragonUi.zip",
-          "sha256": "cdfe19012fd7aaa6b2c6be804bbf4b9466e7fcf4783eb9defa5d97b51c623b9a",
-          "size": 2442144,
-          "interface": 11200,
-          "folders": {
-            "SurvivorsDragonUi": "8d65ad50fc4e2c9f4bb8265bd65aab3d9e615b47b46b80de70ddfa6566c39fa8"
-          },
-          "downloads": 205
         }
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 78315
+      "downloads": 78445
+    },
+    {
+      "id": "bordo-ui",
+      "name": "BordoUI",
+      "repo": "threenox/BordoUI",
+      "author": "threenox",
+      "summary": "A modern interface suite with a centered combat HUD",
+      "group": "Full interfaces",
+      "folders": [
+        "BordoUI"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "BordoUI.zip"
+      },
+      "latest": {
+        "tag": "v2.8.18",
+        "version": "2.8.18",
+        "published": "2026-10-31T19:37:44Z",
+        "prerelease": false,
+        "file": "BordoUI.zip",
+        "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.18/BordoUI.zip",
+        "sha256": "9869ad81498e539bf30d06b53f4f36a18fe12e764de4bbfa0d5043269c3e5d49",
+        "size": 1629233,
+        "interface": 11200,
+        "folders": {
+          "BordoUI": "3495ce53962753a238d4298882bc65119b6e1b98b588e600a2c5380fd76c5e4c"
+        },
+        "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.17...v2.8.18",
+        "downloads": 533
+      },
+      "earlier": [
+        {
+          "tag": "v2.8.17",
+          "version": "2.8.17",
+          "published": "2026-10-31T19:17:51Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.17/BordoUI.zip",
+          "sha256": "544da82334abc57743f73737db793d9cadcefc7a93f48c9b4c4ef5959b393806",
+          "size": 1629007,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "058c7e60de9b62df25b7e01bc12ac1578c36ec5e03221abd76070613de6a9f10"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.16...v2.8.17",
+          "downloads": 5
+        },
+        {
+          "tag": "v2.8.16",
+          "version": "2.8.16",
+          "published": "2026-10-31T18:07:03Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.16/BordoUI.zip",
+          "sha256": "640b499bee941733dd5e5260f8a72a749d1598c48e93a888731352152f75bba2",
+          "size": 1629003,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "c9f1695fd5360cb9736ebba9c22f62c64d8f23c81a2697c912fd2424cd9cdfaf"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.15...v2.8.16",
+          "downloads": 17
+        },
+        {
+          "tag": "v2.8.15",
+          "version": "2.8.15",
+          "published": "2026-10-30T03:40:45Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.15/BordoUI.zip",
+          "sha256": "e6b569a9694322b6bf9b68458b1dee97109f13a3cf2cac011fefa0a5638c8aac",
+          "size": 1624307,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "84cceede84d76bb92d236b75b4e05834419ec86ff7b08a22e2b0f5db43546751"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.14...v2.8.15",
+          "downloads": 411
+        },
+        {
+          "tag": "v2.8.14",
+          "version": "2.8.14",
+          "published": "2026-10-30T03:02:07Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.14/BordoUI.zip",
+          "sha256": "6b8dfbc8f17d71306396faa2094ca02ed7c8c36ccdaa5e999af95af9c20e4025",
+          "size": 1623227,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "ba68c024cd186dc621ef6b5610d19d8f0999da071824ad5ad1d1e0153300aeee"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.13...v2.8.14",
+          "downloads": 18
+        },
+        {
+          "tag": "v2.8.13",
+          "version": "2.8.13",
+          "published": "2026-10-30T02:46:06Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.13/BordoUI.zip",
+          "sha256": "883548ab84a339a4820dca64e44c6d9e9bdddf0599a15c7e005fab995087735b",
+          "size": 1622275,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "4119addad144a86e86edbafe230c685528f14bc3cfbd8c7b7b0b066f82f37213"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.12...v2.8.13",
+          "downloads": 6
+        },
+        {
+          "tag": "v2.8.12",
+          "version": "2.8.12",
+          "published": "2026-10-30T02:41:40Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.12/BordoUI.zip",
+          "sha256": "33f63095e360b50e28b51f1d74e8d0b471751e7837c96fbfcf81e49a74b18be1",
+          "size": 1622292,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "13244fdc3a41f2d5b61d4901b141be38cdd70fc364c8377e9b6c95f96d8704a9"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.11...v2.8.12",
+          "downloads": 6
+        },
+        {
+          "tag": "v2.8.11",
+          "version": "2.8.11",
+          "published": "2026-10-30T02:28:31Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.11/BordoUI.zip",
+          "sha256": "6cf7496a20b3cbb3aea1d45da007cff630b717d3a2af4257e13f7d72667ce9dd",
+          "size": 1622164,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "af25e4e2f5c9894863219e00a0e7ac27892a8dfdeb7f81f91abf94da5c75f3bf"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.10...v2.8.11",
+          "downloads": 12
+        },
+        {
+          "tag": "v2.8.10",
+          "version": "2.8.10",
+          "published": "2026-10-30T02:24:39Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.10/BordoUI.zip",
+          "sha256": "2204d8014e2cbfcaff07eab9e0eacb158eeec569604cda5f5411051c9aefd7db",
+          "size": 1621918,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "00a8435c9641856e2adaeac2eaec16d23711b470fb40a55634311f7b1aa6dbdd"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.9...v2.8.10",
+          "downloads": 7
+        },
+        {
+          "tag": "v2.8.9",
+          "version": "2.8.9",
+          "published": "2026-10-30T02:11:05Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.9/BordoUI.zip",
+          "sha256": "c1599293fb7cddae9df40d82a5408ccf38c586602707b86a934a1f4598890915",
+          "size": 1621544,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "e7a7ad47b662223f867dcc199de45ee6b6d50aaadf2383dcce565d1c01829219"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.8...v2.8.9",
+          "downloads": 9
+        },
+        {
+          "tag": "v2.8.8",
+          "version": "2.8.8",
+          "published": "2026-10-30T01:52:45Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.8/BordoUI.zip",
+          "sha256": "dc9f4e3f3fd7bed2d49253cdf0906740d2ed5e5d1b7521531ec580f8b1825b02",
+          "size": 1621160,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "1ada42a027a63b2644fa0f4f8ea25e5a9217b4c6b22a138eaaf928009e350cf1"
+          },
+          "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.7...v2.8.8",
+          "downloads": 10
+        },
+        {
+          "tag": "v2.8.7",
+          "version": "2.8.7",
+          "published": "2026-10-30T00:47:24Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.8.7/BordoUI.zip",
+          "sha256": "71a12a09e20cebd8f15af6ab577a34e40afdbbccd95dec0437af35d37a8f2947",
+          "size": 1620621,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "8593f81e2209465fb50a916a67c63c18634415ca09d1375df2c0f0186d2348e7"
+          },
+          "downloads": 31
+        },
+        {
+          "tag": "v2.0.0",
+          "version": "2.3.4",
+          "published": "2026-10-23T01:26:11Z",
+          "prerelease": false,
+          "file": "BordoUI.zip",
+          "url": "https://github.com/threenox/BordoUI/releases/download/v2.0.0/BordoUI.zip",
+          "sha256": "75f3fa91dee706713ad8e6e4b7d9a368f88ff2bce78b229b85dc90f7ba671dfe",
+          "size": 1625657,
+          "interface": 11200,
+          "folders": {
+            "BordoUI": "2c993ff6122b8338399e58d1a6550e28d3975009eb197f52be787bb3799fc10d"
+          },
+          "downloads": 385
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": [],
+      "downloads": 1450
+    },
+    {
+      "id": "creed-ui",
+      "name": "CreedUI",
+      "repo": "CreedASui/CreedUI-for-AS-",
+      "author": "CreedASui",
+      "summary": "A full HUD in one look: dark glass, gold rails, polished metal",
+      "group": "Full interfaces",
+      "folders": [
+        "CreedUI"
+      ],
+      "asset": {
+        "kind": "source"
+      },
+      "latest": {
+        "tag": "Addon",
+        "version": "1.9.0",
+        "published": "2026-11-02T21:05:04Z",
+        "prerelease": false,
+        "file": "CreedUI-for-AS--Addon.zip",
+        "url": "https://codeload.github.com/CreedASui/CreedUI-for-AS-/zip/cf608b11062a553e793c51e825f91d8b4f716b2a",
+        "sha256": "912b27fbbcd179fda2a58605e9193f9c989596cff51c57f49486890e428e3fa2",
+        "size": 1868777,
+        "interface": 11200,
+        "folders": {
+          "CreedUI": "f78346690076254d004138fa34fa4d70c4264fa9909fbd2ef47d00767a9b147b"
+        }
+      },
+      "earlier": [],
+      "doesnt_mix_with": [],
+      "notes": []
     },
     {
       "id": "azeroth-fieldkit",
@@ -3042,7 +3299,7 @@
           "AzerothFieldKit": "b2f5929c2d7aef03314ac8521cd7438dade7fda5563daed06a7bd66f5db6a67b"
         },
         "notes": "# Azeroth FieldKit v0.4.0 — UI, localization, combat text and previews\n\nChanges **since the published v0.3.4 prerelease** (2026-11-02). Maintained by Maidenhead; derived from **MASH by Malk**.\n\n## User interface and navigation\n- Refined the dark/gold Warcraft-style interface across settings, with clearer group navigation, selected states, tabs, button hierarchy and spacing.\n- Improved long settings pages, compact action controls and footer positioning.\n- Fixed overlap between the Undo and Reset HUD positions controls, including adaptive footer placement.\n\n## French and English\n- Extended bilingual coverage across navigation, settings, action buttons, dynamic descriptions and labels.\n- Language changes refresh bound UI text without restarting the addon.\n- Combat-text simulation spell/event samples now follow the selected language.\n- Fixed mixed-language section headings and several hardcoded French labels in English mode.\n\n## Combat text and customization\n- Three configurable combat-text profiles (Balanced, Quiet, All), with more visible active state and profile-specific resets.\n- Improved simulation display and controls, reduced redundant refresh work, and guarded simulation updates after interruptions.\n- Preserved saved preferences and real combat calculations.\n\n## HUD previews and layout\n- Improved inspector and position controls for HUD cards.\n- Representative **demo/sample data** for 19 preview types, including Damage, Revive, Statistics, Bosses, Player/Target health and more.\n- Fixed missing or blank preview content, health bar value synchronization and incompatible UI button methods.\n- Preview samples are deliberately separate from live player data and do not write to game statistics or SavedVariables.\n\n## Stability and compatibility\n- Defensive handling of incomplete combat profiles and invalid display fields.\n- C9 code audit and C10 visual/UX polish; 38 Lua modules and all 38 TOC references checked in the local release candidate.\n…",
-        "downloads": 86
+        "downloads": 94
       },
       "earlier": [
         {
@@ -3160,7 +3417,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1749
+      "downloads": 1757
     },
     {
       "id": "azs-spell-meter",
@@ -3190,7 +3447,7 @@
           "AZSSpellMeter": "6f58c02562c5eaa491c86b1905801ba2a15d512b26c32ba1cd1c3c6c10b30aa7"
         },
         "notes": "- Totems each stay on their own row. They are no longer grouped together as pets.\n- Searing Totem shows the kills from its shots. Magma Totem's kills stay on one number.\n- The row numbers stay visible beside the spell name.\n\nUnzip into your AddOns folder, so the path ends in `AddOns/AZSSpellMeter/AZSSpellMeter.toc`. Relog.",
-        "downloads": 634
+        "downloads": 699
       },
       "earlier": [
         {
@@ -3596,7 +3853,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 22552
+      "downloads": 22617
     },
     {
       "id": "local-clock",
@@ -3661,7 +3918,7 @@
           "LuckyOdds": "6a66c097663554554e18d026f269a8b7f1b13cc3c28a88440e451a894192b021"
         },
         "notes": "Needs game 0.126.0 or newer.\n\n- The old panel design is back. Lots of you liked the table with a row per card type, so it's now an option next to the new one.\n- Open the cog and hit \"Design\" to flip between New and Old. It remembers your pick.\n- The old design has the same cog, language list, \"Show on selection\" and the new chest and guardian buttons as the new one.\n- Both designs share the same spot on your screen, drag one and the other follows.\n\nInstall: drop the `LuckyOdds` folder into your `AddOns` folder and `/reload`.",
-        "downloads": 2718
+        "downloads": 2758
       },
       "earlier": [
         {
@@ -3747,7 +4004,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 15449
+      "downloads": 15489
     },
     {
       "id": "move-ui",
@@ -3777,7 +4034,7 @@
           "MoveUI": "45958b3a6ecd23d208b99fd29cb0357bf59d0faf55a88a6432238dfc3ce74dbc"
         },
         "notes": "## What's Changed\n* Move UI 1.3.0: modular architecture refactor by @JamieeLee in https://github.com/JamieeLee/MoveUI/pull/2\n\n\n**Full Changelog**: https://github.com/JamieeLee/MoveUI/compare/v1.2.9...v1.3.0",
-        "downloads": 95
+        "downloads": 96
       },
       "earlier": [
         {
@@ -3863,7 +4120,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 325
+      "downloads": 326
     },
     {
       "id": "move-anything",
@@ -3893,7 +4150,7 @@
           "MoveAnything": "9ea17cffce77b5f44f9da9d3900914ba63de5f7b2a74ae993fb34980fb202636"
         },
         "notes": "Hot fix to text being truncated when scaling windows due to rounding errors.",
-        "downloads": 718
+        "downloads": 723
       },
       "earlier": [
         {
@@ -3930,7 +4187,500 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 746
+      "downloads": 751
+    },
+    {
+      "id": "as-tiny-plates",
+      "name": "ASTinyPlates",
+      "repo": "Valorless/ASTinyPlates",
+      "author": "Valorless",
+      "summary": "Smaller nameplates for regular enemies; bosses and guardians stay easy to read",
+      "group": "Meters and HUDs",
+      "folders": [
+        "ASTinyPlates"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "ASTinyPlates-v*.zip"
+      },
+      "latest": {
+        "tag": "v1.5.6",
+        "version": "1.5.6",
+        "published": "2026-11-04T01:39:53Z",
+        "prerelease": false,
+        "file": "ASTinyPlates-v1.5.6.zip",
+        "url": "https://github.com/Valorless/ASTinyPlates/releases/download/v1.5.6/ASTinyPlates-v1.5.6.zip",
+        "sha256": "6f405572bd83f48c84ea2a4f4877f6645937a9963c30ee3dbcd8923fc2bf3b5d",
+        "size": 14738,
+        "interface": 11200,
+        "folders": {
+          "ASTinyPlates": "73962e602ec928f1e8cac3e317ffbdbb8fd4cdd9209ba6934cef5b8e54a6ac5f"
+        },
+        "notes": "Lets players color the health bars themselves, separately for regular (shrunken) plates and boss/guardian plates, with colorblind-friendly presets.\r\n\r\n## What's Changed\r\n* Add custom bar colors with colorblind presets by @Valorless in https://github.com/Valorless/ASTinyPlates/pull/6\r\n\r\n## \r\n- **Settings window** (`ASTinyPlatesSettings.lua`): each plate type gets a **Custom bar color** checkbox, a color-picker swatch (`ColorPickerFrame`, live preview, Cancel reverts), six colorblind-friendly presets (Okabe-Ito: blue, orange, sky blue, vermillion, yellow, pink, at full brightness to offset the bar texture dimming colors) and a **Reset** button.\r\n- **Off by default**: with the option off, bars keep the game's colors, so nothing changes for existing users.\r\n- **Saved variables**: `bossBarColor`/`bossBarColorOn` and `regularBarColor`/`regularBarColorOn` in `ASTinyPlatesDB`.\r\n- **Applies on every path** (`ASTinyPlates.lua`): the default UI (native bar, which our overlay copies) and SDUI (StatusBars inside its styled visual), for both boss/guardian and regular plates. Re-applied every update, so changes are live.\r\n- **Plate recycling**: each bar's original color is remembered and restored when the override is turned off or a recycled plate switches between boss and regular.\r\n- README documents the feature and the new settings.\r\n\r\n**Full Changelog**: https://github.com/Valorless/ASTinyPlates/compare/v1.4.5...v1.5.6",
+        "downloads": 153
+      },
+      "earlier": [
+        {
+          "tag": "v1.4.5",
+          "version": "1.4.5",
+          "published": "2026-11-02T20:18:51Z",
+          "prerelease": false,
+          "file": "ASTinyPlates-v1.4.5.zip",
+          "url": "https://github.com/Valorless/ASTinyPlates/releases/download/v1.4.5/ASTinyPlates-v1.4.5.zip",
+          "sha256": "7548b290fa1f634287f3acdc13477a16bcb8c74cc3eec3f2dc46af65252181bf",
+          "size": 12778,
+          "interface": 11200,
+          "folders": {
+            "ASTinyPlates": "98ccd3c224453d7d994611fa6fbedfe9d8d6bb82cb77595b1aa70a8cf830591e"
+          },
+          "notes": "## What's Changed\r\n* Add settings window, dragon minimap button and nameplate options by @Valorless in https://github.com/Valorless/ASTinyPlates/pull/5\r\n\r\n## \r\n- **Settings window** (`ASTinyPlatesSettings.lua`, added to the TOC): checkboxes with tooltips; movable; Esc closes. Settings are saved in `ASTinyPlatesDB` (new `## SavedVariables`).\r\n- **Minimap button** with a dragon icon: click opens/closes the settings, drag moves it round the minimap (angle saved; square-minimap placement when SDUI is loaded), with a tooltip.\r\n- **Slash commands:** `/astp` and `/astinyplates` open the settings. `/astpdebug` is unchanged.\r\n- **Four options**, applied live without `/reload`:\r\n  - Show debuffs (default on)\r\n  - Hide name on boss/guardian plates (default off)\r\n  - Hide nameplates: hides the regular mob plates completely, leaving only boss/guardian plates (default off; tooltip notes it requires Overlapping nameplates)\r\n  - Show name on regular (shrunken) plates (default off; disabled while the plates are hidden)\r\n- The AZS-based boss/guardian detection is untouched.\r\n- README documents the settings window, minimap button and commands.\r\n\r\n**Full Changelog**: https://github.com/Valorless/ASTinyPlates/compare/v1.3.4...v1.4.5",
+          "downloads": 460
+        },
+        {
+          "tag": "v1.3.4",
+          "version": "1.3.4",
+          "published": "2026-10-31T13:43:40Z",
+          "prerelease": false,
+          "file": "ASTinyPlates-v1.3.4.zip",
+          "url": "https://github.com/Valorless/ASTinyPlates/releases/download/v1.3.4/ASTinyPlates-v1.3.4.zip",
+          "sha256": "8602894bd2b3ba3c36797e46358495b948aa972ec8ea57e182a4450415d4c017",
+          "size": 9320,
+          "interface": 11200,
+          "folders": {
+            "ASTinyPlates": "c68bcad70e357b59513316516f1caf0769ed15fe012f13f680d3759863f790e4"
+          },
+          "notes": "## What's Changed\n* Add README by @Valorless in https://github.com/Valorless/ASTinyPlates/pull/4\n\n\n**Full Changelog**: https://github.com/Valorless/ASTinyPlates/compare/v1.2.3...v1.3.4",
+          "downloads": 618
+        },
+        {
+          "tag": "v1.2.3",
+          "version": "1.2.3",
+          "published": "2026-10-31T13:29:03Z",
+          "prerelease": false,
+          "file": "ASTinyPlates-v1.2.3.zip",
+          "url": "https://github.com/Valorless/ASTinyPlates/releases/download/v1.2.3/ASTinyPlates-v1.2.3.zip",
+          "sha256": "3c67a9fc37db83ad6ddcfd4062b67c519d3121991d135fc4f51c3d9f2c9c3c70",
+          "size": 9320,
+          "interface": 11200,
+          "folders": {
+            "ASTinyPlates": "06375d6a0e403eed24805a8f8319bbd04e9015910df572d7cba03b0ad409d0ba"
+          },
+          "notes": "## What's Changed\n* Update TOC description to match addon behavior by @Valorless in https://github.com/Valorless/ASTinyPlates/pull/3\n\n\n**Full Changelog**: https://github.com/Valorless/ASTinyPlates/compare/v1.1.2...v1.2.3",
+          "downloads": 4
+        },
+        {
+          "tag": "v1.1.2",
+          "version": "1.1.2",
+          "published": "2026-10-31T13:25:28Z",
+          "prerelease": false,
+          "file": "ASTinyPlates-v1.1.2.zip",
+          "url": "https://github.com/Valorless/ASTinyPlates/releases/download/v1.1.2/ASTinyPlates-v1.1.2.zip",
+          "sha256": "49babe06d7283515348b2d46eda5bd0236b31be4e367a8dde15edbacc4794e95",
+          "size": 9255,
+          "interface": 11200,
+          "folders": {
+            "ASTinyPlates": "5ef7880743e0012bb57f1d8829d5c5892599e7a7dbac5e3115a82fd68c6eadec"
+          },
+          "notes": "## What's Changed\n* Fix missing boss/guardian names under SDUI and stale plate names by @Valorless in https://github.com/Valorless/ASTinyPlates/pull/1\n* Add release workflow on PR merge by @Valorless in https://github.com/Valorless/ASTinyPlates/pull/2\n\n## New Contributors\n* @Valorless made their first contribution in https://github.com/Valorless/ASTinyPlates/pull/1\n\n**Full Changelog**: https://github.com/Valorless/ASTinyPlates/commits/v1.1.2",
+          "downloads": 4
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": [],
+      "downloads": 1239
+    },
+    {
+      "id": "as-drops",
+      "name": "ASDrops",
+      "repo": "Valorless/ASDrops",
+      "author": "Valorless",
+      "summary": "An icon bar of the loot you got this run, and the zone's items you haven't collected yet",
+      "group": "Meters and HUDs",
+      "folders": [
+        "ASDrops"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "ASDrops-v*.zip"
+      },
+      "latest": {
+        "tag": "v1.5.7",
+        "version": "1.5.7",
+        "published": "2026-11-02T14:53:50Z",
+        "prerelease": false,
+        "file": "ASDrops-v1.5.7.zip",
+        "url": "https://github.com/Valorless/ASDrops/releases/download/v1.5.7/ASDrops-v1.5.7.zip",
+        "sha256": "ccca9f4aaa98b63254be6b42151c094c7a65962a93681f96a52f8f5c24581836",
+        "size": 34575,
+        "interface": 11200,
+        "folders": {
+          "ASDrops": "742a8caaf0ef191cec744d8f0eb689ba80558034fb07f80aa60be54fbc612fed"
+        },
+        "notes": "## What's Changed\r\n* Keep frames on top of cards; add settings window, minimap button and collected-item options by @Valorless in https://github.com/Valorless/ASDrops/pull/7\r\n\r\n## Keep frames on top of level-up/jewelry cards\r\n- New global helper `ASDropsKeepOnTop(frame)` (in `ASDropsLootIcons.lua`, loaded first). It guards on `AZS_SetOnTopOfScreens`, uses `pcall`, and `GameTooltip` is kept on top once.\r\n- Applied to every frame ASDrops creates (loot bar, icons, borders, resize handles, missing row and its icons, event/update frames). Previously unnamed frames now have unique global names.\r\n- The backpack mirror is intentionally left alone, since the bag stays under the cards.\r\n\r\n## Settings window and minimap button\r\n- New `ASDropsSettings.lua` (added to the `.toc`). A draggable minimap button (angle saved in `ASDropsDB.minimapAngle`) and `/asdrops` or `/asdrops settings` open and close the window. `/asdrops debug` is unchanged.\r\n- Row toggles, default on: show the loot bar (`ASDropsDB.barHidden`) and show the missing-items row (`ASDropsZoneDB.hidden`, the same flag as `/asmissing hide`).\r\n- Missing-row options, default off, saved in `ASDropsZoneDB`:\r\n  - **Show collected items**: collected items are listed in the row.\r\n  - **Greyscale collected items**: desaturated plus a dark overlay.\r\n  - **Green checkmark on collected items**: drawn above the dimming.\r\n  - The greyscale and checkmark boxes are disabled until \"Show collected items\" is on.\r\n- Settings apply live and have gold-titled tooltips.\r\n\r\n## Missing row\r\n- Items are sorted by boss order. Collected items stay in that order. Lists without boss info keep the rarity/name order.\r\n- The \"Missing in … (N)\" label counts only missing items; `/asmissing list` prints only missing items.\r\n\r\n## Docs\r\n- README updated (Features, Commands, Saved Variables, How it works).\r\n\r\n\r\n**Full Changelog**: https://github.com/Valorless/ASDrops/compare/v1.4.6...v1.5.7",
+        "downloads": 458
+      },
+      "earlier": [
+        {
+          "tag": "v1.4.6",
+          "version": "1.4.6",
+          "published": "2026-11-02T11:52:18Z",
+          "prerelease": false,
+          "file": "ASDrops-v1.4.6.zip",
+          "url": "https://github.com/Valorless/ASDrops/releases/download/v1.4.6/ASDrops-v1.4.6.zip",
+          "sha256": "aa90007b1c8b14e59f37b5f36fbf9556e8cab0a0f78ff8a00243d43b55c7f77d",
+          "size": 30742,
+          "interface": 11200,
+          "folders": {
+            "ASDrops": "2a6f6b120576cb9e315cb2ea669824b66dc31d3a321179051e8947a575c08143"
+          },
+          "notes": "## What's Changed\n* Add README by @Valorless in https://github.com/Valorless/ASDrops/pull/6\n\n\n**Full Changelog**: https://github.com/Valorless/ASDrops/compare/v1.3.4...v1.4.6",
+          "downloads": 66
+        },
+        {
+          "tag": "v1.3.4",
+          "version": "1.3.4",
+          "published": "2026-10-31T03:17:51Z",
+          "prerelease": false,
+          "file": "ASDrops-v1.3.4.zip",
+          "url": "https://github.com/Valorless/ASDrops/releases/download/v1.3.4/ASDrops-v1.3.4.zip",
+          "sha256": "d24bcc5eeb7951658eefc01f285831df6ade4596048fa1d1556e48ba6a06b251",
+          "size": 30741,
+          "interface": 11200,
+          "folders": {
+            "ASDrops": "0e0b5dabfa48799fd061bc448ae87f4058f91eb9059dcc7e68805d9637c66ac7"
+          },
+          "notes": "## What's Changed\n* Write MAJOR.MINOR.PR into TOC version by @Valorless in https://github.com/Valorless/ASDrops/pull/4\n\n\n**Full Changelog**: https://github.com/Valorless/ASDrops/compare/v1.2.3...v1.3.4",
+          "downloads": 3
+        },
+        {
+          "tag": "v1.2.3",
+          "version": "1.2",
+          "published": "2026-10-31T03:14:10Z",
+          "prerelease": false,
+          "file": "ASDrops-v1.2.3.zip",
+          "url": "https://github.com/Valorless/ASDrops/releases/download/v1.2.3/ASDrops-v1.2.3.zip",
+          "sha256": "139ad4c93a899531603396c0a46bd2d847b66a43ff9c8f4602a6abf45b0e4700",
+          "size": 30737,
+          "interface": 11200,
+          "folders": {
+            "ASDrops": "27421e418259b1a6de66364903b8d64defeb37ae4726bc38b639f861f3174888"
+          },
+          "notes": "## What's Changed\n* Fix collection tracking and class icons for missing row by @Valorless in https://github.com/Valorless/ASDrops/pull/3\n\n\n**Full Changelog**: https://github.com/Valorless/ASDrops/compare/v1.1.2...v1.2.3",
+          "downloads": 3
+        },
+        {
+          "tag": "v1.1.2",
+          "version": "1.1",
+          "published": "2026-10-31T02:10:12Z",
+          "prerelease": false,
+          "file": "ASDrops-v1.1.2.zip",
+          "url": "https://github.com/Valorless/ASDrops/releases/download/v1.1.2/ASDrops-v1.1.2.zip",
+          "sha256": "5ea9f30ed47309c2ce94a6302208f14b2881e8dbb906cb0c2cccd847c1e643b1",
+          "size": 30110,
+          "interface": 11200,
+          "folders": {
+            "ASDrops": "87ce718689ac06229dbc093f3381623f595cfbd91b3a6d49ad35107b89de1e6f"
+          },
+          "notes": "## What's Changed\n* Add \"Missing in zone\" icon row and main bar preview by @Valorless in https://github.com/Valorless/ASDrops/pull/1\n* Add release workflow on PR merge; update TOC notes by @Valorless in https://github.com/Valorless/ASDrops/pull/2\n\n## New Contributors\n* @Valorless made their first contribution in https://github.com/Valorless/ASDrops/pull/1\n\n**Full Changelog**: https://github.com/Valorless/ASDrops/commits/v1.1.2",
+          "downloads": 3
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": [],
+      "downloads": 533
+    },
+    {
+      "id": "azs-max-hit",
+      "name": "AZS Max Hit",
+      "repo": "ghoulcompiler/AZSMaxHit",
+      "author": "ghoulcompiler",
+      "summary": "Each ability's biggest hit, biggest crit and best one-second burst; a party tab in co-op",
+      "group": "Meters and HUDs",
+      "folders": [
+        "AZSMaxHit"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "AZSMaxHit-*.zip"
+      },
+      "latest": {
+        "tag": "v1.5.3",
+        "version": "1.5.3",
+        "published": "2026-11-04T09:46:30Z",
+        "prerelease": false,
+        "file": "AZSMaxHit-1.5.3.zip",
+        "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.5.3/AZSMaxHit-1.5.3.zip",
+        "sha256": "e9c92416de636492fe2b63a413cf26f3589a22d9e714150b1d5e95250aae261b",
+        "size": 63562,
+        "interface": 11200,
+        "folders": {
+          "AZSMaxHit": "4271e0e304d788dfc49bab17beda93d6c64777aabd3eeed81713d65b3d337768"
+        },
+        "notes": "Tested with game 0.140.0.\r\n\r\n- Numbers no longer reset when you switch away from the browser and come back during a run. The addon now goes by the game's id for the run, on games that have one.\r\n- The window now sorts by Total by default. If you already clicked a column header, your choice is kept.\r\n- Hunter: Kill Command has its own row with its own Hit, Crit and Burst, so its big hits no longer count as the pet's.\r\n- Shaman: the game now reports all of Windfury Weapon together, so its Total under each spell is shared out by how much it hit there. The two Totals are an estimate and still add up to the game's\r\nmeter.\r\n- Updated for game 0.140's new names in every language, including Kill Command and the Tier 0.5 sets' damage lines.",
+        "downloads": 51
+      },
+      "earlier": [
+        {
+          "tag": "v1.5.2",
+          "version": "1.5.2",
+          "published": "2026-11-02T19:55:57Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.5.2.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.5.2/AZSMaxHit-1.5.2.zip",
+          "sha256": "1efee79adb3ae18c232223b07dc7f8a60e0acb880d802935d658f6f766477764",
+          "size": 61562,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "f9b237836a9c43dcb45906fadef79ba43cf334a8e0b5302f073b3c8313716255"
+          },
+          "notes": "Tested with game 0.139.0, in game in English, Russian and German.\r\n\r\n- Rows now show spell, demon and proc names in your game's language on game 0.139 and later, using the game's own translations, and group the same way as in English. The window's own text, like\r\ncolumn names, stays in English.\r\n- In co-op, names from a host playing in another language should be understood too. This hasn't been played yet.\r\n- Older game versions still need the game set to English.",
+          "downloads": 324
+        },
+        {
+          "tag": "v1.5.1",
+          "version": "1.5.1",
+          "published": "2026-11-02T18:35:21Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.5.1.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.5.1/AZSMaxHit-1.5.1.zip",
+          "sha256": "97e255527789637a5a63d85c4affd87a106e359f87c6b54353e3ed617d698521",
+          "size": 34138,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "20e2378ba8e6cdb13ea28923bbed4655ed0ac1f5282e69ac7d309dbb15eb852d"
+          },
+          "notes": "Tested with game 0.139.0.\r\n\r\n- Compact and Mini now stay on between games. The window used to open at full width every time.\r\n- `/maxhit help` now says no game settings are needed on game 0.139 and later.",
+          "downloads": 36
+        },
+        {
+          "tag": "v1.5.0",
+          "version": "1.5.0",
+          "published": "2026-11-02T06:48:54Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.5.0.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.5.0/AZSMaxHit-1.5.0.zip",
+          "sha256": "a8ac79c122da88c2d5f65b525d859fbbc6cfb4cc8c95ea4127bd5a25d4658866",
+          "size": 34067,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "b3d7e08378bb62f079f20d82a1b5bc33de951ea78ed9bbb76dcaca485b481726"
+          },
+          "notes": "Description:\r\nTested with game 0.139.0, in game on Shadow Priest, Warlock, Hunter and Enhancement Shaman.\r\n\r\n- Exact numbers for procs, thanks to the game's new data. On game 0.139 and later, the game says which damage meter line each hit counts\r\ntoward, and the addon now uses that for all classes. Shadow Weaving, Shadowy Apparitions, demons, pets and item procs get their own true Hit,\r\nCrit, Burst, Avg, Hits and Crit%, and a spell's row only counts its own hits. Hit should no longer end up above Crit because of a proc.\r\n- Grouping stays: procs sit under the ability they borrow, like Shadowy Apparitions under Mind Blast, and a demon under the spell it casts,\r\nlike the Dread Lord under Searing Pain, each with its own numbers. That spell's row shows `-` until you cast it yourself, so nothing jumps\r\nwhen you learn it. A summon's attacks stay under it, like Infernal: Melee and Hellfire under Infernal. Shadowform stands alone, since Corpse\r\nExplosion isn't a spell you pick.\r\n- Shaman: Windfury Weapon has a row under each spell that triggers it, like Stormstrike and Rockbiter Weapon, each with its own numbers,\r\nbecause its hits differ a lot between them. Eye of the Tempest now sits under Chain Lightning, so its damage no longer counts twice.\r\n- Hunter: Bestial Wrath's splashes are on its own row, so a pet's Hit, Crit and Avg only count its bites.\r\n- New `/maxhit feed` command lists which meter line the game credits each ability's hits to.\r\n- Older game versions keep working the way they did.\r\n- New Compact and Mini views, with C and M buttons next to R. Compact, or `/maxhit compact`, leaves only Total, Hit, Crit and Burst, with no\r\nOVERKILL tile. Mini, or `/maxhit mini`, leaves only Total, with TOP HIT and TOTAL on top. Both narrow the window, and the Party tab keeps its\r\nfull width.\r\n- The title bar has - and + buttons next to R that make the whole window smaller or bigger, in steps of 0.1. The window's top-right corner\n…",
+          "downloads": 186
+        },
+        {
+          "tag": "v1.4.0",
+          "version": "1.4.0",
+          "published": "2026-11-01T20:43:25Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.4.0.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.4.0/AZSMaxHit-1.4.0.zip",
+          "sha256": "461dd77713545cb55601c8e1c91eef094e8cd0e1ba4b03d8ad55e3b104263572",
+          "size": 28978,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "aa40ba5989d0e738835e7ec1c5d3cc65eca9a205ebec179a92132e55c1d11ca6"
+          },
+          "notes": "Description:\r\nTested with game 0.138.0.\r\n\r\n- Hunter pets now have real numbers. On game 0.138 and later, a Hunter's pet shows Hit, Crit, Burst, Avg, Hits and Crit% on its row, and can\r\nbe your TOP HIT and count toward BURST. A pet's special attacks share its one row, and OVERKILL still leaves pets out. A Frost Mage's Water\r\nElemental still shows only its Total, because the game doesn't report its single hits.\r\n- Hunter: Bestial Wrath's splashes go on its own row with their own numbers, so a pet's Hit, Avg and Hits only count its bites.\r\n- Shaman: Frostbrand Weapon now sits under Frost Shock.\r\n- Warlock: the Imp's row is now called Imp, with the Imp's icon, instead of Fireball.",
+          "downloads": 131
+        },
+        {
+          "tag": "v1.3.4",
+          "version": "1.3.4",
+          "published": "2026-11-01T19:06:09Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.3.4.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.3.4/AZSMaxHit-1.3.4.zip",
+          "sha256": "6ee2bce916ec0b08f97a4cbcaa7251dacb04944548c87081421dfc0e110aec6c",
+          "size": 27593,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "646a89bbaa4bbf41b631ae7e3a88bcb7167a12708054310c36d99a832f0ac714"
+          },
+          "notes": "Description:\r\n- Priest: Shadow Weaving strikes logged under Mind Blast, Psychic Scream, Mind Flay and other Shadow spells now move to the Shadow Weaving row when they are bigger than the spell's biggest crit, including ones that landed earlier in the run. Smaller strikes of a size already seen on that enemy no longer set the spell's Hit either, so Hit gets closer to its real number and should less often beat Crit. Those smaller strikes still count in the spell's Avg and Hits, Shadowy Apparitions still count under Mind Blast, and Burst can stay a little high.\r\n- New `/maxhit scale` command makes the whole window smaller or bigger, from 0.6 to 1.5, for example `/maxhit scale 0.8`. The setting is\r\nremembered.\r\n- The BURST, TOTAL and PARTY TOTAL tiles now use short numbers like 388K and 16.49M. TOP HIT keeps the full number and has more room for the ability's name.",
+          "downloads": 46
+        },
+        {
+          "tag": "v1.3.3",
+          "version": "1.3.3",
+          "published": "2026-11-01T16:58:50Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.3.3.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.3.3/AZSMaxHit-1.3.3.zip",
+          "sha256": "4ebb0b5341f9324ea3ae1ea2a375e62251eb6e5bc2ef38bb490f2dab27485c54",
+          "size": 25364,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "2c2e1dd39e7d150f18ff6b1972c40c6d74f2b1f3f2672dda8e475ee69360c36f"
+          },
+          "notes": "Description:\r\n- Big hits that mostly overkill now go to the proc that caused them, when a damage-over-time spell has exactly one proc under it. For example,\r\nPendant of the Plague's explosions no longer end up in an \"Other hits\" row under Devouring Plague.\r\n- Procs like Shadow Weaving no longer take a hit far above their usual size when the spell has its own proc, so Pendant of the Plague's\r\nexplosions stop inflating Shadow Weaving's Hit.",
+          "downloads": 45
+        },
+        {
+          "tag": "v1.3.2",
+          "version": "1.3.2",
+          "published": "2026-11-01T14:44:00Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.3.2.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.3.2/AZSMaxHit-1.3.2.zip",
+          "sha256": "6e84a8692597ddde5e459514f774ee89d02cdb5158635bc152073df7647cf3af",
+          "size": 24974,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "ba1fb32b71f878d194f4cf180803ae25ad6eed00309766ea392968fcf813f5e5"
+          },
+          "notes": "Description:\r\n  - A summon's attacks are grouped: Infernal: Melee and Hellfire sit indented under Infernal, with the summon's total on the top row and each  attack keeping its own Hit, Crit and Avg.",
+          "downloads": 44
+        },
+        {
+          "tag": "v1.3.1",
+          "version": "1.3.1",
+          "published": "2026-11-01T14:06:12Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.3.1.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.3.1/AZSMaxHit-1.3.1.zip",
+          "sha256": "0361297f235eaa0d554906fe6a5b50fcb0fe807bb6f24a65d27347fba4e85cba",
+          "size": 24602,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "1b33ea3aced8497fc393081e06d2163cbbb483322f211171b8a94c0c92cf2329"
+          },
+          "notes": "Description:\r\n  - Total and Burst columns now use short numbers like 17.2K, 317K and 5.31M. Hit, Crit and Avg stay full numbers, and the TOTAL and BURST tiles\r\n  at the top still show the exact number.\r\n  - The window is narrower, 500 instead of 550 wide, so it covers less of the game.\r\n  - Times are now off by default: the At column and the time next to TOP HIT and BURST. Turn them on with `/maxhit at`, which also widens the\r\n  window a little.\r\n  - The Party tab's Total also uses short numbers.\r\n  - Priest: Breath of the Black Dragon's burn no longer appears a second time as an \"Ignite\" row. Its hits now show on the necklace's row under\r\n  Mind Flay, and the rows add up to TOTAL.\r\n  - Choker of the Fire Lord now sits under Blast Wave, the name its blasts have in the combat log, so they no longer show as a separate total.\r\n  - The game meter's Other line, for damage it doesn't credit to a spell or item, has an icon instead of a question mark.\r\n  - An \"Other hits\" row only shows when it is at least 1% of the spell's logged damage, so a stray hit or two no longer adds a row. `/maxhit\r\n  top` still lists them.",
+          "downloads": 8
+        },
+        {
+          "tag": "v1.3.0",
+          "version": "1.3.0",
+          "published": "2026-11-01T11:27:13Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.3.0.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.3.0/AZSMaxHit-1.3.0.zip",
+          "sha256": "008fe011a95fbbbe1cfe84e64c1d9da8ec0fe3019645a3d35c35ec6362286bcb",
+          "size": 23604,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "a76a6d789b426aac725569747db3da8b77de1c499a4da974e5b929f09de9e083"
+          },
+          "notes": "Every class has been played and checked against the game's meter on game 0.135.1, so the rows now add up to TOTAL in far more cases.\r\n\r\n**All classes**\r\n\r\n- Damage the game's meter lists with no matching combat log name now gets its own row, so it no longer goes missing.\r\n- An ability whose hits all come from a proc under it now shows `-` as its Total, and the proc row shows the damage. Examples are Eviscerate with Seal Fate before you learn Eviscerate, and Corpse Explosion with Shadowform or Seed of Corruption. Its Hit, Crit, Burst, Avg and Hits still show.\r\n- Pets: the game meter's Pets line has a row with an icon. With one kind of summon out, it is named after it, like Water Elemental. Summons whose hits are in the combat log show one row, not two.\r\n- OVERKILL no longer shrinks or disappears when you have pets.\r\n- New icons show up sooner at the start of a run.\r\n\r\n**By class**\r\n\r\n- Warrior: Deep Wounds is one row instead of two.\r\n- Rogue: Seal Fate sits under Eviscerate. Toxic Bloom is one row instead of a separate \"Noxious Cloud\".\r\n- Druid: Blood Frenzy is one row instead of a separate \"Rip\". Treants are one row.\r\n- Hunter: Immolation Trap, Explosive Trap and Frost Trap are one row each.\r\n- Warlock: Soulfire is one row. Each demon takes its Total from the game's meter and counts once. The Infernal's landing is part of its row. Dread Lord sits under Searing Pain and Doomguard under Shadow Bolt, the spells they cast, and both have icons.\r\n- Priest: Penance is one row instead of a separate \"Holy Shock\".\r\n- Shaman: Searing Totem's damage shows as Searing Totem with its icon, instead of \"Attack\".",
+          "downloads": 39
+        },
+        {
+          "tag": "v1.2.1",
+          "version": "1.2.1",
+          "published": "2026-11-01T09:09:39Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.2.1.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.2.1/AZSMaxHit-1.2.1.zip",
+          "sha256": "31d376e221097e6afc57d574bd64e7b88514f892619c9c4237b2141aa3fcdf25",
+          "size": 21315,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "092e216e164e9027cbbd4dd002052365a9e04a8ebb0892e42054125ad17cf00b"
+          },
+          "notes": "Description:\r\n- Updated for the Enhancement Shaman rework (game 0.134 and 0.135): Stormstrike and Rockbiter Weapon have their icons, Flametongue Weapon sits under Fire Nova, and Eye of the Tempest sits under Stormstrike.\r\n- Procs and necklaces without a known icon now take theirs from the game's meter, so new ones stop showing a question mark.\r\n- After you leave a co-op run with End Run, your next solo run no longer shows the old party in the Party tab.\r\n\r\nTested with game version 0.135.1.",
+          "downloads": 12
+        },
+        {
+          "tag": "v1.2.0",
+          "version": "1.2.0",
+          "published": "2026-11-01T01:12:51Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.2.0.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.2.0/AZSMaxHit-1.2.0.zip",
+          "sha256": "2111b5a56c5b0d44ba755cf49b28fe848198f72887abeb8b0bb37ae82cd60399",
+          "size": 20842,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "5e7cf8515cac4996522e063d8b254198614aa329bd951d0500fbbb6a4f30cff2"
+          },
+          "downloads": 42
+        },
+        {
+          "tag": "v1.1.0",
+          "version": "1.1.0",
+          "published": "2026-10-31T22:54:32Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.1.0.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.1.0/AZSMaxHit-1.1.0.zip",
+          "sha256": "af49921c8cb340d31a8994f50dac9ea1cf32c4a7dfab95f00227c1efdd2b2e0f",
+          "size": 16032,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "179a20ab13ba90a0c9a613d89e850b10f7d6ccd29937bb921fdfb4d93dc51c12"
+          },
+          "downloads": 18
+        },
+        {
+          "tag": "v1.0.0",
+          "version": "1.0.0",
+          "published": "2026-10-31T20:33:37Z",
+          "prerelease": false,
+          "file": "AZSMaxHit-1.0.0.zip",
+          "url": "https://github.com/ghoulcompiler/AZSMaxHit/releases/download/v1.0.0/AZSMaxHit-1.0.0.zip",
+          "sha256": "05364a6af70fd87bad2a2aee09ec30b67fedb621da019769df20b28f69564a40",
+          "size": 13216,
+          "interface": 11200,
+          "folders": {
+            "AZSMaxHit": "9682d9cd2c25aad6f40d2a638642f8c68565addf5693ee2ba153fa177fa32af7"
+          },
+          "downloads": 20
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": [],
+      "downloads": 1002
+    },
+    {
+      "id": "vulchans-combat-text",
+      "name": "Vulchan's Combat Text",
+      "repo": "Vulchan/Vulchan-s-Combat-Text",
+      "author": "Vulchan",
+      "summary": "Condenses the floating combat text into a readable form",
+      "group": "Meters and HUDs",
+      "folders": [
+        "VulchansCombatText"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "VulchansCombatText.zip"
+      },
+      "latest": {
+        "tag": "v0.4.14",
+        "version": "0.4.14",
+        "published": "2026-10-31T16:05:25Z",
+        "prerelease": false,
+        "file": "VulchansCombatText.zip",
+        "url": "https://github.com/Vulchan/Vulchan-s-Combat-Text/releases/download/v0.4.14/VulchansCombatText.zip",
+        "sha256": "156b4361ebeb385001d2cf2d16bbab00a7772c282db5be8cb071481505005853",
+        "size": 7752,
+        "interface": 11200,
+        "folders": {
+          "VulchansCombatText": "2834c8c9482c890007a820d19b3454f4a6b1bcc0664adeb49faf9be36e777b79"
+        },
+        "notes": "**Full Changelog**: https://github.com/Vulchan/Vulchan-s-Combat-Text/compare/v0.3.4...v0.4.14",
+        "downloads": 758
+      },
+      "earlier": [
+        {
+          "tag": "v0.3.4",
+          "version": "0.3.4",
+          "published": "2026-10-31T03:03:47Z",
+          "prerelease": false,
+          "file": "VulchansCombatText.zip",
+          "url": "https://github.com/Vulchan/Vulchan-s-Combat-Text/releases/download/v0.3.4/VulchansCombatText.zip",
+          "sha256": "9643d744c7410d80b2849f09a79fe3de77aa49c12e29fe3adf485ddb71df413a",
+          "size": 5652,
+          "interface": 11200,
+          "folders": {
+            "VulchansCombatText": "f5b55d30aa1f4edc636d4b33fb0bdf2ff7ebb8b40ffca0aab54a68755e08e33b"
+          },
+          "notes": "## What's Changed\n* feat: added release ci and extracted addon files from zip by @Rezondes in https://github.com/Vulchan/Vulchan-s-Combat-Text/pull/1\n\n## New Contributors\n* @Rezondes made their first contribution in https://github.com/Vulchan/Vulchan-s-Combat-Text/pull/1\n\n**Full Changelog**: https://github.com/Vulchan/Vulchan-s-Combat-Text/commits/v0.3.4",
+          "downloads": 153
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": [],
+      "downloads": 911
     },
     {
       "id": "azeroth-cursor",
@@ -3960,7 +4710,7 @@
           "AzerothCursor": "0d55473f67df32b3f58a6c641ca6e65246a459e56cd8f362244c6ef0c94694d3"
         },
         "notes": "# Azeroth Cursor 1.2.0 — Optional Class Icons\n\nShow your class crest on the cursor — or keep the ring alone. Marker and icon are\nindependent. Thanks to **Joker / Kohrinthian** for the class masks in\n[PR #2](https://github.com/Maidenquinn/AzerothCursor/pull/2)!\n\n## Optional class icon\n\n- Toggle **Class icon** / **Icône de classe** (**off by default**).\n- Use the icon alone, the ring marker alone, or both together.\n- All nine classes, including Rogue / Voleur, as circular white masks that tint\n  with your marker color.\n- Dedicated **class icon size** slider (8–120).\n- With the icon on, class-color buttons also choose which crest to display.\n\n## Randomize and polish\n\n- **Random** / **Aléatoire** (and `/azcursor random`): marker stays on; randomizes\n  halo, class icon, sliders, color and icon token.\n- Live cursor overlay while options are open.\n- Preview keeps the same marker/icon proportions as the real cursor.\n- Texture reload when switching class so preview and live stay in sync.\n\n## Download and update\n\nDownload **AzerothCursor-1.2.0.zip** below. Close the game, replace the `AzerothCursor`\nfolder in your active `benilla-config/AddOns` directory, keep `AzerothCursorDB`, and restart.\nOpen the cyan minimap button or `/azcursor`.\n\nUse the attached player ZIP rather than GitHub's automatic source archive.\nYour saved settings and original-cursor default are preserved. No other addon is required.\n\n## Validation\n\nNative Lua 5.0.3 regression tests cover optional/independent class icons, all nine\nmasks, Random, preview proportions, FR/EN, class colors, scaled maps and persistence.\nRuntime syntax, TOC/version consistency and all twenty TGA assets pass as well.\n\nTests simulate FrameXML behavior; keep an eye on native rendering after `/reload`.\n\n[Full changelog](https://github.com/Maidenquinn/AzerothCursor/blob/v1.2.0/CHANGELOG.md) · [Report an issue](https://github.com/Maidenquinn/AzerothCursor/issues)",
-        "downloads": 231
+        "downloads": 233
       },
       "earlier": [
         {
@@ -3998,7 +4748,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 528
+      "downloads": 530
     },
     {
       "id": "big-cursor",
@@ -4028,12 +4778,12 @@
           "BigCursor": "dfecc5a7cfe54566009a9b290f98ab0370e905d99697ead5ec219cb9bb360fd4"
         },
         "notes": "Tired of losing track of your mouse cursor in the middle of the action? Big Cursor makes it easier to spot your cursor in-game with a larger, more visible pointer. A simple, lightweight quality-of-life addon designed to help you keep your cursor in sight when you need it most.",
-        "downloads": 370
+        "downloads": 372
       },
       "earlier": [],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 370
+      "downloads": 372
     },
     {
       "id": "cursor-reticle",
@@ -4131,7 +4881,7 @@
           "ASBuilder": "47076745dc7e5e6b1cdc5c4872cc2145a7758a0a339bc9ac2543cedb90092996"
         },
         "notes": "Updated for game 0.140.0.\n\n- Hunter: Kill Command replaces Explosive Trap, with its new legendary amulet, Heart of the Packlord. Your saved builds switch Explosive Trap to Kill Command on their own, and so do imported codes.\n- Amulet tooltips match the game again: Heart of the Packlord, Ice Barrier and Power Word: Shield (The Eternal Talisman) now raise the absorb cap, Eye of the Tempest adds +35% Stormstrike damage to bosses, elites and Guardians, and Amulet of the Inferno no longer lists its Consecration damage.\n- Spell, amulet and effect names are updated in every language.",
-        "downloads": 353
+        "downloads": 491
       },
       "earlier": [
         {
@@ -4148,7 +4898,7 @@
             "ASBuilder": "04bcad578db0f748853a979fbb9686dc539b083805594a4305d8e7b189a9f08b"
           },
           "notes": "Matched with the website, and the example builds are gone.\n\n- A build now has one note instead of one per stage, same as on the website. It can be up to 2000 characters. If you import an older build with several notes, the first filled one is kept.\n- \"Fill empty slots before upgrading\" is always on now, so the checkbox is gone.\n- A banished spell now counts toward the 6 spells, same as on the website. You can still banish up to 3.\n- The Spells tab tooltip in the planner now says \"Please list spells for upgrade priority\".\n- New installs start with no example builds, they were out of date. Your own builds stay as they are.",
-          "downloads": 3780
+          "downloads": 3781
         },
         {
           "tag": "v1.11.0",
@@ -4462,7 +5212,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 26261
+      "downloads": 26400
     },
     {
       "id": "azerloot",
@@ -4492,7 +5242,7 @@
           "Azerloot": "9ae70a6614c21237dbb59af02295c2d42be6652717179fa05c047db50616233d"
         },
         "notes": "The Shaman's rework is in the book: Stormstrike, Rockbiter Weapon and the five new necklaces, with their real numbers. Plus Seal of the Damned's new ceiling and the game's latest texts in every language.\r\n\r\n⚡ Shaman\r\n\r\n* New spells: Stormstrike and Rockbiter Weapon, each with its picture, what it does and a line under its name. Call of Flame is gone.\r\n* New necklaces, with their rank-1 numbers as the game has them:\r\n  * Cinderheart Pendant (Fire Nova): +50% area, +25% damage, its hits stun for 1.5 sec.\r\n  * Winter's Embrace (Frost Shock): slows by 70% for 6 sec, 75% more damage to already chilled enemies.\r\n  * Earthshatter Seal (Earth Shock): 75% more damage to enemies below 35% health, a kill cuts its remaining cooldown by 50%.\r\n  * Emberwake Pendant (Flame Shock): +40% damage, each tick also hits 2 nearby enemies within 6 yd for 50% damage.\r\n  * Eye of the Tempest (Stormstrike): every fourth Stormstrike strikes again for 100% damage, with one more target at ranks 5 and 10.\r\n* Rockbiter Weapon wears the Medallion of the Bladestorm, like Cleave and Shred.\r\n* Lightning Shield and Healing Wave no longer have a necklace: the Shaman's class amulets count 10 now.\r\n* Builds: with Rockbiter Initiation a build can start with Rockbiter Weapon instead of Lightning Bolt. Shared build codes keep it.\r\n* Your saved builds and older build codes simply drop Call of Flame and the necklaces that are gone, so their places are free again.\r\n\r\n💍 Rings\r\n\r\n* Seal of the Damned: 48% at Legendary (was 40%), and picked again it grows toward 100% (was 40%).\r\n\r\n🌍 Languages\r\n\r\n* The new spells, necklaces and their lines in the game's own words in German, French, Spanish and Portuguese.\r\n* Tooltips are read in every game language again after the latest updates: the Enhancement talents, the necklaces' target ranks, Pact of the Nathrezim, the Dwarf's and Human's new racials, and more.\r\n\r\n⬆️ Updating\n…",
-        "downloads": 1777
+        "downloads": 1792
       },
       "earlier": [
         {
@@ -4658,7 +5408,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 5941
+      "downloads": 5956
     },
     {
       "id": "azeroth-stats",
@@ -4688,7 +5438,7 @@
           "AzerothStats": "67396b310bcc1299e295ab89269eb87d83e7845f5d57bded4c129f9e98c52be3"
         },
         "notes": "# Azeroth Stats 2.0.0 — First full V2 release\n\nAzeroth Stats 2.0.0 consolidates changes delivered since **2.0.0-dev.12** into one installable release. Existing local statistics, saved data and V1 accounting are preserved while V2 history, navigation, personal tracking and data safety are expanded.\n\n## Home screen, history and navigation\n- Clear **Overview** and **All statistics** tabs with active-view highlighting and consistent navigation.\n- Revised dashboard, recent runs and personal objectives; Edit page and Restore hidden rows controls repositioned at the lower right.\n- **My runs** history: direct Back navigation from Compare runs, retained pagination, and combined local filtering by map, date, level, kills, gold and survival duration.\n- Collapsible advanced filters, min/max numerical input and paired sliders, map filter alongside difficulty, date calendar buttons, input validation and reset.\n- More readable Settings, backup manager, and other crowded screens.\n\n## Data editing and protection\n- **Reset this total** on lifetime Overview counters without deleting retained runs. Accounting fences prevent late run events from automatically repopulating intentionally reset values.\n- Ledger-aware run deletion adjusts attributable totals and invalidates affected records. Retention-pruned history cannot be recreated by resync.\n- A validated independent safety backup precedes destructive local operations; failed backups block deletion.\n- **Backup now**, append-only manual backup history and a rotating record of up to 15 automatic safety snapshots.\n- Paginated manager for selecting, inspecting, restoring or deleting an individual snapshot with confirmations. Previously stored single-slot backups migrate into the history.\n- Backup/restore/resync chat commands; UI reload after completed backup/restore operations.\n\n## Combat Intelligence and newer client support\n- Passive detection of supported native capabilities with graceful fallbacks.\n…",
-        "downloads": 296
+        "downloads": 307
       },
       "earlier": [
         {
@@ -4801,7 +5551,7 @@
             "AzerothStats": "aecfd0998fa3a7fd1aa55c763889847a43e9edc55211006632d586e99ff12963"
           },
           "notes": "# Azeroth Stats 1.6.1-beta.1 — Co-op, Build Journal & UX\n\nA clearer way to find your runs, review group performance and follow your build's progression.\n\n## What's changed\n\n- **Co-op context:** observed multiplayer runs are marked in History, recent-run context, selectors and reports. The displayed player count belongs to the last shared snapshot, not every player ever present.\n- **Group reports:** available player damage/DPS, group totals, sample size, supported rankings/contributions and top-spell/source tooltips. `/azstats coop` opens the selected/current/latest run report. Independently captured or incomplete samples remain partial and do not produce invented team totals/ranks.\n- **Observed Build journal:** timestamped rank/equipment changes and global-stat checkpoints, before/after values and category filters. Logging avoids ordinary stat fluctuations. Initial states are baselines, and partial/limited observations remain explicit. `/azstats journal` opens it.\n- **Searchable History:** literal text search plus result, observed co-op and favorite filters alongside class/difficulty. Summary cards describe the filtered retained list. Reset clears filters; missing party evidence never labels a run solo.\n- **Clearer navigation:** Usage becomes Trends; companion-history links lead to run reports. Run menus share identity/context. Combat/Character drilldowns keep the selected run.\n- **More accurate labels:** official provenance is assigned per matching summary field; partial co-op headings stay neutral. Large DPS is compact on revised widgets with exact values on hover.\n- **Safer history retention:** reductions that would remove details ask for confirmation showing the current removal count. Cancel keeps history/settings; changed impact requires confirmation again. Protected favorites, live run and cumulative ledgers stay protected.\n- **Accessibility/localization:** improved body-text fitting, new labels in all fourteen languages and updated CJK glyph coverage.\n…",
-          "downloads": 87
+          "downloads": 88
         },
         {
           "tag": "v1.6.0-beta.2",
@@ -4884,7 +5634,155 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 2822
+      "downloads": 2834
+    },
+    {
+      "id": "azeroth-hub",
+      "name": "Azeroth Hub",
+      "repo": "Maidenquinn/AzerothHub",
+      "author": "Maidenquinn",
+      "summary": "One place to open your addons, tweak what they expose and switch between saved setups",
+      "group": "Tools",
+      "folders": [
+        "AzerothHub"
+      ],
+      "asset": {
+        "kind": "file",
+        "pattern": "AzerothHub*.zip"
+      },
+      "latest": {
+        "tag": "v0.7.5",
+        "version": "0.7.5",
+        "published": "2026-11-01T19:35:07Z",
+        "prerelease": false,
+        "file": "AzerothHub-0.7.5.zip",
+        "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.7.5/AzerothHub-0.7.5.zip",
+        "sha256": "828123abe23fb69ab1fbb7c31c6cfc72d99ebe785ddbc231cb31f08133ef1ec2",
+        "size": 127420,
+        "interface": 11200,
+        "folders": {
+          "AzerothHub": "04bcdce299e5312395d421e8268e79b589710c979350870c0658a011bbe890ce"
+        },
+        "notes": "Fix: language switch now refreshes search bars, profiles, appearance and default profile labels. Install AzerothHub-0.7.5.zip then /reload.",
+        "downloads": 124
+      },
+      "earlier": [
+        {
+          "tag": "v0.7.4",
+          "version": "0.7.4",
+          "published": "2026-11-01T17:54:16Z",
+          "prerelease": false,
+          "file": "AzerothHub-0.7.4.zip",
+          "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.7.4/AzerothHub-0.7.4.zip",
+          "sha256": "2f924a0fb564b69f20b09726444373a573ecaaf5a17d4b59d932b465c928f23b",
+          "size": 126636,
+          "interface": 11200,
+          "folders": {
+            "AzerothHub": "842c437816f007c4ceac059229a969bf8ae82d87cd9b57c885ed08fb58af5310"
+          },
+          "notes": "Fix language dropdown labels (UTF-8 truncation). Install AzerothHub-0.7.4.zip then /reload.",
+          "downloads": 2
+        },
+        {
+          "tag": "v0.7.3",
+          "version": "0.7.3",
+          "published": "2026-11-01T17:51:41Z",
+          "prerelease": false,
+          "file": "AzerothHub-0.7.3.zip",
+          "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.7.3/AzerothHub-0.7.3.zip",
+          "sha256": "6f2fcf226138209e4d98f73545887df7712bde72dc23c0216da6798ac787a0f6",
+          "size": 126501,
+          "interface": 11200,
+          "folders": {
+            "AzerothHub": "ab7522f676a2a11a8e98545d5981d0139342780a29a8236d914e36d61bcf45c4"
+          },
+          "notes": "## Azeroth Hub 0.7.3\n\nLanguage dropdown in the top bar next to **Appearance** (Automatic + all 14 game languages).\n\n### Install\n`AzerothHub-0.7.3.zip` → `AddOns` → `/reload`",
+          "downloads": 2
+        },
+        {
+          "tag": "v0.7.2",
+          "version": "0.7.2",
+          "published": "2026-11-01T17:46:00Z",
+          "prerelease": false,
+          "file": "AzerothHub-0.7.2.zip",
+          "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.7.2/AzerothHub-0.7.2.zip",
+          "sha256": "38a00edbbf2f0ab1c745d93d3aff885705f2f7114f5a00e0e1b6ebb89fc6e9d4",
+          "size": 126085,
+          "interface": 11200,
+          "folders": {
+            "AzerothHub": "f448418a64f4366f69161afa7dfe13052e469bd7cc0d045ed0d320a4d7f1fb58"
+          },
+          "notes": "## Azeroth Hub 0.7.2\n\n- Language in **Appearance** (plus Hub → Language)\n- **Back to Hub** closes the native options window\n- Collapsible left sections (With settings / catalog)\n- French accents; Hub first in the settings list\n\n### Install\n`AzerothHub-0.7.2.zip` → `AddOns` → `/reload`",
+          "downloads": 2
+        },
+        {
+          "tag": "v0.7.1",
+          "version": "0.7.1",
+          "published": "2026-11-01T17:40:45Z",
+          "prerelease": false,
+          "file": "AzerothHub-0.7.1.zip",
+          "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.7.1/AzerothHub-0.7.1.zip",
+          "sha256": "e0d963a3ad134ea8ebd7ee8eb3684f2b5a3e66786d6b8f11082f8b42e94eec99",
+          "size": 125132,
+          "interface": 11200,
+          "folders": {
+            "AzerothHub": "e67f77465c9fd9bab40df6585c17da71ec31323b1aa69867f8a98f3ff4c22c3e"
+          },
+          "notes": "## Azeroth Hub 0.7.1\n\n- UI and Hub-authored settings in all **14** Survivors languages\n- Follows game language (`azsLanguage`); override under Hub → Language\n- Profiles, unified settings UI, SurvivorsForge catalog\n\n### Install\n\nDownload **AzerothHub-0.7.1.zip** (not Source code), extract `AzerothHub` into `AddOns`, relaunch. `/azhub`",
+          "downloads": 2
+        },
+        {
+          "tag": "v0.7.0",
+          "version": "0.7.0",
+          "published": "2026-11-01T17:20:42Z",
+          "prerelease": false,
+          "file": "AzerothHub-0.7.0.zip",
+          "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.7.0/AzerothHub-0.7.0.zip",
+          "sha256": "1b7ac982166ddb8c5bc9097146c26c42b93ee3a038560b38445904e5204ce17d",
+          "size": 38611,
+          "interface": 11200,
+          "folders": {
+            "AzerothHub": "c39aea3339eeff5849a5d4351e4de20a93c4116cf4d9e446d083daaa8c4425e6"
+          },
+          "notes": "## Azeroth Hub 0.7.0\n\nPremière release publique du Hub élargi.\n\n- Plusieurs profils, interface unique pour les réglages intégrés, chargement dynamique\n- Catalogue aligné sur les addons référencés sur https://forge.rezondes.net/\n- Schémas Hub (Cursor 1.2, FieldKit, Azerloot, Stats, Survivor UI/Plates, etc.) + ouverture native pour le reste\n- Guide auteurs : `docs/INTEGRATION.md` (`AzerothHubCatalog`)\n\n### Installation\n\nTélécharger **AzerothHub-0.7.0.zip** (pas Source code), extraire le dossier `AzerothHub` dans `AddOns`, relancer. `/azhub`",
+          "downloads": 2
+        },
+        {
+          "tag": "v0.6.1-test",
+          "version": "0.6.1-test",
+          "published": "2026-10-31T16:26:19Z",
+          "prerelease": true,
+          "file": "AzerothHub-0.6.1-test.zip",
+          "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.6.1-test/AzerothHub-0.6.1-test.zip",
+          "sha256": "7fa757d4405590fe89420f53947c633534560f1c8762d351093c83943d754bdf",
+          "size": 47820,
+          "interface": 11200,
+          "folders": {
+            "AzerothHub": "b0793b75f71b59a16dd22ffdc37926785330947904be1100bf2655619477e8ea"
+          },
+          "notes": "Correctif de chargement. La 0.6.0-test s'arretait a l'ouverture : Manager.lua lisait un champ points qui n'existe que dans les tests.\n\nTelecharger AzerothHub-0.6.1-test.zip, extraire AzerothHub dans AddOns, puis /reload ou relancer le jeu.",
+          "downloads": 2
+        },
+        {
+          "tag": "v0.6.0-test",
+          "version": "0.6.0-test",
+          "published": "2026-10-31T16:22:30Z",
+          "prerelease": true,
+          "file": "AzerothHub-0.6.0-test.zip",
+          "url": "https://github.com/Maidenquinn/AzerothHub/releases/download/v0.6.0-test/AzerothHub-0.6.0-test.zip",
+          "sha256": "98933385748fdf2f8c76b266054994b310029b1cdca7fa375cd8459fedf11655",
+          "size": 47657,
+          "interface": 11200,
+          "folders": {
+            "AzerothHub": "59b74d1fd31c658aad97154dccbf8039a9810f975dd442ae6f21e6a996541b43"
+          },
+          "notes": "## Azeroth Hub 0.6.0-test\n\nVersion de test, pas une version stable. Les suites Lua 5.0 passent, y compris les schémas installés d'Azerloot et le rendu Cursor. Le rendu de cette interface n'a pas été validé dans le client : une partie était en cours au moment de l'installation, et l'interface n'a pas été rechargée.\n\n### Installation\n1. Fermer le jeu, ou recharger l'interface après avoir fermé les fenêtres sensibles.\n2. Télécharger **AzerothHub-0.6.0-test.zip** (pas l'archive Source code).\n3. Extraire le dossier `AzerothHub` dans `benilla-config/AddOns`.\n4. Relancer le jeu.\n\n### Cette version\nLe gestionnaire se lit dans l'ordre profil, addon, onglet, section, réglage. Les trois apparences restent au choix. Les profils ne copient pas les collections ni l'activation des addons.\n\n### Limites\nTous les réglages ne sont pas importés. Le suivi des sorts d'Azerloot est exclu des profils. Un rechargement nécessaire est signalé, jamais lancé automatiquement.",
+          "downloads": 2
+        }
+      ],
+      "doesnt_mix_with": [],
+      "notes": [],
+      "downloads": 138
     }
   ]
 }
