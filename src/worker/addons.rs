@@ -2032,13 +2032,7 @@ impl Worker {
         // installed addon, or one another PC brings), a download under way, whether releases
         // were checked at all.
         let waiting_ok = rows.iter().filter(|r| r.reason_kind == 1 && (r.can_update || r.incoming) && !r.installing).count();
-        let rail = satchel_core::shell::AddonsFacts {
-            count: a.lines.len(),
-            at_play: by_itself,
-            waiting_ok,
-            downloading: !a.fetching.is_empty() || !a.waiting.is_empty(),
-            checked: a.looked.is_some(),
-        };
+        let rail = satchel_core::shell::addons_facts(&a.lines, waiting_ok, !a.fetching.is_empty() || !a.waiting.is_empty(), a.looked.is_some());
         AddonsView {
             count: a.lines.len(),
             rows,

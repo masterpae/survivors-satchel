@@ -48,9 +48,9 @@ export struct PcRow {
 }
 
 // A button of a Needs-you question: its words, what it does (`action`, as the app numbers them:
-// 0 keep this PC's progress, 1 use the other PC's, 2 keep this PC's game settings, 3 use the
-// other PC's, 4 use this PC's own from before it joined, 5 keep this PC's addon settings, 6 use the
-// other PC's, 7 Install anyway, 8 Show what it found, 9 Open Settings) and the addon it names.
+// 0 Choose… (the progress question, over the window), 1 keep this PC's game settings, 2 use the
+// other PC's, 3 use this PC's own from before it joined, 4 keep this PC's addon settings, 5 use the
+// other PC's, 6 Install anyway, 7 Show what it found, 8 Open Settings) and the addon it names.
 export struct QuestionButton {
     text: string,
     action: int,
@@ -297,7 +297,7 @@ export struct VersionsRow {
     loading: bool,
 }
 
-// The app's own colours (0.9's design mock), each in a dark and a light version; `dark` follows
+// The app's own colours (see docs/plan-0.9.md), each in a dark and a light version; `dark` follows
 // the window's theme. The surfaces: the window, the panel (the rail, the cards, the tables, the
 // pane, Settings' boxes), the alternate box, hover, the line, the selected row.
 global Look {
@@ -326,8 +326,8 @@ global Look {
     out property <color> ink: text;
     out property <color> note-paper: sel;
     // Who vouches for an addon: Discord Verified (green), added by link (blue), from a file
-    // (gold), by hand (muted); then SurvivorsForge's word: it lets it in (green, as the mock has
-    // it), it waits for the player's OK (amber), never (red). Every ink reads at 4.5:1 or more on
+    // (gold), by hand (muted); then SurvivorsForge's word: it lets it in (green), it waits for
+    // the player's OK (amber), never (red). Every ink reads at 4.5:1 or more on
     // its paper, in both themes (checked in the 0.9 pull request): the light theme's green and gold
     // inks are darker than the text colours of the same name for that.
     public pure function badge-ink(kind: int) -> color {
@@ -555,8 +555,15 @@ component Segment inherits Rectangle {
     in property <bool> active;
     in property <bool> filled;
     in property <bool> first;
+    in property <bool> last;
     callback clicked();
-    height: 28px;
+    // Inside its control's 1 px border: 28 px with it. The ends round their own corners (the
+    // software renderer clips without corners).
+    height: 26px;
+    border-top-left-radius: root.first ? 5px : 0;
+    border-bottom-left-radius: root.first ? 5px : 0;
+    border-top-right-radius: root.last ? 5px : 0;
+    border-bottom-right-radius: root.last ? 5px : 0;
     background: root.active ? (root.filled ? Look.accent : Look.sel) : touch.has-hover ? Look.hover : transparent;
     accessible-role: tab;
     accessible-label: root.text;
@@ -615,7 +622,7 @@ component MenuRow inherits Rectangle {
 
 // A plain button in the app's own look: a 1 px line, 6 px corners, the panel colour; `primary` on
 // the accent colour. The std Button stays where it is; this one sits in the cards, the rows and
-// Settings, where the std one's look clashes with the mock's surfaces.
+// Settings, where the std one's look clashes with the app's surfaces (see docs/plan-0.9.md).
 component PlainButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary;
@@ -636,6 +643,7 @@ component PlainButton inherits Rectangle {
         Text {
             text: root.text;
             font-size: root.font-size;
+            horizontal-alignment: center;
             vertical-alignment: center;
             color: !root.enabled ? Look.muted : root.primary ? #ffffff : Look.text;
         }
@@ -723,6 +731,7 @@ component Installing inherits HorizontalLayout {
     if root.small: Text {
         text: root.text;
         font-size: 11px;
+        overflow: elide;
         vertical-alignment: center;
         color: Look.muted;
     }
@@ -746,13 +755,40 @@ component CheckMark inherits Rectangle {
     }
 }
 
-// A small button in a table's cell: the primary kind filled, the plain one outlined.
+// The installed mark at the minimum window, where the name needs the check mark's room: a green
+// disc with the check over the square's lower right corner, ringed in the row's colour (`ring`).
+component CornerCheck inherits Rectangle {
+    in property <color> ring;
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    background: Look.green;
+    border-width: 1.5px;
+    border-color: root.ring;
+    accessible-role: image;
+    accessible-label: "installed";
+    Path {
+        x: 3px;
+        y: 3px;
+        width: 8px;
+        height: 8px;
+        viewbox-width: 8;
+        viewbox-height: 8;
+        commands: "M 1 4.3 L 3.2 6.5 L 7 1.7";
+        stroke: root.ring;
+        stroke-width: 1.7px;
+        fill: transparent;
+    }
+}
+
+// A small button in a table's cell: the primary kind filled, the plain one outlined. Its words
+// take a second line when the cell is too narrow for them ("Install again" in the narrow table).
 component RowButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary;
     in property <bool> enabled: true;
     callback clicked();
-    height: 24px;
+    height: max(24px, label.preferred-height + 8px);
     border-radius: 6px;
     border-width: 1px;
     border-color: root.primary ? Look.accent : Look.line;
@@ -761,18 +797,18 @@ component RowButton inherits Rectangle {
         : touch.has-hover ? Look.hover : Look.panel;
     accessible-role: button;
     accessible-label: root.text;
-    HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 6px;
-        Text {
-            text: root.text;
-            font-size: 11px;
-            font-weight: root.primary ? 600 : 400;
-            overflow: elide;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            color: !root.enabled ? Look.muted : root.primary ? #ffffff : Look.text;
-        }
+    label := Text {
+        x: 3px;
+        width: root.width - 6px;
+        height: root.height;
+        text: root.text;
+        font-size: 11px;
+        font-weight: root.primary ? 600 : 400;
+        wrap: word-wrap;
+        overflow: elide;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: !root.enabled ? Look.muted : root.primary ? #ffffff : Look.text;
     }
     // Greyed, a click on it still does nothing else: it never falls through to the row under it.
     touch := TouchArea {
@@ -798,7 +834,7 @@ component SafetyText inherits VerticalLayout {
         font-size: root.small ? 11px : 11.5px;
         font-weight: 600;
         overflow: elide;
-        // "scanned" is let in but not vouched for: plain, as the mock has it.
+        // "scanned" is let in but not vouched for: plain (see docs/plan-0.9.md).
         color: root.word == "scanned" ? Look.text : Look.badge-ink(root.kind);
     }
     if root.by != "": Text {
@@ -1274,9 +1310,81 @@ component Section inherits Rectangle {
     }
 }
 
+// The rail's search: the magnifier, then the words typed (the placeholder until then). The app's
+// own field, as the std LineEdit has no place for the glyph; its words scroll to keep the cursor
+// in view, as the LineEdit's do.
+component SearchField inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text <=> input.text;
+    callback edited();
+    height: 28px;
+    border-width: 1px;
+    border-color: input.has-focus ? Look.accent : Look.line;
+    border-radius: 6px;
+    background: Look.bg;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-value: root.text;
+    accessible-placeholder-text: root.placeholder;
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+    // The magnifier: a ring and its handle.
+    Path {
+        x: 8px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        viewbox-width: 14;
+        viewbox-height: 14;
+        commands: "M 10 6 A 4.25 4.25 0 1 0 1.5 6 A 4.25 4.25 0 1 0 10 6 Z M 9.1 9.1 L 12.75 12.75";
+        stroke: Look.muted;
+        stroke-width: 1.5px;
+        fill: transparent;
+    }
+    Rectangle {
+        x: 28px;
+        width: parent.width - 28px - 8px;
+        height: parent.height;
+        clip: true;
+        if root.text == "": Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.placeholder;
+            font-size: 12.5px;
+            vertical-alignment: center;
+            overflow: elide;
+            color: Look.muted;
+            accessible-role: none;
+        }
+        input := TextInput {
+            property <length> computed-x;
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: parent.height;
+            font-size: 12.5px;
+            vertical-alignment: center;
+            single-line: true;
+            color: Look.text;
+            selection-background-color: Look.accent;
+            selection-foreground-color: #ffffff;
+            accessible-role: none;
+            cursor-position-changed(position) => {
+                if (position.x + self.computed-x < 0) {
+                    self.computed-x = -position.x;
+                } else if (position.x + self.computed-x > parent.width - self.text-cursor-width) {
+                    self.computed-x = parent.width - position.x - self.text-cursor-width;
+                }
+            }
+            edited => { root.edited(); }
+        }
+    }
+}
+
 // One row of a Settings section: its words (and a smaller line under them) on the left, "✓ Saved"
-// in the 54 px before its control, and the control (a switch, a segmented choice, a field) on
-// the right. "✓ Saved" shows the moment the value applied and fades out over 0.4 s after a second.
+// in the 54 px before its control, and the control (a switch, a segmented choice) on the right.
+// "✓ Saved" shows the moment the value applied and fades out over 0.4 s after a second.
 component SettingRow inherits HorizontalLayout {
     in property <string> text;
     in property <string> detail;
@@ -1315,6 +1423,40 @@ component SettingRow inherits HorizontalLayout {
     }
 }
 
+// "✓ Saved", in its 54 px, as SettingRow shows it: at once, then fading over 0.4 s.
+component SavedMark inherits Text {
+    in property <bool> saved;
+    text: "✓ Saved";
+    width: 54px;
+    font-size: 11.5px;
+    color: Look.green;
+    vertical-alignment: center;
+    opacity: root.saved ? 1 : 0;
+    animate opacity { duration: root.saved ? 0ms : 400ms; }
+}
+
+// The line under a typed field: why the text typed was refused (red, the text kept in the field),
+// else "Enter to apply" while the text differs from the saved one, else what the saved value's
+// status is (`status`, in `status-ink`), else nothing.
+component FieldLine inherits HorizontalLayout {
+    in property <string> refused;
+    in property <bool> typed;
+    in property <string> status;
+    in property <color> status-ink: Look.muted;
+    property <string> words: root.refused != "" ? "✗ " + root.refused : root.typed ? "Enter to apply" : root.status;
+    spacing: 10px;
+    padding-bottom: root.words != "" ? 6px : 0px;
+    Rectangle { width: 96px; }
+    Text {
+        text: root.words;
+        height: root.words != "" ? self.preferred-height : 0px;
+        font-size: 12px;
+        wrap: word-wrap;
+        horizontal-stretch: 1;
+        color: root.refused != "" ? Look.red : root.typed ? Look.muted : root.status-ink;
+    }
+}
+
 component LinkText inherits Rectangle {
     in property <string> text;
     in property <color> ink: Look.muted;
@@ -1339,7 +1481,13 @@ component ViewButton inherits Rectangle {
     in property <int> glyph;
     in property <bool> active;
     in property <string> label;
+    in property <bool> first;
+    in property <bool> last;
     callback clicked();
+    border-top-left-radius: root.first ? 5px : 0;
+    border-bottom-left-radius: root.first ? 5px : 0;
+    border-top-right-radius: root.last ? 5px : 0;
+    border-bottom-right-radius: root.last ? 5px : 0;
     property <color> ink: root.active ? Look.accent : touch.has-hover ? Look.text : Look.muted;
     width: 28px;
     height: 26px;
@@ -1917,17 +2065,22 @@ component TableHead inherits Rectangle {
     in property <string> text;
     in property <string> mark;
     in property <bool> sorts;
-    // At the minimum window: smaller, and a heading may take two lines.
+    // The narrow set of columns: a heading may take two lines; at the minimum window, smaller.
+    in property <bool> narrow;
     in property <bool> small;
+    // Its column's padding on either side.
+    in property <length> pad;
     in property <TextHorizontalAlignment> align: TextHorizontalAlignment.left;
     callback clicked();
-    height: root.small ? 34px : 28px;
+    height: root.narrow ? 34px : 28px;
     HorizontalLayout {
+        padding-left: root.pad;
+        padding-right: root.pad;
         Text {
             text: root.text + (root.mark != "" ? " " + root.mark : "");
             font-size: root.small ? 10.5px : 11.5px;
             overflow: elide;
-            wrap: root.small ? TextWrap.word-wrap : TextWrap.no-wrap;
+            wrap: root.narrow ? TextWrap.word-wrap : TextWrap.no-wrap;
             horizontal-alignment: root.align;
             vertical-alignment: center;
             horizontal-stretch: 1;
@@ -1941,18 +2094,24 @@ component TableHead inherits Rectangle {
     }
 }
 
-// Browse's table's columns, as wide as its rows and its headings both take them; narrower at the
-// minimum window (`small`), where the headings take two lines.
+// Browse's table's columns, as wide as its rows and its headings both take them, each with its own
+// padding inside: the narrow set (Safety 96, Version 60, Last updated 64, Popularity 60, Install
+// 64) below 1,500 px of content area, the wide set from there; the name takes what they leave.
 global TableColumns {
-    public pure function safety(small: bool) -> length { small ? 92px : 110px }
-    public pure function version(small: bool) -> length { small ? 60px : 76px }
-    out property <length> tags: 150px;
-    public pure function updated(small: bool) -> length { small ? 62px : 92px }
-    public pure function popularity(small: bool) -> length { small ? 56px : 82px }
-    public pure function install(small: bool) -> length { small ? 62px : 88px }
-    public pure function spacing(small: bool) -> length { small ? 2px : 4px }
-    public pure function padding(small: bool) -> length { small ? 6px : 10px }
-    public pure function square(small: bool) -> length { small ? 24px : 28px }
+    public pure function safety(narrow: bool) -> length { narrow ? 96px : 110px }
+    public pure function version(narrow: bool) -> length { narrow ? 60px : 76px }
+    out property <length> tags: 170px;
+    public pure function updated(narrow: bool) -> length { narrow ? 64px : 92px }
+    public pure function popularity(narrow: bool) -> length { narrow ? 60px : 82px }
+    public pure function install(narrow: bool) -> length { narrow ? 64px : 88px }
+    // A cell's padding on either side, and the row's own (its right one clear of the scroll bar):
+    // less at the minimum window, where the name needs every pixel.
+    public pure function pad(narrow: bool, small: bool) -> length { small ? 1px : narrow ? 2px : 6px }
+    public pure function left(narrow: bool, small: bool) -> length { small ? 3px : narrow ? 4px : 6px }
+    public pure function right(narrow: bool) -> length { narrow ? 8px : 12px }
+    // The square, and the space after it: smaller at the minimum window.
+    public pure function square(small: bool) -> length { small ? 20px : 28px }
+    public pure function gap(small: bool) -> length { small ? 4px : 8px }
 }
 
 // One addon in Browse's table: the square, its name (a check mark after it when it is installed)
@@ -1963,6 +2122,7 @@ component OfferTableRow inherits Rectangle {
     in property <OfferRow> offer;
     in property <bool> current;
     in property <bool> wide;
+    in property <bool> narrow;
     in property <bool> small;
     in property <bool> busy;
     callback select();
@@ -1972,6 +2132,17 @@ component OfferTableRow inherits Rectangle {
     height: 48px;
     background: root.current ? Look.sel : row-touch.has-hover ? Look.hover : transparent;
     property <length> text-size: root.small ? 11.5px : 12px;
+    property <length> pad: TableColumns.pad(root.narrow, root.small);
+    property <length> fixed: TableColumns.safety(root.narrow) + TableColumns.version(root.narrow) + TableColumns.updated(root.narrow)
+        + TableColumns.popularity(root.narrow) + TableColumns.install(root.narrow) + (root.wide ? TableColumns.tags : 0px);
+    // The check mark after the name; at the minimum window on the square's corner instead, so
+    // the name has the whole column.
+    property <length> check-slot: root.offer.installed && !root.small ? 21px : 0px;
+    // The name's own width, so that it takes a second line when it needs one: what the columns
+    // leave, less the square and the check mark.
+    property <length> name-width: max(24px, root.width - TableColumns.left(root.narrow, root.small) - TableColumns.right(root.narrow) - root.fixed
+        - 2 * root.pad - TableColumns.square(root.small) - TableColumns.gap(root.small) - root.check-slot);
+    property <color> paper: root.current ? Look.sel : row-touch.has-hover ? Look.hover : Look.panel;
 
     row-touch := TouchArea {
         mouse-cursor: pointer;
@@ -1984,38 +2155,52 @@ component OfferTableRow inherits Rectangle {
         background: Look.line;
     }
     HorizontalLayout {
-        padding-left: TableColumns.padding(root.small);
-        // Clear of the scroll bar, as the headings are.
-        padding-right: TableColumns.padding(root.small) + 4px;
-        spacing: TableColumns.spacing(root.small);
+        padding-left: TableColumns.left(root.narrow, root.small);
+        padding-right: TableColumns.right(root.narrow);
         HorizontalLayout {
             horizontal-stretch: 1;
-            min-width: 70px;
-            spacing: 8px;
+            padding-left: root.pad;
+            padding-right: root.pad;
+            spacing: TableColumns.gap(root.small);
             VerticalLayout {
                 alignment: center;
-                Initials {
-                    text: root.offer.initials;
-                    kind: root.offer.initials-kind;
-                    icon: root.offer.icon;
-                    side: TableColumns.square(root.small);
+                Rectangle {
+                    width: TableColumns.square(root.small);
+                    height: self.width;
+                    Initials {
+                        text: root.offer.initials;
+                        kind: root.offer.initials-kind;
+                        icon: root.offer.icon;
+                        side: TableColumns.square(root.small);
+                    }
+                    if root.offer.installed && root.small: CornerCheck {
+                        x: parent.width - self.width + 4px;
+                        y: parent.height - self.height + 4px;
+                        ring: root.paper;
+                    }
                 }
             }
             VerticalLayout {
                 alignment: center;
                 HorizontalLayout {
-                    spacing: 4px;
+                    // As wide as the name, the check mark right after it; at most the column's
+                    // width, then on two lines at most, the second cut short with "…".
                     Text {
+                        width: min(root.name-width, self.preferred-width);
+                        height: min(self.preferred-height, root.text-size * 2.6);
                         text: root.offer.name;
                         font-size: root.text-size;
                         font-weight: 600;
+                        wrap: word-wrap;
                         overflow: elide;
-                        vertical-alignment: center;
+                        vertical-alignment: top;
                         color: Look.text;
                     }
-                    if root.offer.installed: VerticalLayout {
+                    VerticalLayout {
+                        width: root.check-slot;
+                        padding-left: root.check-slot > 0 ? 3px : 0px;
                         alignment: center;
-                        CheckMark {}
+                        if root.offer.installed && !root.small: CheckMark {}
                     }
                     Rectangle { horizontal-stretch: 1; }
                 }
@@ -2027,48 +2212,72 @@ component OfferTableRow inherits Rectangle {
                 }
             }
         }
-        SafetyText {
-            width: TableColumns.safety(root.small);
-            word: root.offer.safety;
-            kind: root.offer.safety-kind;
-            by: root.offer.safety-by;
-            small: root.small;
+        HorizontalLayout {
+            width: TableColumns.safety(root.narrow);
+            padding-left: root.pad;
+            padding-right: root.pad;
+            SafetyText {
+                word: root.offer.safety;
+                kind: root.offer.safety-kind;
+                by: root.offer.safety-by;
+                small: root.small || root.narrow;
+            }
         }
-        Text {
-            width: TableColumns.version(root.small);
-            text: root.offer.version;
-            font-size: root.text-size;
-            overflow: elide;
-            vertical-alignment: center;
-            color: Look.text;
+        HorizontalLayout {
+            width: TableColumns.version(root.narrow);
+            padding-left: root.pad;
+            padding-right: root.pad;
+            Text {
+                text: root.offer.version;
+                font-size: root.text-size;
+                overflow: elide;
+                vertical-alignment: center;
+                color: Look.text;
+            }
         }
-        if root.wide: Text {
+        if root.wide: HorizontalLayout {
             width: TableColumns.tags;
-            text: root.offer.tags;
-            font-size: root.text-size;
-            color: Look.muted;
-            overflow: elide;
-            vertical-alignment: center;
+            padding-left: root.pad;
+            padding-right: root.pad;
+            Text {
+                text: root.offer.tags;
+                font-size: root.text-size;
+                color: Look.muted;
+                overflow: elide;
+                vertical-alignment: center;
+            }
         }
-        Text {
-            width: TableColumns.updated(root.small);
-            text: root.offer.date;
-            font-size: root.text-size;
-            overflow: elide;
-            vertical-alignment: center;
-            color: Look.text;
+        HorizontalLayout {
+            width: TableColumns.updated(root.narrow);
+            padding-left: root.pad;
+            padding-right: root.pad;
+            // "2 days ago" takes a second line where the column is narrow.
+            Text {
+                text: root.offer.date;
+                font-size: root.text-size;
+                wrap: word-wrap;
+                overflow: elide;
+                vertical-alignment: center;
+                color: Look.text;
+            }
         }
-        Text {
-            width: TableColumns.popularity(root.small);
-            text: root.offer.popularity;
-            font-size: root.text-size;
-            horizontal-alignment: right;
-            overflow: elide;
-            vertical-alignment: center;
-            color: Look.text;
+        HorizontalLayout {
+            width: TableColumns.popularity(root.narrow);
+            padding-left: root.pad;
+            padding-right: root.pad;
+            Text {
+                text: root.offer.popularity;
+                font-size: root.text-size;
+                horizontal-alignment: right;
+                overflow: elide;
+                vertical-alignment: center;
+                color: Look.text;
+            }
         }
         VerticalLayout {
-            width: TableColumns.install(root.small);
+            width: TableColumns.install(root.narrow);
+            padding-left: root.pad;
+            padding-right: root.pad;
             alignment: center;
             if root.offer.action == 2: Installing {
                 small: true;
@@ -2078,6 +2287,7 @@ component OfferTableRow inherits Rectangle {
             if root.offer.action == 3 && root.offer.installed-id == "": Text {
                 text: "Installed";
                 font-size: 11px;
+                overflow: elide;
                 color: Look.green;
             }
             if root.offer.action != 2 && root.offer.install-text != "" && !(root.offer.action == 3 && root.offer.installed-id == ""): RowButton {
@@ -2847,8 +3057,11 @@ export component MainWindow inherits Window {
     callback open-folder();
     callback open-game-folder();
 
-    // Home: the game's newest note, Your PCs, Needs you, Recent activity, Playtime.
+    // Home: the game's newest note, Your PCs, Needs you, Recent activity, Playtime. The note: its
+    // version, its paragraph and first lines (`news-more`: lines were left out, "More ▾").
+    in property <string> news-version;
     in property <[ChangelogBlock]> news-blocks;
+    in property <bool> news-more;
     in property <[PcRow]> pcs;
     in property <string> pcs-week;
     in property <[QuestionRow]> questions;
@@ -3006,7 +3219,11 @@ export component MainWindow inherits Window {
             root.browse-filter();
         }
     }
-    changed tab => { root.addons-view-changed(); }
+    // A page left: no Settings field is being typed in any more.
+    changed tab => {
+        root.focused-field = "";
+        root.addons-view-changed();
+    }
     changed addons-page => { root.addons-view-changed(); }
     // The picture viewer, over the window: the open addon's screenshot `viewer-index`, its pixels
     // from the app (`viewer-state` 0 loading, 1 shown, 2 not available). Only the one shown is held.
@@ -3064,21 +3281,27 @@ export component MainWindow inherits Window {
     in-out property <string> removed-open;
     callback install-again(string);
 
-    // Settings. Every setting applies the moment it changes: a switch or a segmented choice on
-    // click (`setting-bool`, `setting-theme`), a text field when it loses focus or Enter is pressed
-    // (`setting-text`: "folder", "pc-name", "game-dir"). The app answers with the form as saved, and
-    // names the row that applied (`saved-key`): its "✓ Saved" shows for a second.
+    // Settings. Every setting applies on its own the moment it changes: a switch or a segmented
+    // choice on click (`setting-bool`, `setting-theme`), the network folder's Browse… once picked
+    // (`pick-sync-folder`), a typed folder or name with Enter only (`setting-text`: "folder",
+    // "pc-name", "game-dir"), never on focus loss, which Alt-Tab and a popup cause too. The app
+    // answers with the form as saved: a refused field keeps the text typed, with why under it
+    // (`folder-refused`, `name-refused`, `game-refused`; typing again clears it), and the row that
+    // applied shows "✓ Saved" for a second (`show-saved`). `focused-field` names the field being
+    // typed in ("folder", "pc-name", "game-dir"): an answer leaves it as it is.
     in-out property <string> game-dir;
     in property <string> game-status;
     in property <bool> game-ok;
     in-out property <bool> sync-switch;
     in-out property <string> sync-folder;
     in property <string> folder-status;
-    // 0 muted, 1 green (it answers), 2 red (refused).
+    // 0 muted, 1 green (it answers), 2 red (it can't be used).
     in property <int> folder-status-kind;
     in-out property <string> pc-name;
-    // Why the name typed wasn't saved (another PC syncing there has it); empty otherwise.
-    in-out property <string> name-status;
+    in-out property <string> folder-refused;
+    in-out property <string> name-refused;
+    in-out property <string> game-refused;
+    in-out property <string> focused-field;
     in-out property <bool> start-with-windows;
     in-out property <bool> desktop-shortcut;
     in-out property <bool> notifications;
@@ -3093,14 +3316,22 @@ export component MainWindow inherits Window {
     callback setting-bool(string, bool);
     callback setting-theme(int);
     callback setting-text(string, string);
+    callback pick-sync-folder();
     callback restore-defaults();
     callback detect-game();
     in-out property <string> saved-key;
-    // "✓ Saved" fades out after a second.
+    // "✓ Saved" fades out a second after the last change applied.
     saved-timer := Timer {
         interval: 1s;
-        running: root.saved-key != "";
-        triggered => { root.saved-key = ""; }
+        running: false;
+        triggered => {
+            self.stop();
+            root.saved-key = "";
+        }
+    }
+    public function show-saved(key: string) {
+        root.saved-key = key;
+        saved-timer.restart();
     }
     // The game's own settings on every PC: where they stand with the other PCs (`game-line-kind`
     // 0 plain, 1 news, 2 needs a look); the choice itself is on Home's Needs-you card.
@@ -3209,13 +3440,19 @@ export component MainWindow inherits Window {
     icon: @image-url("icons/satchel.svg");
     default-font-size: 13px;
     background: Look.bg;
-    // 16:9: 1,280 × 720, and never smaller than 1,120 × 630, so the rail, the table and the pane fit.
+    // 16:9: 1,280 × 720, and never smaller than 1,120 × 630, so the rail, the table and the pane
+    // fit; on a work area smaller than that (a small screen at a high scale) never larger than it:
+    // the app sets `min-w` and `min-h` at start, so a maximised window never exceeds the screen.
     preferred-width: 1280px;
     preferred-height: 720px;
-    min-width: 1120px;
-    min-height: 630px;
-    // The minimum window: the table's columns narrow and its headings take two lines.
+    in property <length> min-w: 1120px;
+    in property <length> min-h: 630px;
+    min-width: root.min-w;
+    min-height: root.min-h;
+    // The minimum window: smaller text and squares, the check mark on the square's corner.
     property <bool> small: root.width < 1200px;
+    // Browse's table: the narrow set of columns below 1,500 px of content area.
+    property <bool> table-narrow: content.width < 1500px;
 
     // The shell: the top bar over everything, then the rail and the content beside it.
     VerticalLayout {
@@ -3372,10 +3609,9 @@ export component MainWindow inherits Window {
                             Rectangle { height: 12px; }
                             HorizontalLayout {
                                 spacing: 6px;
-                                LineEdit {
-                                    placeholder-text: "Search addons";
+                                SearchField {
+                                    placeholder: "Search addons";
                                     text <=> root.browse-search;
-                                    font-size: 12.5px;
                                     horizontal-stretch: 1;
                                     min-width: 80px;
                                     edited => { root.browse-filter(); }
@@ -3442,7 +3678,7 @@ export component MainWindow inherits Window {
                     // Play and the gear, pinned to the bottom.
                     HorizontalLayout {
                         padding: 12px;
-                        padding-bottom: 4px;
+                        padding-bottom: root.setup ? 12px : 4px;
                         spacing: 2px;
                         play-button := Rectangle {
                             horizontal-stretch: 1;
@@ -3536,12 +3772,12 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    HorizontalLayout {
+                    if !root.setup: HorizontalLayout {
                         padding-left: 12px;
                         padding-right: 12px;
                         padding-bottom: 12px;
                         Text {
-                            text: root.setup ? "Not played from the Satchel yet" : root.last-line;
+                            text: root.last-line;
                             font-size: 11.5px;
                             wrap: word-wrap;
                             color: Look.muted;
@@ -3576,7 +3812,7 @@ export component MainWindow inherits Window {
                                     alignment: start;
                                     spacing: 12px;
                                     HomeCard {
-                                        heading: "What's new in the game" + (root.game-news-version != "" ? " · " + root.game-news-version : "");
+                                        heading: "What's new in the game" + (root.news-version != "" ? " · " + root.news-version : "");
                                         if root.news-blocks.length == 0: Text {
                                             text: "The game's notes show here once the Satchel has read them.";
                                             font-size: 13px;
@@ -3599,7 +3835,7 @@ export component MainWindow inherits Window {
                                         }
                                         if root.news-blocks.length > 0: HorizontalLayout {
                                             LinkText {
-                                                text: "Older notes ▾";
+                                                text: root.news-more ? "More ▾" : "Older notes ▾";
                                                 ink: Look.muted;
                                                 font-size: 13px;
                                                 clicked => { root.open-game-news(); }
@@ -3913,8 +4149,8 @@ export component MainWindow inherits Window {
                                     border-width: 1px;
                                     border-color: Look.line;
                                     border-radius: 6px;
-                                    clip: true;
                                     HorizontalLayout {
+                                        padding: 1px;
                                         Segment {
                                             text: "Installed" + (root.addons-count > 0 ? " · " + root.addons-count : "");
                                             active: root.addons-page == 0;
@@ -3929,6 +4165,7 @@ export component MainWindow inherits Window {
                                         Segment {
                                             text: root.removed-rows.length > 0 ? "Removed · " + root.removed-rows.length : "Removed";
                                             active: root.addons-page == 2;
+                                            last: true;
                                             clicked => { root.addons-page = 2; }
                                         }
                                     }
@@ -3952,11 +4189,12 @@ export component MainWindow inherits Window {
                                     border-width: 1px;
                                     border-color: Look.line;
                                     border-radius: 6px;
-                                    clip: true;
                                     HorizontalLayout {
+                                        padding: 1px;
                                         ViewButton {
                                             glyph: 1;
                                             label: "Cards";
+                                            first: true;
                                             active: root.browse-view != "list" && root.browse-view != "table";
                                             clicked => { root.pick-view("cards"); }
                                         }
@@ -3969,6 +4207,7 @@ export component MainWindow inherits Window {
                                         ViewButton {
                                             glyph: 2;
                                             label: "Table";
+                                            last: true;
                                             active: root.browse-view == "table";
                                             clicked => { root.pick-view("table"); }
                                         }
@@ -4042,12 +4281,14 @@ export component MainWindow inherits Window {
                                     border-width: 1px;
                                     border-color: Look.line;
                                     border-radius: 6px;
-                                    clip: true;
                                     property <length> fixed: InstalledColumns.safety + InstalledColumns.version + InstalledColumns.released + InstalledColumns.on
                                         + 5 * InstalledColumns.spacing + 26px;
                                     property <length> status-width: clamp((self.width - self.fixed) * 0.55, 150px, 460px);
+                                    // Inside the line; the rows end 5 px over the rounded foot (the
+                                    // software renderer clips without corners).
                                     VerticalLayout {
                                         padding: 1px;
+                                        padding-bottom: 5px;
                                         // The headings over their columns, both clear of the scroll bar,
                                         // which is drawn over the rows' right edge.
                                         HorizontalLayout {
@@ -4246,64 +4487,78 @@ export component MainWindow inherits Window {
                                             border-width: 1px;
                                             border-color: Look.line;
                                             border-radius: 6px;
-                                            clip: true;
                                             // The marks of the column sorted by: ▲ A to Z, oldest or fewest
                                             // first; ▼ the other way.
                                             property <string> down: root.browse-sort-reverse ? "▲" : "▼";
                                             property <string> up: root.browse-sort-reverse ? "▼" : "▲";
+                                            // Inside the line; the rows end 5 px over the rounded foot.
                                             VerticalLayout {
                                                 padding: 1px;
+                                                padding-bottom: 5px;
                                                 // The headings over their columns, both clear of the scroll bar,
                                                 // which is drawn over the rows' right edge.
                                                 HorizontalLayout {
-                                                    padding-left: TableColumns.padding(root.small);
-                                                    padding-right: TableColumns.padding(root.small) + 4px;
-                                                    spacing: TableColumns.spacing(root.small);
+                                                    padding-left: TableColumns.left(root.table-narrow, root.small);
+                                                    padding-right: TableColumns.right(root.table-narrow);
                                                     TableHead {
                                                         horizontal-stretch: 1;
-                                                        min-width: 70px;
+                                                        min-width: 60px;
                                                         text: "Name";
                                                         sorts: true;
+                                                        narrow: root.table-narrow;
                                                         small: root.small;
+                                                        pad: TableColumns.pad(root.table-narrow, root.small);
                                                         mark: root.browse-sort == 0 ? table-box.up : "";
                                                         clicked => { root.sort-table(0); }
                                                     }
                                                     TableHead {
-                                                        width: TableColumns.safety(root.small);
+                                                        width: TableColumns.safety(root.table-narrow);
                                                         text: "Safety";
+                                                        narrow: root.table-narrow;
                                                         small: root.small;
+                                                        pad: TableColumns.pad(root.table-narrow, root.small);
                                                     }
                                                     TableHead {
-                                                        width: TableColumns.version(root.small);
+                                                        width: TableColumns.version(root.table-narrow);
                                                         text: "Version";
+                                                        narrow: root.table-narrow;
                                                         small: root.small;
+                                                        pad: TableColumns.pad(root.table-narrow, root.small);
                                                     }
                                                     if split.wide: TableHead {
                                                         width: TableColumns.tags;
                                                         text: "Tags";
+                                                        narrow: root.table-narrow;
                                                         small: root.small;
+                                                        pad: TableColumns.pad(root.table-narrow, root.small);
                                                     }
                                                     TableHead {
-                                                        width: TableColumns.updated(root.small);
+                                                        width: TableColumns.updated(root.table-narrow);
                                                         text: "Last updated";
                                                         sorts: true;
+                                                        narrow: root.table-narrow;
                                                         small: root.small;
+                                                        pad: TableColumns.pad(root.table-narrow, root.small);
                                                         mark: root.browse-sort == 1 ? table-box.down : "";
                                                         clicked => { root.sort-table(1); }
                                                     }
                                                     TableHead {
-                                                        width: TableColumns.popularity(root.small);
+                                                        width: TableColumns.popularity(root.table-narrow);
                                                         text: "Popularity";
                                                         align: TextHorizontalAlignment.right;
                                                         sorts: true;
+                                                        narrow: root.table-narrow;
                                                         small: root.small;
+                                                        pad: TableColumns.pad(root.table-narrow, root.small);
                                                         mark: root.browse-sort == 2 ? table-box.down : "";
                                                         clicked => { root.sort-table(2); }
                                                     }
                                                     TableHead {
-                                                        width: TableColumns.install(root.small);
+                                                        width: TableColumns.install(root.table-narrow);
                                                         text: "Install";
+                                                        narrow: root.table-narrow;
                                                         small: root.small;
+                                                        pad: TableColumns.pad(root.table-narrow, root.small);
                                                     }
                                                 }
                                                 Rectangle {
@@ -4320,6 +4575,7 @@ export component MainWindow inherits Window {
                                                         for offer in root.offer-rows: OfferTableRow {
                                                             offer: offer;
                                                             wide: split.wide;
+                                                            narrow: root.table-narrow;
                                                             small: root.small;
                                                             busy: root.busy;
                                                             current: root.browse-panel-id == offer.id;
@@ -4569,11 +4825,12 @@ export component MainWindow inherits Window {
                                     border-width: 1px;
                                     border-color: Look.line;
                                     border-radius: 6px;
-                                    clip: true;
                                     property <length> fixed: RemovedColumns.safety + RemovedColumns.version + RemovedColumns.removed + RemovedColumns.button + 5 * RemovedColumns.spacing + 26px;
                                     property <length> name-width: clamp((self.width - self.fixed) * 0.4, 140px, 360px);
+                                    // Inside the line; the rows end 5 px over the rounded foot.
                                     VerticalLayout {
                                         padding: 1px;
+                                        padding-bottom: 5px;
                                         HorizontalLayout {
                                             padding-left: 12px;
                                             padding-right: 14px;
@@ -4930,8 +5187,8 @@ export component MainWindow inherits Window {
                                             border-width: 1px;
                                             border-color: Look.line;
                                             border-radius: 6px;
-                                            clip: true;
                                             HorizontalLayout {
+                                                padding: 1px;
                                                 Segment {
                                                     text: "System";
                                                     active: root.theme == 0;
@@ -4955,6 +5212,7 @@ export component MainWindow inherits Window {
                                                     text: "Dark";
                                                     active: root.theme == 2;
                                                     filled: true;
+                                                    last: true;
                                                     clicked => {
                                                         root.theme = 2;
                                                         root.setting-theme(2);
@@ -4987,35 +5245,35 @@ export component MainWindow inherits Window {
                                             vertical-alignment: center;
                                             color: Look.muted;
                                         }
-                                        folder-edit := LineEdit {
+                                        LineEdit {
                                             text <=> root.sync-folder;
                                             font-size: 12px;
                                             placeholder-text: "\\\\server\\share\\Azeroth Survivors Saves";
                                             horizontal-stretch: 1;
                                             accepted(text) => { root.setting-text("folder", text); }
+                                            edited => { root.folder-refused = ""; }
                                             changed has-focus => {
-                                                if (!self.has-focus) {
-                                                    root.setting-text("folder", self.text);
+                                                if (self.has-focus) {
+                                                    root.focused-field = "folder";
                                                 }
                                             }
                                         }
-                                    }
-                                    if root.folder-status != "": HorizontalLayout {
-                                        spacing: 10px;
-                                        padding-bottom: 6px;
-                                        Rectangle { width: 96px; }
-                                        Text {
-                                            text: root.folder-status;
-                                            font-size: 12px;
-                                            wrap: word-wrap;
-                                            horizontal-stretch: 1;
-                                            color: root.folder-status-kind == 1 ? Look.green : root.folder-status-kind == 2 ? Look.red : Look.muted;
+                                        SavedMark { saved: root.saved-key == "folder"; }
+                                        PlainButton {
+                                            text: "Browse…";
+                                            clicked => { root.pick-sync-folder(); }
                                         }
+                                    }
+                                    FieldLine {
+                                        refused: root.folder-refused;
+                                        typed: root.sync-folder != root.saved-form.folder;
+                                        status: root.folder-status;
+                                        status-ink: root.folder-status-kind == 1 ? Look.green : root.folder-status-kind == 2 ? Look.red : Look.muted;
                                     }
                                     HorizontalLayout {
                                         spacing: 10px;
                                         padding-top: 6px;
-                                        padding-bottom: 6px;
+                                        padding-bottom: 2px;
                                         Text {
                                             text: "This PC's name";
                                             width: 96px;
@@ -5028,25 +5286,19 @@ export component MainWindow inherits Window {
                                             font-size: 12px;
                                             width: 200px;
                                             accepted(text) => { root.setting-text("pc-name", text); }
+                                            edited => { root.name-refused = ""; }
                                             changed has-focus => {
-                                                if (!self.has-focus) {
-                                                    root.setting-text("pc-name", self.text);
+                                                if (self.has-focus) {
+                                                    root.focused-field = "pc-name";
                                                 }
                                             }
                                         }
+                                        SavedMark { saved: root.saved-key == "pc-name"; }
                                         Rectangle { horizontal-stretch: 1; }
                                     }
-                                    if root.name-status != "": HorizontalLayout {
-                                        spacing: 10px;
-                                        padding-bottom: 6px;
-                                        Rectangle { width: 96px; }
-                                        Text {
-                                            text: root.name-status;
-                                            font-size: 12px;
-                                            wrap: word-wrap;
-                                            horizontal-stretch: 1;
-                                            color: Look.red;
-                                        }
+                                    FieldLine {
+                                        refused: root.name-refused;
+                                        typed: root.pc-name != root.saved-form.pc-name;
                                     }
                                     if root.sync-switch: SettingRow {
                                         text: "The game's own settings on every PC";
@@ -5101,7 +5353,7 @@ export component MainWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 10px;
                                         padding-top: 6px;
-                                        padding-bottom: 6px;
+                                        padding-bottom: 2px;
                                         Text {
                                             text: "Game folder";
                                             width: 96px;
@@ -5112,15 +5364,19 @@ export component MainWindow inherits Window {
                                         LineEdit {
                                             text <=> root.game-dir;
                                             font-size: 12px;
+                                            placeholder-text: "Not set";
                                             horizontal-stretch: 1;
                                             accepted(text) => { root.setting-text("game-dir", text); }
+                                            edited => { root.game-refused = ""; }
                                             changed has-focus => {
-                                                if (!self.has-focus) {
-                                                    root.setting-text("game-dir", self.text);
+                                                if (self.has-focus) {
+                                                    root.focused-field = "game-dir";
                                                 }
                                             }
                                         }
-                                        Text {
+                                        SavedMark { saved: root.saved-key == "game-dir"; }
+                                        // Of the folder in force: shown while the field holds it.
+                                        if root.game-dir == root.saved-form.game-dir && root.game-dir != "": Text {
                                             text: root.game-ok ? "✓ found" : "not found";
                                             font-size: 12.5px;
                                             vertical-alignment: center;
@@ -5131,17 +5387,11 @@ export component MainWindow inherits Window {
                                             clicked => { root.detect-game(); }
                                         }
                                     }
-                                    if !root.game-ok && root.game-status != "": HorizontalLayout {
-                                        spacing: 10px;
-                                        padding-bottom: 6px;
-                                        Rectangle { width: 96px; }
-                                        Text {
-                                            text: root.game-status;
-                                            font-size: 12px;
-                                            wrap: word-wrap;
-                                            horizontal-stretch: 1;
-                                            color: Look.red;
-                                        }
+                                    FieldLine {
+                                        refused: root.game-refused;
+                                        typed: root.game-dir != root.saved-form.game-dir;
+                                        status: root.game-ok ? "" : root.game-status;
+                                        status-ink: Look.red;
                                     }
                                     SettingRow {
                                         text: "Pause the game when I switch away (experimental)";
@@ -5366,7 +5616,14 @@ export component MainWindow inherits Window {
                                 }
                                 HorizontalLayout {
                                     spacing: 10px;
-                                    alignment: end;
+                                    Text {
+                                        text: "Resets the switches above except sync and sharing; keeps your folders and this PC's name.";
+                                        font-size: 11.5px;
+                                        wrap: word-wrap;
+                                        horizontal-stretch: 1;
+                                        vertical-alignment: center;
+                                        color: Look.muted;
+                                    }
                                     Text {
                                         text: "✓ Defaults restored";
                                         font-size: 11.5px;
@@ -5463,11 +5720,23 @@ export component MainWindow inherits Window {
                                             clicked => { root.pick-game-folder(); }
                                         }
                                     }
+                                    if root.game-refused != "": Text {
+                                        text: "✗ " + root.game-refused;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                        color: Look.red;
+                                    }
                                     if root.setup-sync-line != "": Text {
                                         text: root.setup-sync-line;
                                         font-size: 12px;
                                         overflow: elide;
                                         color: Look.muted;
+                                    }
+                                    if root.folder-refused != "": Text {
+                                        text: "✗ " + root.folder-refused;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                        color: Look.red;
                                     }
                                 }
                             }
@@ -6059,7 +6328,7 @@ export component MainWindow inherits Window {
                 color: Look.text;
             }
             Text {
-                text: "Your progress changed here and on " + root.needs-other-pc + " since this PC last synced. Pick the one to continue with. The other one is kept as a version.";
+                text: "Your progress here and on " + root.needs-other-pc + " differ: pick the one to continue with. The other is kept as a version.";
                 wrap: word-wrap;
                 color: Look.text;
             }

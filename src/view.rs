@@ -104,9 +104,12 @@ pub struct View {
     pub playing: bool,
     pub rail: RailView,
     pub pill: Pill,
-    /// Home: the newest note's blocks (as What's new shows them), the PCs, the questions, the
-    /// activity, the playtime.
+    /// Home: the newest note's version, its paragraph and first lines (as What's new shows them)
+    /// and whether lines were left out ("More ▾"); the PCs, the questions, the activity, the
+    /// playtime.
+    pub news_version: String,
     pub news_blocks: Vec<(i32, String)>,
+    pub news_more: bool,
     pub pcs: Vec<PcLine>,
     pub pcs_week: String,
     pub questions: Vec<Question>,
@@ -505,7 +508,7 @@ pub struct Setup {
     pub sync_line: String,
 }
 
-/// The Settings fields, as the user edits them.
+/// The Settings fields, as saved.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Form {
     pub game_dir: String,
@@ -523,23 +526,32 @@ pub struct Form {
     /// 0 System, 1 Light, 2 Dark.
     pub theme: i32,
     pub game_shared: bool,
-    /// Browse's view as its switch left it (`list`, `cards`, `table`): not one of Settings' fields,
-    /// so Save doesn't light up for it, but Save keeps it as it is.
+    /// Browse's view as its switch left it (`list`, `cards`, `table`): not one of Settings' fields.
     pub browse_view: String,
 }
 
+/// The change a form answers: its row (`key`, as the window names it), the text the window sent
+/// for it, and what came of it: `applied` (its value changed and was written: "✓ Saved"), or the
+/// reason it was refused (`why`; nothing was written).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Answered {
+    pub key: String,
+    pub typed: String,
+    pub applied: bool,
+    pub why: String,
+}
+
+/// Settings as the app has them: the saved fields, the game's and the network folder's status
+/// lines, and the change this form answers, if any.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FormView {
-    pub form: Form,
-    /// The fields as saved: a change that was refused leaves them apart.
     pub saved: Form,
     pub game_status: String,
-    /// The game is in the folder the form names.
+    /// The game is in the saved folder (at the first start, the one chosen there).
     pub game_ok: bool,
     pub folder_status: String,
-    /// Why the name typed isn't saved (another PC syncing there has it); empty otherwise.
-    pub name_status: String,
     pub settings_path: String,
+    pub answered: Option<Answered>,
 }
 
 /// The worker's handle on the UI: weak references, used through the event loop; `maximised`:
@@ -562,7 +574,8 @@ impl Ui {
         });
     }
 
-    /// Overwrites the Settings fields: only on start, after Save or Cancel, and after Find it.
+    /// Settings as saved, at start, after each Settings change (applied or refused), after Find
+    /// it and at the first start's steps; `apply_form` decides what each field takes of it.
     pub fn push_form(&self, form: FormView) {
         let _ = self.window.upgrade_in_event_loop(move |window| apply_form(&window, &form));
     }
@@ -646,8 +659,6 @@ thread_local! {
     static CHECKS_ASKED: Cell<u32> = const { Cell::new(0) };
     // The main window has been sized and placed once.
     static PLACED: Cell<bool> = const { Cell::new(false) };
-    // The Settings row whose change is on its way to the app.
-    static PENDING_SAVE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Right after a window is shown (Windows has made it): its frame in the theme's colours, and its
@@ -659,7 +670,8 @@ pub fn after_show(window: &slint::Window, dark: bool) {
 
 /// The main window's size the first time it shows: 1,280 × 720 centred on the work area, the
 /// minimum when that doesn't fit, else maximised; maximised when it was closed so last time.
-/// Later shows leave it where it is.
+/// Its smallest size is never larger than the work area (`shell::min_size`), so a maximised window
+/// fits a small screen at a high scale. Later shows leave it where it is.
 pub fn place_main(window: &MainWindow, maximised: bool) {
     if PLACED.replace(true) {
         return;
@@ -667,6 +679,9 @@ pub fn place_main(window: &MainWindow, maximised: bool) {
     let scale = window.window().scale_factor();
     let open = match win::work_area() {
         Some((left, top, right, bottom)) => {
+            let (min_w, min_h) = shell::min_size(right - left, bottom - top, scale);
+            window.set_min_w(min_w as f32);
+            window.set_min_h(min_h as f32);
             let open = shell::open_size(right - left, bottom - top, scale);
             if let shell::Open::Size(w, h) = open {
                 let (pw, ph) = ((w as f32 * scale) as i32, (h as f32 * scale) as i32);
@@ -680,12 +695,6 @@ pub fn place_main(window: &MainWindow, maximised: bool) {
     if maximised || open == shell::Open::Maximised {
         window.window().set_maximized(true);
     }
-}
-
-/// A setting change on its way to the app (`key` names its row): "✓ Saved" shows on that row once
-/// the app answers with the value applied.
-pub fn pending_save(key: &str) {
-    PENDING_SAVE.with(|p| *p.borrow_mut() = Some(key.to_string()));
 }
 
 /// What doesn't change while the Satchel runs: About's version and build, and What's new.
@@ -730,16 +739,15 @@ fn strings(values: &[String]) -> ModelRc<SharedString> {
 /// The number a Needs-you button's action goes by in the window, and the addon it names.
 fn question_button(label: &str, action: &Action) -> QuestionButton {
     let (code, id) = match action {
-        Action::KeepHere => (0, ""),
-        Action::UseOther => (1, ""),
-        Action::GameKeepHere => (2, ""),
-        Action::GameUseOther => (3, ""),
-        Action::GameUseOwn => (4, ""),
-        Action::AddonKeepHere(id) => (5, id.as_str()),
-        Action::AddonUseOther(id) => (6, id.as_str()),
-        Action::InstallAnyway(id) => (7, id.as_str()),
-        Action::ShowScan(id) => (8, id.as_str()),
-        Action::OpenSettings => (9, ""),
+        Action::ChooseProgress => (0, ""),
+        Action::GameKeepHere => (1, ""),
+        Action::GameUseOther => (2, ""),
+        Action::GameUseOwn => (3, ""),
+        Action::AddonKeepHere(id) => (4, id.as_str()),
+        Action::AddonUseOther(id) => (5, id.as_str()),
+        Action::InstallAnyway(id) => (6, id.as_str()),
+        Action::ShowScan(id) => (7, id.as_str()),
+        Action::OpenSettings => (8, ""),
     };
     QuestionButton { text: text(label), action: code, id: text(id) }
 }
@@ -1308,12 +1316,12 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
         tray.set_status(text(&view.status));
         tray.set_sync_on(view.sync_on);
 
-        window.set_dark(view.dark);
-        card.set_dark(view.dark);
-        // Windows draws the frame: painted at the first view (the window may be shown already) and
-        // again when the colours or Windows' own mode change.
+        // The colours and the frame Windows draws: at the first view (the window may be shown
+        // already) and when the theme or Windows' own mode change, and only then: Settings' theme
+        // applies them the moment it is clicked, and a view made before that click mustn't put
+        // the old ones back.
         if old.is_none_or(|o| o.dark != view.dark || o.system_dark != view.system_dark) {
-            win::paint_frame(&window.window().window_handle(), view.dark);
+            set_theme(window, card, view.dark);
         }
         window.set_app_released(text(&view.app_released));
         window.set_pill_text(text(&view.pill.text));
@@ -1335,6 +1343,8 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
         let news = &view.game_news;
         window.set_game_news_new(news.new);
         window.set_game_news_version(text(&news.version));
+        window.set_news_version(text(&view.news_version));
+        window.set_news_more(view.news_more);
         window.set_game_notes_footer(text(&news.footer));
         window.set_game_notes_empty(text(&news.empty));
         window.set_game_news_latest_answer(text(&news.latest_answer));
@@ -1505,38 +1515,72 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
     });
 }
 
-/// The form as the app has it, after a start, a change applied or refused, or Find it. A refused
-/// change (the folder, the name, the game folder) keeps the typed text with its reason in red, and
-/// the saved value stays in force: the sync switch shows the saved value then. A change applied
-/// lights "✓ Saved" on the row that asked for it.
+/// The window's colours and its frame, light or dark: the window, the Play card, and the caption
+/// Windows draws.
+pub fn set_theme(window: &MainWindow, card: &PlayCard, dark: bool) {
+    window.set_dark(dark);
+    card.set_dark(dark);
+    win::paint_frame(&window.window().window_handle(), dark);
+}
+
+/// Settings as the app answers them. Every switch and choice shows the saved value. Of the three
+/// typed fields (the network folder, this PC's name, the game's folder):
+/// - the one this answer refused keeps the text typed, with why under it in red; it stays so until
+///   it is typed in again or applies (another row's answer leaves it as it is);
+/// - the one this answer applied shows the value as saved (a mapped drive as its network path),
+///   and "✓ Saved" lights on its row;
+/// - the one being typed in (`focused-field`: Alt-Tab or a popup doesn't end that, a click on
+///   another control does) is never touched, unless the answer is for the very text it holds;
+/// - any other shows the saved value: text typed there and never applied with Enter goes.
 pub fn apply_form(window: &MainWindow, view: &FormView) {
-    let form = &view.form;
-    let refused = view.folder_status.starts_with('✗') || !view.name_status.is_empty() || (!view.game_ok && form.game_dir != view.saved.game_dir);
-    window.set_game_dir(text(&form.game_dir));
+    let saved = &view.saved;
+    let focused = window.get_focused_field();
+    let answered = view.answered.as_ref();
+    for (key, value) in [("folder", &saved.folder), ("pc-name", &saved.pc_name), ("game-dir", &saved.game_dir)] {
+        let now = field_text(window, key);
+        // Typed in again since the change went out: what the player types now wins.
+        let typed_since = |sent: &str| focused.as_str() == key && now.as_str() != sent;
+        match answered.filter(|a| a.key == key) {
+            Some(a) if !a.why.is_empty() => {
+                if !typed_since(&a.typed) {
+                    set_field(window, key, &a.typed);
+                    set_refusal(window, key, &a.why);
+                }
+            }
+            Some(a) => {
+                if !typed_since(&a.typed) {
+                    set_field(window, key, value);
+                }
+                set_refusal(window, key, "");
+            }
+            None if focused.as_str() == key || !refusal(window, key).is_empty() => {}
+            None => set_field(window, key, value),
+        }
+    }
+    // The sync switch turned on with a network folder that can't be used or doesn't answer: why,
+    // under the folder.
+    if let Some(a) = answered.filter(|a| a.key == "sync" && !a.why.is_empty()) {
+        set_refusal(window, "folder", &a.why);
+    }
+    if let Some(a) = answered.filter(|a| a.applied) {
+        window.invoke_show_saved(text(&a.key));
+    }
     window.set_game_status(text(&view.game_status));
     window.set_game_ok(view.game_ok);
-    window.set_sync_switch(if refused { view.saved.sync } else { form.sync });
-    window.set_sync_folder(text(&form.folder));
+    window.set_sync_switch(saved.sync);
     window.set_folder_status(text(&view.folder_status));
     window.set_folder_status_kind(if view.folder_status.starts_with('✓') { 1 } else if view.folder_status.starts_with('✗') { 2 } else { 0 });
-    window.set_pc_name(text(&form.pc_name));
-    window.set_name_status(text(&view.name_status));
-    let pending = PENDING_SAVE.with(|p| p.borrow_mut().take());
-    if let Some(key) = pending {
-        window.set_saved_key(text(if refused { "" } else { &key }));
-    }
-    window.set_start_with_windows(form.start_with_windows);
-    window.set_desktop_shortcut(form.desktop_shortcut);
-    window.set_notifications(form.notifications);
-    window.set_addons_auto(form.addons_auto);
-    window.set_addons_shared(form.addons_shared);
-    window.set_addons_forge(form.addons_forge);
-    window.set_pause_when_away(form.pause_when_away);
-    window.set_theme(form.theme);
-    window.set_game_shared(form.game_shared);
-    window.set_browse_view(text(&form.browse_view));
+    window.set_start_with_windows(saved.start_with_windows);
+    window.set_desktop_shortcut(saved.desktop_shortcut);
+    window.set_notifications(saved.notifications);
+    window.set_addons_auto(saved.addons_auto);
+    window.set_addons_shared(saved.addons_shared);
+    window.set_addons_forge(saved.addons_forge);
+    window.set_pause_when_away(saved.pause_when_away);
+    window.set_theme(saved.theme);
+    window.set_game_shared(saved.game_shared);
+    window.set_browse_view(text(&saved.browse_view));
     window.set_settings_path(text(&view.settings_path));
-    let saved = &view.saved;
     window.set_saved_form(SettingsForm {
         game_dir: text(&saved.game_dir),
         sync: saved.sync,
@@ -1555,21 +1599,34 @@ pub fn apply_form(window: &MainWindow, view: &FormView) {
     });
 }
 
-pub fn read_form(window: &MainWindow) -> Form {
-    Form {
-        game_dir: window.get_game_dir().to_string(),
-        sync: window.get_sync_switch(),
-        folder: window.get_sync_folder().to_string(),
-        pc_name: window.get_pc_name().to_string(),
-        start_with_windows: window.get_start_with_windows(),
-        desktop_shortcut: window.get_desktop_shortcut(),
-        notifications: window.get_notifications(),
-        addons_auto: window.get_addons_auto(),
-        addons_shared: window.get_addons_shared(),
-        addons_forge: window.get_addons_forge(),
-        pause_when_away: window.get_pause_when_away(),
-        theme: window.get_theme(),
-        game_shared: window.get_game_shared(),
-        browse_view: window.get_browse_view().to_string(),
+fn field_text(window: &MainWindow, key: &str) -> SharedString {
+    match key {
+        "folder" => window.get_sync_folder(),
+        "pc-name" => window.get_pc_name(),
+        _ => window.get_game_dir(),
+    }
+}
+
+fn set_field(window: &MainWindow, key: &str, value: &str) {
+    match key {
+        "folder" => window.set_sync_folder(text(value)),
+        "pc-name" => window.set_pc_name(text(value)),
+        _ => window.set_game_dir(text(value)),
+    }
+}
+
+fn refusal(window: &MainWindow, key: &str) -> SharedString {
+    match key {
+        "folder" => window.get_folder_refused(),
+        "pc-name" => window.get_name_refused(),
+        _ => window.get_game_refused(),
+    }
+}
+
+fn set_refusal(window: &MainWindow, key: &str, why: &str) {
+    match key {
+        "folder" => window.set_folder_refused(text(why)),
+        "pc-name" => window.set_name_refused(text(why)),
+        _ => window.set_game_refused(text(why)),
     }
 }

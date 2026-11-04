@@ -738,7 +738,7 @@ pub fn paint_frame(handle: &slint::WindowHandle, dark: bool) {
         let _ = DwmSetWindowAttribute(hwnd, attribute, &value as *const u32 as *const c_void, std::mem::size_of::<u32>() as u32);
     };
     set(DWMWA_USE_IMMERSIVE_DARK_MODE, u32::from(dark));
-    // The mock's caption, text and line colours (section 6 of the 0.9 plan), as COLORREFs.
+    // The app's caption, text and line colours (see docs/plan-0.9.md), as COLORREFs.
     let (caption, text, border) = if dark { ("#1f232b", "#e8ebf0", "#2b313c") } else { ("#e9ecf1", "#1b1f27", "#d9dde4") };
     for (attribute, hex) in [(DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text), (DWMWA_BORDER_COLOR, border)] {
         if let Some(value) = colorref(hex) {
@@ -747,16 +747,18 @@ pub fn paint_frame(handle: &slint::WindowHandle, dark: bool) {
     }
 }
 
-/// Windows' folder picker, in front of the Satchel's window (`owner`): the first start's Change…
-/// and Find it. Blocks until the player picks or cancels, so it runs on a thread of its own.
-pub fn pick_folder(owner: Option<isize>) -> Option<PathBuf> {
+/// Windows' folder picker, in front of the Satchel's window (`owner`), with its `title`: the first
+/// start's Change… and Find it, and the network folder's Browse…. Blocks until the player picks or
+/// cancels, so it runs on a thread of its own.
+pub fn pick_folder(owner: Option<isize>, title: &str) -> Option<PathBuf> {
     use windows::Win32::UI::Shell::{FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH};
     com_init();
     unsafe {
         let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None::<&IUnknown>, CLSCTX_INPROC_SERVER).ok()?;
         let options = dialog.GetOptions().ok()?;
         dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
-        let _ = dialog.SetTitle(w!("Where is Azeroth Survivors?"));
+        let title = HSTRING::from(title);
+        let _ = dialog.SetTitle(&title);
         let parent = owner.map(|h| HWND(h as *mut c_void));
         dialog.Show(parent).ok()?;
         let item = dialog.GetResult().ok()?;

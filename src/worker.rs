@@ -9,20 +9,22 @@ mod share;
 use crate::net::{self, Answer};
 use crate::about;
 use crate::update;
-use crate::view::{Form, FormView, PcLine, Pill, PlaytimeView, RailView, Recent, SaveLine, Setup, Tray, Ui, UpdateLine, View};
+use crate::view::{Answered, Form, FormView, PcLine, Pill, PlaytimeView, RailView, Recent, SaveLine, Setup, Tray, Ui, UpdateLine, View};
 use crate::win;
 use chrono::{DateTime, Datelike, Local, Utc};
 use satchel_core::activity::{self, Kind};
 use satchel_core::decide::Decision;
-use satchel_core::engine::{BroughtIn, Engine, Outlook, Shown, SyncError};
+use satchel_core::engine::{BroughtIn, Engine, Outlook, REACH_WAIT, Shown, SyncError};
+use satchel_core::fsx;
 use satchel_core::gate;
 use satchel_core::log;
 use satchel_core::markers::{HEARTBEAT_SECS, InUse, Other};
 use satchel_core::paths;
 use satchel_core::playtime::{self, Session, format_long, format_minutes};
 use satchel_core::session::{Event, Tracker};
-use satchel_core::settings::Theme;
+use satchel_core::settings::{self as settings_rules, Settings, Theme};
 use satchel_core::shell::{self, Dot, NeedsYouFacts, WaitingOk};
+use satchel_core::game_news::card as news_card;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -54,18 +56,23 @@ pub enum Command {
     OpenFolder,
     /// The gear's Open the game's folder.
     OpenGameFolder,
+    /// Home's progress question: Choose… opens the question over the window, where both sides show.
+    ChooseProgress,
+    /// The question over the window: this PC's progress, the other PC's, or later.
     KeepHere,
     UseOther,
     DecideLater,
-    /// A setting changed: the form as the window has it, saved through today's path.
-    SaveSettings(Form),
-    /// Restore defaults: every switch and the theme as a new install has them, saved at once; the
-    /// game folder, the network folder and the PC name stay.
+    /// One Settings change: its row (`sync`, `folder`, `theme`, …) and the value the window sent
+    /// (`true`/`false`, the theme's name, the text typed or picked).
+    Setting(String, String),
+    /// Restore defaults: the switches and the theme as a new install has them, except sync and
+    /// the two sharing switches; the folders and this PC's name stay.
     RestoreDefaults,
-    DetectGame(Form),
-    /// The first start's folder picker chose this folder (with the form as it stands).
-    GameFolderPicked(Form, PathBuf),
-    FinishSetup(Form),
+    /// Settings' Find it: the game looked for in the usual folders, kept when found.
+    DetectGame,
+    /// The first start's folder picker chose this folder.
+    GameFolderPicked(PathBuf),
+    FinishSetup,
     /// The window closed to the tray, maximised or not: remembered for the next start.
     WindowClosed(bool),
     // Addons: ids are a record's, a catalog entry's, SurvivorsForge's own (`forge:<slug>`), or
@@ -148,8 +155,7 @@ pub enum Command {
     /// The game's patch notes were opened: the Play line stops being new for the build it names.
     GameNewsSeen,
     /// The no-game panel's Find it: the game's folder is looked for and kept when found.
-    /// The no-game panel's Find it, with the Settings form as it stands (unsaved edits stay).
-    FindGame(Form),
+    FindGame,
     /// The no-game panel's Get the game.
     OpenGameSite,
     /// An answer from the network thread.
@@ -519,7 +525,7 @@ impl Worker {
                 | Command::VersionBack(..)
                 | Command::IncomingInstallAnyway(_)
                 | Command::OkAnyway(_)
-                | Command::SaveSettings(_)
+                | Command::Setting(..)
                 | Command::RestoreDefaults
         );
         match command {
@@ -550,6 +556,11 @@ impl Worker {
                 }
             }
             Command::WindowClosed(maximised) => self.window_closed(maximised),
+            Command::ChooseProgress => {
+                if self.split.is_some() {
+                    self.needs_you_open = true;
+                }
+            }
             Command::KeepHere => self.resolve(true),
             Command::UseOther => self.resolve(false),
             Command::DecideLater => {
@@ -557,66 +568,11 @@ impl Worker {
                 self.pending_play = false;
                 self.card = None;
             }
-            Command::SaveSettings(form) => {
-                if self.save_settings(form) {
-                    self.refresh();
-                    self.push_form();
-                    self.addons_scan();
-                    // SurvivorsForge switched on: asked at once when it's due. Off, nothing is.
-                    self.forge_look();
-                }
-            }
-            Command::RestoreDefaults => {
-                // The switches and the theme only: the game's folder, the network folder and this
-                // PC's name stay. Saved at once, as every change is.
-                let defaults = satchel_core::settings::Settings::default();
-                let mut form = self.form_view().form;
-                form.start_with_windows = defaults.start_with_windows;
-                form.desktop_shortcut = defaults.desktop_shortcut;
-                form.notifications = defaults.notifications;
-                form.addons_auto = defaults.addons.update_by_themselves;
-                form.addons_shared = defaults.addons.shared;
-                form.addons_forge = defaults.addons.forge;
-                form.pause_when_away = defaults.pause_when_away;
-                form.theme = theme_index(defaults.theme);
-                form.game_shared = defaults.game.shared;
-                if self.save_settings(form) {
-                    self.refresh();
-                    self.push_form();
-                    self.addons_scan();
-                    self.forge_look();
-                }
-            }
-            Command::DetectGame(form) => {
-                let mut view = self.form_view();
-                view.form = form;
-                if let Some(dir) = win::detect_game_dir() {
-                    view.form.game_dir = dir.display().to_string();
-                }
-                view.game_status = game_status(non_empty(&view.form.game_dir).map(Path::new));
-                view.game_ok = game_ok(non_empty(&view.form.game_dir).map(Path::new));
-                // Found while Settings shows (the first start keeps it in the form until Start): saved.
-                if self.setup.is_none() && view.game_ok {
-                    let form = view.form.clone();
-                    if self.save_settings(form) {
-                        self.refresh();
-                        self.push_form();
-                        self.addons_scan();
-                        self.share_look();
-                        return;
-                    }
-                }
-                self.ui.push_form(view);
-            }
-            Command::GameFolderPicked(form, dir) => {
-                let mut view = self.form_view();
-                view.form = form;
-                view.form.game_dir = dir.display().to_string();
-                view.game_status = game_status(Some(&dir));
-                view.game_ok = game_ok(Some(&dir));
-                self.ui.push_form(view);
-            }
-            Command::FinishSetup(form) => self.finish_setup(form),
+            Command::Setting(key, value) => self.setting(&key, &value),
+            Command::RestoreDefaults => self.restore_defaults(),
+            Command::DetectGame => self.detect_game(),
+            Command::GameFolderPicked(dir) => self.game_folder_picked(dir),
+            Command::FinishSetup => self.finish_setup(),
             Command::AddonsCheck => self.addons_check(),
             Command::AddonsUpdateAll => self.addons_update_all(),
             Command::AddonsOpenFolder => self.addons_open_folder(),
@@ -666,7 +622,7 @@ impl Worker {
             Command::CheckUpdates => self.check_updates(),
             Command::WhatsNewSeen => self.whats_new_seen(),
             Command::GameNewsSeen => self.news_seen(),
-            Command::FindGame(form) => self.find_game(form),
+            Command::FindGame => self.find_game(),
             Command::OpenGameSite => win::open_url(win::GAME_SITE),
             Command::Net(answer) => self.addons_answer(answer),
             Command::Quit => {}
@@ -1418,60 +1374,67 @@ impl Worker {
         }
     }
 
-    /// Saves the form. A shared folder the Satchel can't safely use is refused, and so is a name
-    /// another PC syncing there already has (two PCs with one name share a marker, a checkpoint
-    /// and a playtime file): nothing is saved, the form stays as typed with the reason under the
-    /// field, and the answer is `false`.
-    fn save_settings(&mut self, form: Form) -> bool {
-        let mut settings = self.engine.settings.clone();
-        settings.game_dir = non_empty(&form.game_dir).map(PathBuf::from);
-        settings.sync.enabled = form.sync;
-        settings.sync.folder = non_empty(&form.folder).map(|f| win::network_path(Path::new(f)));
-        settings.pc_name = non_empty(&form.pc_name).map(str::to_string).unwrap_or_else(win::computer_name);
-        settings.start_with_windows = form.start_with_windows;
-        settings.desktop_shortcut = form.desktop_shortcut;
-        settings.notifications = form.notifications;
-        settings.addons.update_by_themselves = form.addons_auto;
-        settings.addons.shared = form.addons_shared;
-        settings.addons.forge = form.addons_forge;
-        settings.addons.browse_view = satchel_core::settings::browse_view_or_default(&form.browse_view);
-        settings.pause_when_away = form.pause_when_away;
-        settings.theme = match form.theme {
-            1 => Theme::Light,
-            2 => Theme::Dark,
-            _ => Theme::System,
+    /// One Settings change, from its row (`key`, as the window names it) with the value the window
+    /// sent. Only that row is checked (`settings::change`), and only a value that changed and went
+    /// through is written (atomically, as every settings file is). The window gets the form as
+    /// saved, with the row that applied ("✓ Saved") or why it was refused (the text typed stays in
+    /// its field). Only sync, the network folder and this PC's name read the folder again.
+    fn setting(&mut self, key: &str, typed: &str) {
+        // As the settings keep it: a mapped drive as its network path; a name emptied, this PC's
+        // Windows name.
+        let value = match key {
+            "folder" => non_empty(typed).map(|f| win::network_path(Path::new(f)).display().to_string()).unwrap_or_default(),
+            "pc-name" => non_empty(typed).map_or_else(win::computer_name, str::to_string),
+            _ => typed.to_string(),
         };
-        settings.game.shared = form.game_shared;
-        if let Some(folder) = settings.sync_folder()
-            && let Some(why) = paths::sync_folder_problem(folder, &self.engine.local, settings.game_dir.as_deref())
-        {
-            log!("settings not saved: {why}");
-            let mut view = self.form_view();
-            view.form = form;
-            view.folder_status = format!("✗ Can't be used: {why}");
-            self.ui.push_form(view);
-            return false;
+        let answer = settings_rules::change(&self.engine.settings, key, &value, &Checks(self));
+        let mut answered = Answered { key: key.to_string(), typed: typed.to_string(), applied: false, why: String::new() };
+        if let Some(refusal) = answer.refused {
+            log!("setting {key} not applied: {}", refusal.why);
+            answered.why = refusal.why;
+        } else if answer.applied.is_some() {
+            match self.write_settings(answer.settings) {
+                Ok(()) => answered.applied = true,
+                Err(e) => {
+                    log!("setting {key} not saved: {e}");
+                    answered.why = format!("Not saved: {e}");
+                }
+            }
         }
-        if settings.sync_folder().is_some()
-            && let Some(taken) = self.name_taken(&settings.pc_name)
-        {
-            log!("settings not saved: another PC syncing here is already called {taken}");
-            let mut view = self.form_view();
-            view.form = form;
-            view.name_status = format!("✗ Another PC syncing here is already called {taken}; give this one a name of its own");
-            self.ui.push_form(view);
-            return false;
+        if !answered.applied {
+            self.answer_form(answered);
+            return;
         }
-        if let Err(e) = settings.save(&self.engine.local.settings()) {
-            log!("settings not saved: {e}");
-            self.problem = Some(format!("Settings couldn't be saved: {e}"));
-            return true;
+        match key {
+            "sync" | "folder" | "pc-name" => {
+                self.refresh();
+                self.share_look();
+            }
+            "start-with-windows" | "desktop-shortcut" => self.apply_windows_settings(),
+            "game-dir" => {
+                self.apply_windows_settings();
+                self.addons_scan();
+                self.share_look();
+            }
+            "addons-shared" | "game-shared" => self.share_look(),
+            // SurvivorsForge switched on: asked at once when it's due. Off, nothing is.
+            "addons-forge" => {
+                self.addons_scan();
+                self.forge_look();
+            }
+            "addons-auto" => self.addons_scan(),
+            _ => {}
         }
-        log!("settings saved (sync {}, folder {:?}, PC {:?})", settings.sync.enabled, settings.sync.folder, settings.pc_name);
-        // Every name this PC has had, the one it had before included: typed again, it's never
-        // taken for another PC's.
+        self.answer_form(answered);
+    }
+
+    /// Writes `next` as this PC's settings and puts it in force. Every name this PC has had is
+    /// remembered: typed again, it's never taken for another PC's.
+    fn write_settings(&mut self, next: Settings) -> std::io::Result<()> {
+        next.save(&self.engine.local.settings())?;
+        log!("settings saved (sync {}, folder {:?}, PC {:?})", next.sync.enabled, next.sync.folder, next.pc_name);
         let mut named = false;
-        for name in [self.engine.settings.pc_name.clone(), settings.pc_name.clone()] {
+        for name in [self.engine.settings.pc_name.clone(), next.pc_name.clone()] {
             if !self.engine.state.pc_names.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
                 self.engine.state.pc_names.push(name);
                 named = true;
@@ -1480,15 +1443,64 @@ impl Worker {
         if named && let Err(e) = self.engine.save_state() {
             log!("state not saved: {e}");
         }
-        if settings.sync != self.engine.settings.sync {
+        if next.sync != self.engine.settings.sync {
             self.outlook = None;
             self.split = None;
             self.offline = false;
         }
-        self.engine.settings = settings;
+        self.engine.settings = next;
         self.problem = None;
-        self.apply_windows_settings();
-        true
+        Ok(())
+    }
+
+    /// Restore defaults: the switches and the theme as a new install has them, except sync and
+    /// the two sharing switches; the folders and this PC's name stay (`settings::restore_defaults`).
+    fn restore_defaults(&mut self) {
+        let next = settings_rules::restore_defaults(&self.engine.settings);
+        let mut answered = Answered { key: "defaults".into(), ..Answered::default() };
+        if next != self.engine.settings {
+            match self.write_settings(next) {
+                Ok(()) => {
+                    self.apply_windows_settings();
+                    self.addons_scan();
+                    self.forge_look();
+                }
+                Err(e) => {
+                    log!("defaults not saved: {e}");
+                    self.say(format!("The defaults couldn't be saved: {e}"));
+                    self.answer_form(answered);
+                    return;
+                }
+            }
+        }
+        // Said even when nothing had to change: the switches are as a new install has them.
+        answered.applied = true;
+        self.answer_form(answered);
+    }
+
+    /// Settings' Find it: the game looked for in the usual folders, and kept as the game's folder
+    /// when it passes the same check a folder typed there does (at the first start, until Start).
+    fn detect_game(&mut self) {
+        match win::detect_game_dir() {
+            Some(dir) => self.game_folder_picked(dir),
+            None => self.answer_form(Answered {
+                key: "game-dir".into(),
+                typed: self.form_view().saved.game_dir,
+                applied: false,
+                why: "The game wasn't found in the usual folders: paste its folder and press Enter".into(),
+            }),
+        }
+    }
+
+    /// A game folder picked or found: at the first start shown, and kept with Start; else it goes
+    /// as a typed game folder does.
+    fn game_folder_picked(&mut self, dir: PathBuf) {
+        if self.setup.is_none() {
+            self.setting("game-dir", &dir.display().to_string());
+            return;
+        }
+        self.engine.settings.game_dir = Some(dir);
+        self.answer_form(Answered { key: "game-dir".into(), ..Answered::default() });
     }
 
     /// Browse's switch: the view is kept in settings.toml as soon as it is picked, on its own, so
@@ -1557,18 +1569,22 @@ impl Worker {
             browse_view: settings.addons.browse_view.clone(),
         };
         FormView {
-            saved: form.clone(),
-            form,
+            saved: form,
             game_status: game_status(settings.game_dir.as_deref()),
             game_ok: game_ok(settings.game_dir.as_deref()),
             folder_status,
-            name_status: String::new(),
             settings_path: self.engine.local.settings().display().to_string(),
+            answered: None,
         }
     }
 
     fn push_form(&self) {
         self.ui.push_form(self.form_view());
+    }
+
+    /// The form as saved, answering one change: the row that applied, or why it was refused.
+    fn answer_form(&self, answered: Answered) {
+        self.ui.push_form(FormView { answered: Some(answered), ..self.form_view() });
     }
 
     /// The game's progress folder or the shared folder is a link (junction) to another place,
@@ -1597,21 +1613,42 @@ impl Worker {
         self.ui.show(None);
     }
 
-    fn finish_setup(&mut self, form: Form) {
+    /// The first start's Start: the game's folder (detected, or picked there) and what the
+    /// defaults file beside the exe set are written, and the first sync runs.
+    fn finish_setup(&mut self) {
+        let refuse = |worker: &Self, key: &str, why: &str| {
+            let typed = match key {
+                "folder" => worker.form_view().saved.folder,
+                _ => worker.form_view().saved.game_dir,
+            };
+            worker.answer_form(Answered { key: key.into(), typed, applied: false, why: why.into() });
+        };
+        let settings = self.engine.settings.clone();
+        let Some(dir) = settings.game_dir.clone().filter(|d| game_ok(Some(d))) else {
+            refuse(self, "game-dir", "The game isn't in this folder: choose the one it is in");
+            return;
+        };
         // The first sync may replace this PC's save: only with the game closed.
-        if let Some(dir) = non_empty(&form.game_dir).map(PathBuf::from)
-            && self.scanner.game_running(&dir)
+        if self.scanner.game_running(&dir) {
+            refuse(self, "game-dir", "The game is running: close it, then press Start");
+            return;
+        }
+        if let Some(folder) = settings.sync_folder()
+            && let Some(why) = paths::sync_folder_problem(folder, &self.engine.local, Some(&dir))
         {
-            let mut view = self.form_view();
-            view.form = form;
-            view.game_ok = true;
-            view.game_status = "✗ The game is running: close it, then press Start".into();
-            self.ui.push_form(view);
+            refuse(self, "folder", &format!("The network folder from the defaults file can't be used: {why}"));
             return;
         }
-        if !self.save_settings(form) || self.problem.is_some() {
+        if let Err(e) = settings.save(&self.engine.local.settings()) {
+            log!("settings not saved: {e}");
+            refuse(self, "game-dir", &format!("Settings couldn't be saved: {e}"));
             return;
         }
+        log!("settings saved (sync {}, folder {:?}, PC {:?})", settings.sync.enabled, settings.sync.folder, settings.pc_name);
+        if !self.engine.state.pc_names.iter().any(|n| n.eq_ignore_ascii_case(&settings.pc_name)) {
+            self.engine.state.pc_names.push(settings.pc_name.clone());
+        }
+        self.apply_windows_settings();
         self.engine.state.setup_done = true;
         // A new install has nothing to tell about earlier versions.
         self.engine.state.seen_version = Some(about::VERSION.into());
@@ -1625,11 +1662,20 @@ impl Worker {
                         self.split = Some(nas);
                         self.needs_you_open = true;
                     }
-                    Decision::Send => match self.engine.send(now, None, Some("first start".into()), None) {
-                        Ok(Some(v)) => self.activity(Kind::Sync, &format!("Started the network folder with version {}", v.n)),
-                        Ok(None) => {}
-                        Err(e) => self.problem = Some(format!("The first sync failed: {e}")),
-                    },
+                    Decision::Send => {
+                        // 0.8 offered the newest export at the top of an empty folder in this
+                        // PC's save's place; this PC's save goes first now, and the export stays
+                        // one click away.
+                        let export = self.differing_export(&outlook);
+                        match self.engine.send(now, None, Some("first start".into()), None) {
+                            Ok(Some(v)) => self.activity(Kind::Sync, &format!("Started the network folder with version {}", v.n)),
+                            Ok(None) => {}
+                            Err(e) => self.problem = Some(format!("The first sync failed: {e}")),
+                        }
+                        if let Some(name) = export {
+                            self.activity(Kind::Sync, &format!("Your export {name} is under Settings → Progress versions"));
+                        }
+                    }
                     Decision::BringIn(n) => {
                         self.open_card();
                         self.bring_in(n, now);
@@ -1651,6 +1697,7 @@ impl Worker {
         }
         self.setup = None;
         log!("first start done");
+        self.push_form();
         self.startup();
         self.ui.show(Some(0));
     }
@@ -2044,11 +2091,18 @@ impl Worker {
             game_own: non_empty(&game_settings.own).map(str::to_string),
             addon_asks: addons.rows.iter().filter(|r| !r.ask_pc.is_empty()).map(|r| (r.id.clone(), r.name.clone(), r.ask_pc.clone())).collect(),
             waiting_ok,
-            name_clash: if sync_on { self.name_taken(&self.engine.settings.pc_name) } else { None },
             folder_down: sync_on && self.offline,
         };
         let questions = shell::needs_you(&facts);
-        let news_blocks = news.notes.first().map(|n| n.blocks.clone()).unwrap_or_default();
+        // Home's What's new: the newest note the panel has, its version with it (not the update
+        // server's, which a rollback there can make differ), its paragraph and first lines.
+        let (news_version, news_blocks, news_more) = match news.notes.first() {
+            Some(note) => {
+                let (shown, more) = news_card(&note.blocks, |(kind, _)| *kind == 0);
+                (note.version.clone(), shown.to_vec(), more)
+            }
+            None => (String::new(), Vec::new(), false),
+        };
 
         let mut shown = None;
         let needs_you = match (self.needs_you_open, self.split) {
@@ -2078,7 +2132,9 @@ impl Worker {
             playing,
             rail,
             pill,
+            news_version,
             news_blocks,
+            news_more,
             pcs: self.lists.pcs.clone(),
             pcs_week: self.lists.pcs_week.clone(),
             questions,
@@ -2164,39 +2220,47 @@ impl Worker {
         }
     }
 
-    /// The no-game panel's Find it: a folder found is kept at once (Settings shows it).
-    fn find_game(&mut self, form: Form) {
+    /// The no-game panel's Find it: the game looked for in the usual folders, and kept when it
+    /// passes the check a folder typed in Settings does; Settings shows it.
+    fn find_game(&mut self) {
         let Some(dir) = win::detect_game_dir() else {
             self.say("The game wasn't found in the usual folders. If it's installed, choose its folder in Settings.".into());
             return;
         };
-        let mut settings = self.engine.settings.clone();
-        settings.game_dir = Some(dir.clone());
-        // The same check as Save's: the game's folder and the shared one must stay apart.
-        if let Some(folder) = settings.sync_folder()
-            && let Some(why) = paths::sync_folder_problem(folder, &self.engine.local, Some(&dir))
-        {
-            log!("found game not used: {why}");
-            self.say(format!("The game was found in {}, but it can't be used: {why}. See Settings.", dir.display()));
+        let found = dir.display().to_string();
+        let answer = settings_rules::change(&self.engine.settings, "game-dir", &found, &Checks(self));
+        if let Some(refusal) = answer.refused {
+            log!("found game not used: {}", refusal.why);
+            let mut why = refusal.why.chars();
+            let why = why.next().map(|first| first.to_lowercase().collect::<String>() + why.as_str()).unwrap_or_default();
+            self.say(format!("The game was found in {found}, but {why}. See Settings."));
             return;
         }
-        if let Err(e) = settings.save(&self.engine.local.settings()) {
+        if answer.applied.is_some()
+            && let Err(e) = self.write_settings(answer.settings)
+        {
             self.problem = Some(format!("Settings couldn't be saved: {e}"));
             return;
         }
-        log!("game found at {}", dir.display());
-        self.engine.settings = settings;
+        log!("game found at {found}");
         self.apply_windows_settings();
-        self.say(format!("The game was found in {}", dir.display()));
-        // Settings keeps what was typed there and not saved yet; only the game's folder changes.
-        let mut view = self.form_view();
-        let saved = view.form.game_dir.clone();
-        view.form = Form { game_dir: saved, ..form };
-        view.game_status = game_status(Some(&dir));
-        self.ui.push_form(view);
+        self.say(format!("The game was found in {found}"));
+        self.answer_form(Answered { key: "game-dir".into(), typed: found, applied: answer.applied.is_some(), why: String::new() });
         self.refresh();
         self.addons_scan();
         self.share_look();
+    }
+
+    /// The newest export at the top of an empty network folder, when it isn't this PC's save: its
+    /// name.
+    fn differing_export(&self, outlook: &Outlook) -> Option<String> {
+        if !outlook.index.versions.is_empty() {
+            return None;
+        }
+        let local = self.engine.local_save().ok().flatten()?;
+        let export = self.engine.exports().ok()?.into_iter().next()?;
+        let bytes = fs::read(&export.path).ok()?;
+        (fsx::fingerprint(&bytes) != local.sha256).then_some(export.name)
     }
 
     /// Update now: the Satchel downloaded from GitHub takes this one's place and starts (playing,
@@ -2340,6 +2404,26 @@ impl Worker {
 
     fn close_card_in(&mut self, seconds: u64) {
         self.card_until = Some(Instant::now() + Duration::from_secs(seconds));
+    }
+}
+
+/// What a Settings change is checked against, from this PC: the paths the network folder must
+/// stay apart from, whether a folder answers, the names the other PCs syncing there use, and
+/// whether the game is in a folder.
+struct Checks<'a>(&'a Worker);
+
+impl settings_rules::Checks for Checks<'_> {
+    fn folder_problem(&self, folder: &Path, game_dir: Option<&Path>) -> Option<String> {
+        paths::sync_folder_problem(folder, &self.0.engine.local, game_dir)
+    }
+    fn folder_answers(&self, folder: &Path) -> bool {
+        paths::Shared { folder: folder.to_path_buf() }.reachable_within(REACH_WAIT)
+    }
+    fn name_taken(&self, name: &str) -> Option<String> {
+        self.0.name_taken(name)
+    }
+    fn game_found(&self, dir: &Path) -> bool {
+        game_ok(Some(dir))
     }
 }
 

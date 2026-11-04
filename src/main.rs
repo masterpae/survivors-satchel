@@ -185,20 +185,20 @@ fn main() {
             }
         });
     }
-    // Home's Needs-you card: each button is one of today's callbacks.
+    // Home's Needs-you card: each button is one of today's callbacks; the progress question's
+    // Choose… opens the question over the window, where the choice is made.
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
         window.on_question_action(move |action, id| {
             let id: String = id.into();
             let command = match action {
-                0 => Command::KeepHere,
-                1 => Command::UseOther,
-                2 => Command::GameSettingsChoice(true),
-                3 => Command::GameSettingsChoice(false),
-                4 => Command::GameSettingsOwn,
-                5 => Command::AddonSettingsChoice(id, true),
-                6 => Command::AddonSettingsChoice(id, false),
-                7 => {
+                0 => Command::ChooseProgress,
+                1 => Command::GameSettingsChoice(true),
+                2 => Command::GameSettingsChoice(false),
+                3 => Command::GameSettingsOwn,
+                4 => Command::AddonSettingsChoice(id, true),
+                5 => Command::AddonSettingsChoice(id, false),
+                6 => {
                     if let Some(window) = weak.upgrade() {
                         view::installing(&window, Some(&id));
                     }
@@ -206,7 +206,7 @@ fn main() {
                     // tells the two apart.
                     Command::OkAnyway(id)
                 }
-                8 => {
+                7 => {
                     if let Some(window) = weak.upgrade() {
                         view::show_scan(&window, &id);
                     }
@@ -222,51 +222,69 @@ fn main() {
             let _ = tx.send(command);
         });
     }
-    // Settings apply the moment they change: the form as the window has it goes through today's
-    // path, and the row that asked lights "✓ Saved" when the app answers with the value applied.
+    // Settings apply one change at a time, the moment it's made: a switch or the theme on click, a
+    // typed field with Enter, the network folder's Browse… once a folder is picked. The worker
+    // checks only that row and answers with the form as saved. A click on another control than
+    // the field being typed in ends that field's typing: the answer may then put its saved value
+    // back.
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_setting_bool(move |key, _on| {
+        window.on_setting_bool(move |key, on| {
             if let Some(window) = weak.upgrade() {
-                view::pending_save(&key);
-                let _ = tx.send(Command::SaveSettings(view::read_form(&window)));
+                window.set_focused_field("".into());
             }
+            let _ = tx.send(Command::Setting(key.into(), on.to_string()));
         });
     }
+    // The theme: its colours and the frame at once; the worker saves it.
     {
-        let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_setting_theme(move |_theme| {
-            if let Some(window) = weak.upgrade() {
-                view::pending_save("theme");
-                let _ = tx.send(Command::SaveSettings(view::read_form(&window)));
-            }
-        });
-    }
-    {
-        let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_setting_text(move |key, _value| {
-            if let Some(window) = weak.upgrade() {
-                // Nothing changed: nothing to save, and no "✓ Saved".
-                let form = view::read_form(&window);
-                let saved = window.get_saved_form();
-                let same = match key.as_str() {
-                    "folder" => form.folder == saved.folder.as_str(),
-                    "pc-name" => form.pc_name == saved.pc_name.as_str(),
-                    "game-dir" => form.game_dir == saved.game_dir.as_str(),
-                    _ => false,
+        let (tx, weak, card) = (tx.clone(), window.as_weak(), card.as_weak());
+        window.on_setting_theme(move |index| {
+            let (theme, name) = match index {
+                1 => (Theme::Light, "light"),
+                2 => (Theme::Dark, "dark"),
+                _ => (Theme::System, "system"),
+            };
+            if let (Some(window), Some(card)) = (weak.upgrade(), card.upgrade()) {
+                window.set_focused_field("".into());
+                let dark = match theme {
+                    Theme::System => win::apps_use_dark(),
+                    Theme::Light => false,
+                    Theme::Dark => true,
                 };
-                if same {
-                    return;
-                }
-                view::pending_save(&key);
-                let _ = tx.send(Command::SaveSettings(form));
+                view::set_theme(&window, &card, dark);
             }
+            let _ = tx.send(Command::Setting("theme".into(), name.into()));
         });
     }
     {
         let tx = tx.clone();
+        window.on_setting_text(move |key, value| {
+            let _ = tx.send(Command::Setting(key.into(), value.into()));
+        });
+    }
+    // The network folder's Browse…: Windows' folder picker, on a thread of its own; the folder
+    // picked applies at once.
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        window.on_pick_sync_folder(move || {
+            let Some(window) = weak.upgrade() else { return };
+            window.set_focused_field("".into());
+            let owner = win::native_handle(&window.window().window_handle());
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                if let Some(path) = win::pick_folder(owner, "The network folder for your progress") {
+                    let _ = tx.send(Command::Setting("folder".into(), path.display().to_string()));
+                }
+            });
+        });
+    }
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
         window.on_restore_defaults(move || {
-            view::pending_save("defaults");
+            if let Some(window) = weak.upgrade() {
+                window.set_focused_field("".into());
+            }
             let _ = tx.send(Command::RestoreDefaults);
         });
     }
@@ -274,8 +292,9 @@ fn main() {
         let (tx, weak) = (tx.clone(), window.as_weak());
         window.on_detect_game(move || {
             if let Some(window) = weak.upgrade() {
-                let _ = tx.send(Command::DetectGame(view::read_form(&window)));
+                window.set_focused_field("".into());
             }
+            let _ = tx.send(Command::DetectGame);
         });
     }
     // The first start's Change… and Find it: Windows' folder picker, on a thread of its own.
@@ -284,23 +303,15 @@ fn main() {
         window.on_pick_game_folder(move || {
             let Some(window) = weak.upgrade() else { return };
             let owner = win::native_handle(&window.window().window_handle());
-            let form = view::read_form(&window);
             let tx = tx.clone();
             std::thread::spawn(move || {
-                if let Some(path) = win::pick_folder(owner) {
-                    let _ = tx.send(Command::GameFolderPicked(form, path));
+                if let Some(path) = win::pick_folder(owner, "Where is Azeroth Survivors?") {
+                    let _ = tx.send(Command::GameFolderPicked(path));
                 }
             });
         });
     }
-    {
-        let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_finish_setup(move || {
-            if let Some(window) = weak.upgrade() {
-                let _ = tx.send(Command::FinishSetup(view::read_form(&window)));
-            }
-        });
-    }
+    window.on_finish_setup(sender(&tx, || Command::FinishSetup));
     // The Addons tab. Rows are named by an id (a record's, a catalog entry's, or `folder:<name>`).
     window.on_addons_check(sender(&tx, || Command::AddonsCheck));
     window.on_addons_update_all(sender(&tx, || Command::AddonsUpdateAll));
@@ -319,14 +330,7 @@ fn main() {
     window.on_install_again(with_id(&tx, Command::InstallAgain));
     window.on_whats_new_seen(sender(&tx, || Command::WhatsNewSeen));
     window.on_game_news_seen(sender(&tx, || Command::GameNewsSeen));
-    {
-        let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_find_game(move || {
-            if let Some(window) = weak.upgrade() {
-                let _ = tx.send(Command::FindGame(view::read_form(&window)));
-            }
-        });
-    }
+    window.on_find_game(sender(&tx, || Command::FindGame));
     window.on_update_now(sender(&tx, || Command::UpdateNow));
     // Check for updates shows "Checking…" at once; the worker's answer replaces that.
     {
@@ -517,7 +521,18 @@ fn main() {
 
     tray.on_play(sender(&tx, || Command::Play));
     tray.on_sync_now(sender(&tx, || Command::SyncNow));
-    tray.on_quit(sender(&tx, || Command::Quit));
+    // Exit: a window open maximised is remembered so first, as closing it would.
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        tray.on_quit(move || {
+            if let Some(window) = weak.upgrade()
+                && window.window().is_visible()
+            {
+                let _ = tx.send(Command::WindowClosed(window.window().is_maximized()));
+            }
+            let _ = tx.send(Command::Quit);
+        });
+    }
     {
         let (weak, maximised) = (window.as_weak(), remember_maximised);
         tray.on_open_tab(move |tab| {
