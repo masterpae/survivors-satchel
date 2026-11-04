@@ -224,6 +224,20 @@ pub fn merge(file: &[Version], seen: &BTreeMap<String, Seen>) -> Vec<Note> {
     notes
 }
 
+/// The newest build's note is new on this PC until the panel is opened while the Play line (0.8)
+/// or the rail's Build line (0.9) names that version: `State::opened` remembers the version the
+/// panel was opened for. No build known: nothing is new.
+pub fn newest_is_new(s: &State, version: &str) -> bool {
+    !version.is_empty() && s.opened.as_deref() != Some(version)
+}
+
+/// The versions the panel shows, `PANEL_MOST` at most, and whether older ones were left out (the
+/// panel's last line then says they are on the game's Discord).
+pub fn panel_notes(merged: &[Note]) -> (&[Note], bool) {
+    let shown = merged.len().min(PANEL_MOST);
+    (&merged[..shown], merged.len() > PANEL_MOST)
+}
+
 /// Both sources on this PC (`%LOCALAPPDATA%\SurvivorsSatchel\game-news`): each body exactly as
 /// received, beside `state.json`. Only a cache: a file that can't be read is dropped and fetched
 /// again. Writes are atomic, as the rest of the cache's.
@@ -577,6 +591,77 @@ mod tests {
         assert_eq!(cache.notes(), None);
         // Right at the cap is fine.
         assert!(cache.store_notes(&"#".repeat(Feed::Notes.cap() as usize), None, at(13)).is_ok());
+    }
+
+    /// The caps 0.8 shipped: 64 KB for the update index, 512 KB for the notes file; a body right at
+    /// the cap is kept, one byte over is dropped and counts as a try.
+    #[test]
+    fn the_body_caps_are_64_and_512_kb() {
+        assert_eq!(Feed::Latest.cap(), 64 * 1024);
+        assert_eq!(Feed::Notes.cap(), 512 * 1024);
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::open(dir.path().to_path_buf());
+        // An index body padded to exactly the cap with a field the Satchel ignores.
+        let head = r#"{"version":"0.1.0","notes":"n","pad":""#;
+        let at_cap = format!("{head}{}\"}}", "x".repeat(Feed::Latest.cap() as usize - head.len() - 2));
+        assert_eq!(at_cap.len() as u64, Feed::Latest.cap());
+        assert_eq!(cache.store_latest(&at_cap, None, None, at(10)).unwrap().version, "0.1.0");
+        assert_eq!(cache.state().latest.answered, Some(at(10)));
+        let over = format!("{head}{}\"}}", "x".repeat(Feed::Latest.cap() as usize - head.len() - 1));
+        assert_eq!(over.len() as u64, Feed::Latest.cap() + 1);
+        assert!(cache.store_latest(&over, None, None, at(11)).unwrap_err().contains("over the 64 KB cap"));
+        assert_eq!(cache.state().latest.tried, Some(at(11)), "a dropped body counts as a try");
+        assert_eq!(cache.state().latest.answered, Some(at(10)), "and not as an answer");
+        assert_eq!(cache.latest().map(|l| l.version), Some("0.1.0".into()), "the body kept stays");
+        let notes_at_cap = format!("## 0.1.0\n\n{}\n", "n".repeat(Feed::Notes.cap() as usize - 11));
+        assert_eq!(notes_at_cap.len() as u64, Feed::Notes.cap());
+        assert_eq!(cache.store_notes(&notes_at_cap, None, at(12)).unwrap().len(), 1);
+        let notes_over = format!("{notes_at_cap}\n");
+        assert!(cache.store_notes(&notes_over, None, at(13)).unwrap_err().contains("over the 512 KB cap"));
+        assert_eq!(cache.state().notes, Source { etag: None, tried: Some(at(13)), answered: Some(at(12)) });
+    }
+
+    /// The newest note is new until the panel is opened for that very version: opened for an
+    /// older one, or never, it stays new; opened for it, it stops; a newer build makes it new again.
+    #[test]
+    fn the_newest_note_is_new_until_opened_for_that_version() {
+        let mut state = State::default();
+        assert!(!newest_is_new(&state, ""), "no build known: nothing is new");
+        assert!(newest_is_new(&state, "0.141.0"));
+        state.opened = Some("0.140.0".into());
+        assert!(newest_is_new(&state, "0.141.0"));
+        state.opened = Some("0.141.0".into());
+        assert!(!newest_is_new(&state, "0.141.0"));
+        assert!(newest_is_new(&state, "0.141.1"), "a newer build arrived: new again");
+        // Through the cache, as the app does it.
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::open(dir.path().to_path_buf());
+        cache.store_latest(LATEST, None, None, at(10)).unwrap();
+        assert!(newest_is_new(&cache.state(), "0.141.0"));
+        cache.opened("0.141.0");
+        assert!(!newest_is_new(&cache.state(), "0.141.0"));
+    }
+
+    /// The panel shows 30 versions at most, the newest, and says when older ones were left out.
+    #[test]
+    fn the_panel_shows_thirty_versions_at_most() {
+        assert_eq!(PANEL_MOST, 30);
+        let note = |n: usize| Note { version: format!("0.{n}.0"), ..Note::default() };
+        let few: Vec<Note> = (0..3).map(note).collect();
+        let (shown, more) = panel_notes(&few);
+        assert_eq!((shown.len(), more), (3, false));
+        let thirty: Vec<Note> = (0..30).map(note).collect();
+        let (shown, more) = panel_notes(&thirty);
+        assert_eq!((shown.len(), more), (30, false));
+        let mut seen = BTreeMap::new();
+        for n in 0..35 {
+            seen.insert(format!("0.{n}.0"), Seen { notes: format!("note {n}"), modified: None, first_seen: None });
+        }
+        let merged = merge(&[], &seen);
+        let (shown, more) = panel_notes(&merged);
+        assert_eq!((shown.len(), more), (30, true));
+        assert_eq!((shown[0].version.as_str(), shown[29].version.as_str()), ("0.34.0", "0.5.0"), "the newest thirty");
+        assert_eq!(panel_notes(&[]), (&[][..], false));
     }
 
     #[test]

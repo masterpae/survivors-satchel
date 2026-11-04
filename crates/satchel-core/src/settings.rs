@@ -21,16 +21,27 @@ pub struct Settings {
     pub sync: SyncSettings,
     pub addons: AddonSettings,
     pub game: GameSettings,
+    /// The window as it was left (since 0.9.0).
+    pub window: WindowSettings,
 }
 
-/// The window's colours: as Windows' apps are, or always light, or always dark.
+/// The window's colours: as Windows' apps are, or always light, or always dark. Dark for a new
+/// settings file (since 0.9.0); a file that names its theme keeps it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
-    #[default]
     System,
     Light,
+    #[default]
     Dark,
+}
+
+/// What the window remembers of itself: only whether it was maximised when it closed to the tray
+/// or exited, so it reopens maximised. Nothing else about the window is kept.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowSettings {
+    pub maximised: bool,
 }
 
 /// The game's own settings (`game_settings`).
@@ -135,10 +146,11 @@ impl Default for Settings {
             desktop_shortcut: true,
             notifications: true,
             pause_when_away: false,
-            theme: Theme::System,
+            theme: Theme::default(),
             sync: SyncSettings::default(),
             addons: AddonSettings::default(),
             game: GameSettings::default(),
+            window: WindowSettings::default(),
         }
     }
 }
@@ -259,15 +271,45 @@ mod tests {
         assert!(settings.desktop_shortcut, "untouched keys keep their defaults");
     }
 
+    /// Since 0.9.0 a new settings file is dark; a file that names its theme keeps it (every file
+    /// 0.3 and later wrote names it, as Save writes every field), and one from before 0.3 is dark
+    /// too, as a new one.
     #[test]
-    fn settings_from_0_3_follow_windows_colours_and_share_the_game_settings() {
-        let settings: Settings = toml::from_str("pc_name = 'PC 1'\n[sync]\nenabled = true\n[addons]\nshared = true\n").unwrap();
-        assert_eq!(settings.theme, Theme::System);
-        assert!(settings.game.shared);
-        let dark = Settings { theme: Theme::Dark, ..settings };
-        let text = toml::to_string_pretty(&dark).unwrap();
-        assert!(text.contains("theme = \"dark\""), "{text}");
-        assert_eq!(toml::from_str::<Settings>(&text).unwrap(), dark);
+    fn a_new_settings_file_is_dark_and_an_existing_one_keeps_its_theme() {
+        assert_eq!(Settings::default().theme, Theme::Dark);
+        assert_eq!(Theme::default(), Theme::Dark);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        Settings::default().save(&path).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("theme = \"dark\""));
+        for (line, theme) in [("theme = 'system'", Theme::System), ("theme = 'light'", Theme::Light), ("theme = 'dark'", Theme::Dark)] {
+            let settings: Settings = toml::from_str(&format!("pc_name = 'PC 1'\n{line}\n[sync]\nenabled = true\n")).unwrap();
+            assert_eq!(settings.theme, theme, "{line}");
+            settings.save(&path).unwrap();
+            assert_eq!(Settings::load(&path).unwrap().unwrap().theme, theme, "{line} kept");
+        }
+        // A file from before 0.3, which names no theme: as a new one.
+        let old: Settings = toml::from_str("pc_name = 'PC 1'\n[sync]\nenabled = true\n[addons]\nshared = true\n").unwrap();
+        assert_eq!(old.theme, Theme::Dark);
+        assert!(old.game.shared);
+    }
+
+    /// The window remembers only whether it was maximised; a file without the key reads as not.
+    #[test]
+    fn the_window_remembers_only_that_it_was_maximised() {
+        let from_0_8: Settings = toml::from_str("pc_name = 'PC 1'\ntheme = 'light'\n").unwrap();
+        assert!(!from_0_8.window.maximised);
+        assert!(!Settings::default().window.maximised);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let maximised = Settings { window: WindowSettings { maximised: true }, ..Settings::default() };
+        maximised.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[window]\nmaximised = true"), "{text}");
+        assert_eq!(Settings::load(&path).unwrap(), Some(maximised));
+        // Written by a later Satchel with more under [window]: the rest stands.
+        let later: Settings = toml::from_str("[window]\nmaximised = true\nleft = 10\n").unwrap();
+        assert!(later.window.maximised);
     }
 
     #[test]
