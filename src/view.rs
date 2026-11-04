@@ -119,8 +119,10 @@ pub struct View {
     pub saves: Vec<SaveLine>,
     pub saves_summary: String,
     pub saves_note: String,
-    /// "Needs you" at Play: this PC's save, the other one, the other PC's name.
+    /// "Needs you" at Play: this PC's save, the other one, the other PC's name; and why the last
+    /// pick didn't go through, under its buttons (empty: none).
     pub needs_you: Option<[String; 3]>,
+    pub needs_note: String,
     /// The Play card's lines (text, done, warning) and whether it asks "Play anyway?".
     pub card: Option<(Vec<(String, bool, bool)>, bool)>,
     pub setup: Option<Setup>,
@@ -502,10 +504,12 @@ pub struct LinkView {
 }
 
 /// The first start: one screen. `sync_line`: "Sync is on · <folder>" when the defaults file beside
-/// the exe turned sync on; empty otherwise.
+/// the exe turned sync on, or why sync stays off when that folder can't be used (`sync_warn`, in
+/// amber); empty otherwise.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Setup {
     pub sync_line: String,
+    pub sync_warn: bool,
 }
 
 /// The Settings fields, as saved.
@@ -771,6 +775,7 @@ fn dot(dot: Dot) -> i32 {
         Dot::Gold => 2,
         Dot::Amber => 3,
         Dot::Muted => 4,
+        Dot::Text => 5,
     }
 }
 
@@ -929,6 +934,8 @@ fn offer_row(offer: &OfferLine) -> OfferRow {
         popularity: text(&offer.downloads.map(thousands).unwrap_or_default()),
         install_text: text(cell.text),
         install_primary: cell.primary,
+        // A one-word name is cut short with "…" in a narrow column, not broken inside the word.
+        one_word: !offer.name.trim().contains(char::is_whitespace),
     }
 }
 
@@ -1366,6 +1373,7 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
                 window.set_progress_line(text(&line.text));
                 window.set_progress_dot(dot(line.dot));
                 window.set_progress_amber(line.amber);
+                window.set_progress_wrap(line.wrap);
             }
             None => window.set_progress_line("".into()),
         }
@@ -1472,10 +1480,12 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
             }
             None => window.set_needs_you(false),
         }
+        window.set_needs_note(text(&view.needs_note));
 
         match &view.setup {
             Some(setup) => {
                 window.set_setup_sync_line(text(&setup.sync_line));
+                window.set_setup_sync_warn(setup.sync_warn);
                 window.set_setup(true);
             }
             None => window.set_setup(false),

@@ -23,7 +23,7 @@ use satchel_core::paths;
 use satchel_core::playtime::{self, Session, format_long, format_minutes};
 use satchel_core::session::{Event, Tracker};
 use satchel_core::settings::{self as settings_rules, Settings, Theme};
-use satchel_core::shell::{self, Dot, NeedsYouFacts, WaitingOk};
+use satchel_core::shell::{self, Dot, NeedsYouFacts, Notice, WaitingOk};
 use satchel_core::game_news::card as news_card;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,7 +40,8 @@ const SATCHEL_RETRY_EVERY: Duration = Duration::from_secs(20 * 60);
 const SATCHEL_GATED_EVERY: Duration = Duration::from_secs(10 * 60);
 /// A write to the live save is checkpointed once it has been quiet this long.
 const SETTLE: Duration = Duration::from_secs(3);
-/// How long a one-off message stays in the banner.
+/// How long a one-off message (a notice) stays on the rail's progress line, and the progress
+/// question's own refusal in its overlay.
 const NOTICE_FOR: Duration = Duration::from_secs(60);
 /// The window's tabs, in order: Home, Addons, Settings.
 const TAB_SETTINGS: i32 = 2;
@@ -211,10 +212,15 @@ pub struct Worker {
     offline: bool,
     offline_told: bool,
     problem: Option<String>,
-    notice: Option<String>,
+    /// The problem the rail has been told of: a new one shows at once, as a notice.
+    problem_told: Option<String>,
+    notice: Option<Notice>,
     notice_at: Option<Instant>,
     split: Option<u64>,
     needs_you_open: bool,
+    /// Why the progress question's pick didn't go through (the game running, the folder not
+    /// answering, …), under its buttons while it is open.
+    needs_note: Option<(String, Instant)>,
     /// What the "Needs you" choice shows on screen: an answer applies to exactly that.
     shown: Option<Shown>,
     // Play.
@@ -394,8 +400,10 @@ impl Worker {
             offline: false,
             offline_told: false,
             problem: None,
+            problem_told: None,
             notice: None,
             notice_at: None,
+            needs_note: None,
             split: None,
             needs_you_open: false,
             shown: None,
@@ -458,7 +466,7 @@ impl Worker {
             }));
             if step.is_err() {
                 self.busy = None;
-                self.say("The Satchel hit an internal error and carried on; its log has the details.".into());
+                self.warn("The Satchel hit an internal error and carried on; its log has the details.".into());
             }
             if self.quit {
                 break;
@@ -559,12 +567,14 @@ impl Worker {
             Command::ChooseProgress => {
                 if self.split.is_some() {
                     self.needs_you_open = true;
+                    self.needs_note = None;
                 }
             }
             Command::KeepHere => self.resolve(true),
             Command::UseOther => self.resolve(false),
             Command::DecideLater => {
                 self.needs_you_open = false;
+                self.needs_note = None;
                 self.pending_play = false;
                 self.card = None;
             }
@@ -742,7 +752,7 @@ impl Worker {
         if let Ok(outlook) = self.engine.outlook(now) {
             if let Decision::BringIn(n) | Decision::Split { nas: n } = outlook.decision {
                 let from = outlook.index.get(n).map(|v| v.pc.clone()).unwrap_or_default();
-                self.say(format!("{from} has newer progress: close the game and press Play to bring it in."));
+                self.warn(format!("{from} has newer progress: close the game and press Play to bring it in."));
                 self.notify(
                     "Newer progress in the network folder",
                     &format!("{from} has newer progress. Close the game and press Play to bring it in; if you keep playing, you'll pick one at the end."),
@@ -1179,7 +1189,7 @@ impl Worker {
                     }
                     Decision::BringIn(n) => {
                         if self.tracker.game_running() {
-                            self.say(format!("Close the game to bring in version {n}."));
+                            self.warn(format!("Close the game to bring in version {n}."));
                         } else {
                             self.open_card();
                             self.bring_in(n, now);
@@ -1205,7 +1215,7 @@ impl Worker {
             return;
         };
         if self.tracker.game_running() {
-            self.say("Close the game first, then pick.".into());
+            self.refuse_pick("Close the game first, then pick.");
             return;
         }
         let now = Utc::now();
@@ -1226,6 +1236,7 @@ impl Worker {
             Ok(text) => {
                 self.split = None;
                 self.needs_you_open = false;
+                self.needs_note = None;
                 self.problem = None;
                 if let Some(text) = text {
                     self.activity(Kind::Sync, &text);
@@ -1237,15 +1248,17 @@ impl Worker {
             }
             Err(SyncError::Offline) => {
                 self.offline = true;
-                self.say("The network folder doesn't answer; pick again when it's back.".into());
+                self.refuse_pick("The network folder doesn't answer; pick again when it's back.");
             }
             Err(SyncError::Changed) => {
                 log!("the choice was made on a view that had changed: asked again");
-                self.say("Something changed since you looked (another PC sent, or this PC's save changed). Check the two again and pick.".into());
+                self.refuse_pick("Something changed since you looked (another PC sent, or this PC's save changed). Check the two again and pick.");
             }
             Err(e) => {
                 log!("choice not saved: {e}");
-                self.problem = Some(format!("Your choice couldn't be saved: {e}"));
+                let why = format!("Your choice couldn't be saved: {e}");
+                self.needs_note = Some((why.clone(), Instant::now()));
+                self.problem = Some(why);
             }
         }
         self.refresh();
@@ -1311,7 +1324,7 @@ impl Worker {
 
     fn bring_back(&mut self, index: usize) {
         if self.tracker.game_running() {
-            self.say("Close the game first: a save is only brought in while the game is closed.".into());
+            self.warn("Close the game first: a save is only brought in while the game is closed.".into());
             return;
         }
         let Some(row) = self.lists.rows.get(index).cloned() else { return };
@@ -1467,7 +1480,7 @@ impl Worker {
                 }
                 Err(e) => {
                     log!("defaults not saved: {e}");
-                    self.say(format!("The defaults couldn't be saved: {e}"));
+                    self.warn(format!("The defaults couldn't be saved: {e}"));
                     self.answer_form(answered);
                     return;
                 }
@@ -1599,18 +1612,25 @@ impl Worker {
     }
 
     /// First start: one screen. The game's folder comes from detection (or the defaults file
-    /// beside the exe); sync, when that file turned it on, is said in one line. The "which progress"
-    /// choice of before 0.9 is gone: the normal "two PCs changed it" question handles that case at
-    /// the first Play and on Home.
+    /// beside the exe); sync, when that file turned it on, is said in one line (`setup_view`). The
+    /// "which progress" choice of before 0.9 is gone: the normal "two PCs changed it" question
+    /// handles that case at the first Play and on Home.
     fn enter_setup(&mut self) {
-        let settings = &self.engine.settings;
-        let sync_line = match settings.sync_folder() {
-            Some(folder) => format!("Sync is on · {}", folder.display()),
-            None => String::new(),
-        };
-        self.setup = Some(Setup { sync_line });
+        self.setup = Some(Setup::default());
         self.push_form();
         self.ui.show(None);
+    }
+
+    /// The first-start screen's sync line, for the game folder it shows now: "Sync is on ·
+    /// <folder>" when the defaults file turned sync on, or, when that folder can't be used with
+    /// this game folder, the line that says sync stays off (in amber), as Start will say it too.
+    fn setup_view(&self) -> Setup {
+        let settings = &self.engine.settings;
+        let Some(folder) = settings.sync_folder() else { return Setup::default() };
+        match paths::sync_folder_problem(folder, &self.engine.local, settings.game_dir.as_deref()) {
+            Some(why) => Setup { sync_line: defaults_folder_line(&why), sync_warn: true },
+            None => Setup { sync_line: format!("Sync is on · {}", folder.display()), sync_warn: false },
+        }
     }
 
     /// The first start's Start: the game's folder (detected, or picked there) and what the
@@ -1636,7 +1656,7 @@ impl Worker {
         if let Some(why) = problem {
             log!("sync left off at the first start: {why}");
             settings.sync.enabled = false;
-            self.say(format!("Sync stays off: the network folder from the defaults file can't be used ({why}). Choose another in Settings."));
+            self.warn(defaults_folder_line(&why));
         }
         if let Err(e) = settings.save(&self.engine.local.settings()) {
             log!("settings not saved: {e}");
@@ -1972,7 +1992,7 @@ impl Worker {
         let decision = self.outlook.as_ref().map(|o| &o.decision);
         let newest = self.outlook.as_ref().and_then(|o| o.index.newest_version());
         let (status, banner) = match tray {
-            Tray::NeedsYou => match self.problem.as_ref().or(self.notice.as_ref()) {
+            Tray::NeedsYou => match self.problem.as_ref() {
                 Some(text) => ("Needs you".to_string(), text.clone()),
                 None => (
                     "Needs you".into(),
@@ -1990,22 +2010,11 @@ impl Worker {
                     (true, None) => "nothing new to send".into(),
                     (false, _) => "a copy is kept when the session closes".into(),
                 };
-                (
-                    "Game closed".into(),
-                    self.notice.clone().unwrap_or_else(|| {
-                        format!("Game closed · {sent}. The session closes once the game stays closed for a moment (longer after an update).")
-                    }),
-                )
+                ("Game closed".into(), format!("Game closed · {sent}. The session closes once the game stays closed for a moment (longer after an update)."))
             }
             Tray::Playing => (
                 "Game running".into(),
-                self.notice.clone().unwrap_or_else(|| {
-                    if sync_on {
-                        "Game running · each time the game saves, a checkpoint goes to the network folder".into()
-                    } else {
-                        "Game running".into()
-                    }
-                }),
+                if sync_on { "Game running · each time the game saves, a checkpoint goes to the network folder".into() } else { "Game running".into() },
             ),
             Tray::Offline => (
                 "Network folder unreachable".into(),
@@ -2017,9 +2026,7 @@ impl Worker {
                     _ if sync_on => "Synced".into(),
                     _ => "Ready".into(),
                 };
-                let banner = if let Some(notice) = &self.notice {
-                    notice.clone()
-                } else if self.game_dir().is_none() {
+                let banner = if self.game_dir().is_none() {
                     "The game wasn't found: set its folder in Settings.".into()
                 } else {
                     match (decision, newest) {
@@ -2050,7 +2057,8 @@ impl Worker {
         };
         let last = if sync_on { self.lists.last_sync } else { self.lists.last_copy };
         let last = last.map(|t| shell::when_short(t, &local_now));
-        let progress = shell::progress_line(dot, &banner, sync_on, last.as_deref(), self.lists.pc_count);
+        // A notice, for its minute, comes first whatever the state.
+        let progress = shell::progress_line(dot, &banner, sync_on, last.as_deref(), self.lists.pc_count, self.notice.as_ref());
         let addons = self.addons_view();
         let addons_line = shell::addons_line(addons.rail);
         let playing = self.tracker.in_session();
@@ -2116,6 +2124,11 @@ impl Worker {
             }
             _ => None,
         };
+        // The pick's refusal, under the overlay's buttons while it is open, for its minute.
+        let needs_note = match (&needs_you, &self.needs_note) {
+            (Some(_), Some((why, at))) if at.elapsed() < NOTICE_FOR => why.clone(),
+            _ => String::new(),
+        };
 
         let saves_note = if sync_on {
             "Every version in the network folder, newest first, plus your own exports; bring an older one back if something went wrong. Your save from before is kept as a safety copy.".into()
@@ -2144,8 +2157,9 @@ impl Worker {
             saves_summary: self.lists.saves_summary.clone(),
             saves_note,
             needs_you,
+            needs_note,
             card: self.card.clone(),
-            setup: self.setup.clone(),
+            setup: self.setup.as_ref().map(|_| self.setup_view()),
             addons,
             dark,
             system_dark,
@@ -2163,6 +2177,14 @@ impl Worker {
     }
 
     fn push(&mut self) {
+        // A problem newly set is a notice too: it shows at once, ahead of an older one, and the
+        // tray's needs-you state keeps it on the rail after its minute.
+        if self.problem != self.problem_told {
+            self.problem_told = self.problem.clone();
+            if let Some(problem) = self.problem.clone() {
+                self.warn(problem);
+            }
+        }
         let (view, shown) = self.build_view();
         self.shown = shown;
         if self.last_view.as_ref() != Some(&view) {
@@ -2185,10 +2207,26 @@ impl Worker {
         }
     }
 
-    /// A one-off message for the banner; it goes away after a minute.
+    /// A one-off message, plain news: on the rail's progress line for a minute, whatever the
+    /// tray's state, in the text colour.
     fn say(&mut self, text: String) {
-        self.notice = Some(text);
+        self.tell(text, false);
+    }
+
+    /// A one-off problem: on the rail's progress line for a minute, in amber.
+    fn warn(&mut self, text: String) {
+        self.tell(text, true);
+    }
+
+    fn tell(&mut self, text: String, problem: bool) {
+        self.notice = Some(Notice { text, problem });
         self.notice_at = Some(Instant::now());
+    }
+
+    /// The progress question's pick refused: why, under its buttons, and on the rail.
+    fn refuse_pick(&mut self, why: &str) {
+        self.needs_note = Some((why.to_string(), Instant::now()));
+        self.warn(why.to_string());
     }
 
     /// Whether the window is dark, and whether Windows' apps are (the title bar is set again when
@@ -2224,7 +2262,7 @@ impl Worker {
     /// passes the check a folder typed in Settings does; Settings shows it.
     fn find_game(&mut self) {
         let Some(dir) = win::detect_game_dir() else {
-            self.say("The game wasn't found in the usual folders. If it's installed, choose its folder in Settings.".into());
+            self.warn("The game wasn't found in the usual folders. If it's installed, choose its folder in Settings.".into());
             return;
         };
         let found = dir.display().to_string();
@@ -2233,7 +2271,7 @@ impl Worker {
             log!("found game not used: {}", refusal.why);
             let mut why = refusal.why.chars();
             let why = why.next().map(|first| first.to_lowercase().collect::<String>() + why.as_str()).unwrap_or_default();
-            self.say(format!("The game was found in {found}, but {why}. See Settings."));
+            self.warn(format!("The game was found in {found}, but {why}. See Settings."));
             return;
         }
         if answer.applied.is_some()
@@ -2267,7 +2305,7 @@ impl Worker {
     /// when asked from Play), and this one closes.
     fn update_now(&mut self) {
         if self.game_dir().is_some_and(|d| self.scanner.game_running(&d)) {
-            self.say("Close the game first: the Satchel updates while the game is closed.".into());
+            self.warn("Close the game first: the Satchel updates while the game is closed.".into());
             return;
         }
         // The session closes up to a few minutes after the game (playtime, this PC's in-use
@@ -2293,7 +2331,7 @@ impl Worker {
                 self.busy = None;
                 log!("the update to {} failed: {e}", offer.version);
                 let by_hand = about::repository_url().map(|url| format!("; the new one can also be downloaded from {url}/releases")).unwrap_or_default();
-                self.say(format!("The Satchel didn't update ({e}). It goes on as it was{by_hand}."));
+                self.warn(format!("The Satchel didn't update ({e}). It goes on as it was{by_hand}."));
             }
         }
     }
@@ -2322,7 +2360,8 @@ impl Worker {
             "Checked: this build doesn't look on GitHub for updates".into()
         };
         self.check_result = Some(text.clone());
-        self.say(text);
+        let failed = asks_github && !self.check_pending && self.offer().is_none();
+        self.tell(text, failed);
     }
 
     /// The newer Satchel on offer: downloaded from GitHub, checked and verified.
@@ -2349,6 +2388,8 @@ impl Worker {
         };
         // The answer Check for updates waits for.
         if std::mem::take(&mut self.check_pending) {
+            // GitHub not answering, or a release refused, is a problem; anything else news.
+            let problem = failed.is_some() && self.offer().is_none();
             let text = match (self.offer(), failed) {
                 (Some(offer), _) => format!("Checked: {}", offer.ready()),
                 // No answer says so itself ("GitHub didn't answer (…)"); else a release was refused
@@ -2358,7 +2399,7 @@ impl Worker {
                 (None, None) => format!("Checked: you have the newest version ({})", about::VERSION),
             };
             self.check_result = Some(text.clone());
-            self.say(text);
+            self.tell(text, problem);
         }
     }
 
@@ -2383,7 +2424,10 @@ impl Worker {
         self.card_until = None;
     }
 
+    /// A line on the Play card; on the rail too, for its minute (the card closes sooner), in amber
+    /// when it warns. The card's question (`card_ask`) is not a notice.
     fn card_line(&mut self, text: &str, done: bool, warn: bool) {
+        self.tell(text.to_string(), warn);
         if let Some((lines, asking)) = self.card.as_mut() {
             *asking = false;
             lines.push((text.into(), done, warn));
@@ -2425,6 +2469,12 @@ impl settings_rules::Checks for Checks<'_> {
     fn game_found(&self, dir: &Path) -> bool {
         game_ok(Some(dir))
     }
+}
+
+/// What the first start says, on its screen and then on the rail, when the network folder of the
+/// defaults file beside the exe can't be used (`why`): sync stays off.
+fn defaults_folder_line(why: &str) -> String {
+    format!("Sync stays off: the network folder from the defaults file can't be used ({why}). Choose another in Settings.")
 }
 
 fn game_status(dir: Option<&Path>) -> String {

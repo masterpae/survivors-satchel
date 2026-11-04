@@ -1178,7 +1178,7 @@ impl Worker {
     /// The same pick for the game's own settings, in Settings.
     pub(super) fn game_settings_choice(&mut self, keep_here: bool) {
         if !keep_here && self.game_started_meanwhile() {
-            self.game_say("Close the game first: its settings change only while it's closed.".into());
+            self.game_say("Close the game first: its settings change only while it's closed.".into(), true);
             return;
         }
         let Some((shared, game)) = self.game_share_place() else { return };
@@ -1189,7 +1189,7 @@ impl Worker {
     /// the other PCs as the newest version.
     pub(super) fn game_use_own(&mut self) {
         if self.game_started_meanwhile() {
-            self.game_say("Close the game first: its settings change only while it's closed.".into());
+            self.game_say("Close the game first: its settings change only while it's closed.".into(), true);
             return;
         }
         let Some((shared, game)) = self.game_share_place() else { return };
@@ -1198,11 +1198,11 @@ impl Worker {
             Ok(text) => {
                 self.share.memory.game_own_kept = None;
                 self.activity(Kind::Game, &text);
-                self.game_say(text);
+                self.game_say(text, false);
             }
             Err(text) => {
                 log!("{text}");
-                self.game_say(text);
+                self.game_say(text, true);
             }
         }
         self.share_save();
@@ -1237,33 +1237,34 @@ impl Worker {
         Ok(format!("{what}: this PC's own are back, and go to the other PCs at their next Play"))
     }
 
-    /// An answer about the game's settings: on the Play tab's banner and, for a minute, in Settings
-    /// where the question was.
-    fn game_say(&mut self, text: String) {
+    /// An answer about the game's settings: on the rail and, for a minute, in Settings where the
+    /// question was; `problem` when it didn't go through.
+    fn game_say(&mut self, text: String, problem: bool) {
         self.share.game_note = Some((text.clone(), Instant::now()));
-        self.say(text);
+        self.tell(text, problem);
     }
 
     fn settings_choice(&mut self, shared: &Shared, game: &GameAddons, id: &str, keep_here: bool) {
         let Some(split) = self.share.memory.splits.get(id).cloned() else { return };
         let Some(set) = self.settings_set(id) else { return };
-        // The game's answers show in Settings, an addon's on the Addons tab.
-        let (kind, say): (Kind, fn(&mut Worker, String)) = match &set {
-            SettingsSet::Game => (Kind::Game, |w, text| w.game_say(text)),
-            SettingsSet::Addon { .. } => (Kind::Addon, |w, text| w.addons_say(text)),
+        // The game's answers show in Settings and on the rail, an addon's on the Addons tab; the
+        // flag says a problem.
+        let (kind, say): (Kind, fn(&mut Worker, String, bool)) = match &set {
+            SettingsSet::Game => (Kind::Game, |w, text, problem| w.game_say(text, problem)),
+            SettingsSet::Addon { .. } => (Kind::Addon, |w, text, _| w.addons_say(text)),
         };
         let what = set.what();
         let mine = match set.read(game) {
             Ok(mine) => mine,
-            Err(e) => return say(self, format!("{what} here couldn't be read: {e}")),
+            Err(e) => return say(self, format!("{what} here couldn't be read: {e}"), true),
         };
         // The answer applies to what was shown.
         let list = match share::read(shared) {
             Ok(list) => list,
-            Err(e) => return say(self, format!("The shared addon list can't be read: {e}")),
+            Err(e) => return say(self, format!("The shared addon list can't be read: {e}"), true),
         };
         if mine.fingerprint().as_deref() != Some(split.local.as_str()) || list.newest_settings(id).map(|v| v.n) != Some(split.nas) {
-            say(self, format!("{what} changed again since you looked: see what it shows now."));
+            say(self, format!("{what} changed again since you looked: see what it shows now."), true);
             self.share_look();
             return;
         }
@@ -1286,9 +1287,9 @@ impl Worker {
             Ok(text) => {
                 self.share.memory.splits.remove(id);
                 self.activity(kind, &text);
-                say(self, text);
+                say(self, text, false);
             }
-            Err(e) => say(self, format!("{what}: {e}")),
+            Err(e) => say(self, format!("{what}: {e}"), true),
         }
         self.share_save();
         self.share_look();

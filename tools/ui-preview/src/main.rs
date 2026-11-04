@@ -174,6 +174,7 @@ fn cells(row: OfferRow, trust: (&str, i32), again: bool) -> OfferRow {
         installed: row.action >= 3,
         installed_id: if row.action >= 3 { row.id.clone() } else { SharedString::new() },
         installed_name: if row.action >= 3 { row.name.clone() } else { SharedString::new() },
+        one_word: !row.name.trim().contains(char::is_whitespace),
         ..row
     }
 }
@@ -654,6 +655,23 @@ fn needs_you(facts: &satchel_core::shell::NeedsYouFacts) -> ModelRc<QuestionRow>
     ModelRc::new(VecModel::from(rows))
 }
 
+/// The rail's progress line as the app sets it (`view.rs`: the dot's number, the colour, two lines
+/// for a notice).
+fn set_progress(ui: &MainWindow, line: satchel_core::shell::RailLine) {
+    use satchel_core::shell::Dot;
+    ui.set_progress_line(line.text.into());
+    ui.set_progress_dot(match line.dot {
+        Dot::Green => 0,
+        Dot::Blue => 1,
+        Dot::Gold => 2,
+        Dot::Amber => 3,
+        Dot::Muted => 4,
+        Dot::Text => 5,
+    });
+    ui.set_progress_amber(line.amber);
+    ui.set_progress_wrap(line.wrap);
+}
+
 /// What the Settings fields hold, as saved: the hint "Enter to apply" shows only where a field
 /// differs from it.
 fn saved_form(ui: &MainWindow) -> SettingsForm {
@@ -984,6 +1002,38 @@ fn main() {
     ui.set_pill_kind(0);
     ui.set_update_version("".into());
 
+    // A notice on the rail's progress line for its minute, whatever the state: plain news in the
+    // text colour (the no-game panel's Find it), on two lines…
+    use satchel_core::shell::{Dot, Notice, progress_line};
+    let synced = || progress_line(Dot::Green, "", true, Some("2 min ago"), 3, None);
+    let news = Notice { text: r"The game was found in C:\games\AzerothSurvivors".into(), problem: false };
+    set_progress(&ui, progress_line(Dot::Green, "", true, Some("2 min ago"), 3, Some(&news)));
+    both("50g-home-notice", size);
+    // …and a problem in amber, here while the game runs (the tray's gold state): Sync now with
+    // newer progress in the network folder.
+    ui.set_playing(true);
+    ui.set_state(TrayState::Playing);
+    ui.set_last_line("Session 12 min · your progress is sent when the game closes".into());
+    let problem = Notice { text: "Close the game to bring in version 28.".into(), problem: true };
+    set_progress(&ui, progress_line(Dot::Gold, "", true, Some("2 min ago"), 3, Some(&problem)));
+    both("50h-home-notice-problem", size);
+    // The progress question over the window, its pick refused while the game runs: why, in red
+    // under its buttons, and on the rail behind it.
+    let pick = Notice { text: "Close the game first, then pick.".into(), problem: true };
+    set_progress(&ui, progress_line(Dot::Amber, "", true, Some("2 min ago"), 3, Some(&pick)));
+    ui.set_needs_here("today 13:20 · 8.1 KB".into());
+    ui.set_needs_other("yesterday 21:40 · 8.0 KB".into());
+    ui.set_needs_other_pc("Desktop".into());
+    ui.set_needs_note(pick.text.as_str().into());
+    ui.set_needs_you(true);
+    both("50i-home-choose-refused", size);
+    ui.set_needs_you(false);
+    ui.set_needs_note("".into());
+    ui.set_playing(false);
+    ui.set_state(TrayState::Synced);
+    ui.set_last_line("Last played today, 34 min · Laptop".into());
+    set_progress(&ui, synced());
+
     // Addons: the hybrid, Browse's table with the top row open and its thumbnails, the rail's
     // search and filters, the segmented row.
     let all = offers();
@@ -1093,6 +1143,13 @@ fn main() {
     ui.set_game_ok(false);
     both("53b-first-start-not-found", size);
     ui.set_game_ok(true);
+    // The defaults file's network folder can't be used with this game folder: sync stays off, as
+    // Start will say on the rail too.
+    ui.set_setup_sync_line("Sync stays off: the network folder from the defaults file can't be used (the network folder is inside the game's progress folder). Choose another in Settings.".into());
+    ui.set_setup_sync_warn(true);
+    both("53c-first-start-sync-off", size);
+    ui.set_setup_sync_line("".into());
+    ui.set_setup_sync_warn(false);
     ui.set_setup(false);
 
     // The minimum size and maximised on a Full HD screen: Home and Addons.

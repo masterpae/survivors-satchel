@@ -129,6 +129,8 @@ pub enum Dot {
     Amber,
     /// Nothing to colour yet: muted.
     Muted,
+    /// A notice's plain news: the text colour.
+    Text,
 }
 
 /// One of the rail's status lines.
@@ -136,8 +138,18 @@ pub enum Dot {
 pub struct RailLine {
     pub text: String,
     pub dot: Dot,
-    /// The text in amber (the banner's words) rather than the text colour.
+    /// The text in amber (the banner's words, a problem) rather than the text colour.
     pub amber: bool,
+    /// It may take two lines (a notice); else it is elided on one.
+    pub wrap: bool,
+}
+
+/// A one-off message for the player, shown on the rail's progress line for its minute: plain news
+/// (the text colour) or a problem (amber).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notice {
+    pub text: String,
+    pub problem: bool,
 }
 
 /// The rail's Build line: "Build 0.141.0" with the What's new link beside it (`true`), or, with
@@ -147,20 +159,26 @@ pub fn build_line(version: &str) -> (String, bool) {
     if version.is_empty() { ("The game's notes come here once read".into(), false) } else { (format!("Build {version}"), true) }
 }
 
-/// The rail's progress line. The dot follows the tray: green synced, blue busy, gold playing,
-/// amber needs-you or offline; amber lines carry the banner's words (`banner`) instead. `last`:
-/// the last successful send or bring-in (sync on), or the last local safety copy (sync off), as
-/// `when_short` says it; `pcs`: the PCs in the shared index.
-pub fn progress_line(dot: Dot, banner: &str, sync_on: bool, last: Option<&str>, pcs: usize) -> RailLine {
+/// The rail's progress line. A notice (`notice`, while its minute lasts) comes first, whatever the
+/// tray's state: a problem in amber with an amber dot, plain news in the text colour with a dot of
+/// that colour, on two lines when it needs them. Else the dot follows the tray: green synced, blue
+/// busy, gold playing, amber needs-you or offline; amber lines carry the banner's words (`banner`)
+/// instead. `last`: the last successful send or bring-in (sync on), or the last local safety copy
+/// (sync off), as `when_short` says it; `pcs`: the PCs in the shared index.
+pub fn progress_line(dot: Dot, banner: &str, sync_on: bool, last: Option<&str>, pcs: usize, notice: Option<&Notice>) -> RailLine {
+    if let Some(notice) = notice.filter(|n| !n.text.trim().is_empty()) {
+        let dot = if notice.problem { Dot::Amber } else { Dot::Text };
+        return RailLine { text: notice.text.trim().to_string(), dot, amber: notice.problem, wrap: true };
+    }
     if dot == Dot::Amber {
-        return RailLine { text: banner.trim().to_string(), dot, amber: true };
+        return RailLine { text: banner.trim().to_string(), dot, amber: true, wrap: false };
     }
     let text = match (sync_on, last) {
         (true, Some(last)) => format!("Progress synced {last} · {}", if pcs == 1 { "1 PC".to_string() } else { format!("{pcs} PCs") }),
         (false, Some(last)) => format!("Progress saved {last} · this PC only"),
         (_, None) => "No progress saved yet".into(),
     };
-    RailLine { text, dot, amber: false }
+    RailLine { text, dot, amber: false, wrap: false }
 }
 
 /// What the rail's addons line is made from: the Installed tab's state in numbers.
@@ -196,10 +214,10 @@ pub fn addons_facts(lines: &[Line], waiting_ok: usize, downloading: bool, checke
 /// download runs, amber when one waits for an OK. Only the addons the game loads count as on.
 pub fn addons_line(f: AddonsFacts) -> RailLine {
     if f.installed == 0 {
-        return RailLine { text: "No addons yet".into(), dot: Dot::Muted, amber: false };
+        return RailLine { text: "No addons yet".into(), dot: Dot::Muted, amber: false, wrap: false };
     }
     if !f.checked && f.waiting_ok == 0 && f.at_play == 0 {
-        return RailLine { text: "Addons not checked yet".into(), dot: Dot::Muted, amber: false };
+        return RailLine { text: "Addons not checked yet".into(), dot: Dot::Muted, amber: false, wrap: false };
     }
     let on = if f.on == 1 { "1 addon on".to_string() } else { format!("{} addons on", f.on) };
     let (tail, dot) = if f.waiting_ok > 0 {
@@ -209,7 +227,7 @@ pub fn addons_line(f: AddonsFacts) -> RailLine {
     } else {
         ("all up to date".to_string(), if f.downloading { Dot::Blue } else { Dot::Green })
     };
-    RailLine { text: format!("{on} · {tail}"), dot, amber: false }
+    RailLine { text: format!("{on} · {tail}"), dot, amber: false, wrap: false }
 }
 
 /// The rail's last line, under Play: the newest session ("Last played today, 34 min · Laptop"),
@@ -434,33 +452,68 @@ mod tests {
         assert_eq!(build_line("0.141.0"), ("Build 0.141.0".to_string(), true));
         assert_eq!(build_line(" "), ("The game's notes come here once read".to_string(), false));
 
-        let line = progress_line(Dot::Green, "", true, Some("2 min ago"), 3);
-        assert_eq!(line, RailLine { text: "Progress synced 2 min ago · 3 PCs".into(), dot: Dot::Green, amber: false });
-        assert_eq!(progress_line(Dot::Blue, "", true, Some("just now"), 1).text, "Progress synced just now · 1 PC");
-        assert_eq!(progress_line(Dot::Green, "", false, Some("yesterday 21:40"), 0).text, "Progress saved yesterday 21:40 · this PC only");
-        assert_eq!(progress_line(Dot::Green, "", true, None, 0).text, "No progress saved yet");
-        assert_eq!(progress_line(Dot::Gold, "", false, None, 0), RailLine { text: "No progress saved yet".into(), dot: Dot::Gold, amber: false });
-        let offline = progress_line(Dot::Amber, "Network folder unreachable: your progress is safe on this PC.", true, Some("2 min ago"), 3);
-        assert_eq!(offline, RailLine { text: "Network folder unreachable: your progress is safe on this PC.".into(), dot: Dot::Amber, amber: true });
+        let line = progress_line(Dot::Green, "", true, Some("2 min ago"), 3, None);
+        assert_eq!(line, RailLine { text: "Progress synced 2 min ago · 3 PCs".into(), dot: Dot::Green, amber: false, wrap: false });
+        assert_eq!(progress_line(Dot::Blue, "", true, Some("just now"), 1, None).text, "Progress synced just now · 1 PC");
+        assert_eq!(progress_line(Dot::Green, "", false, Some("yesterday 21:40"), 0, None).text, "Progress saved yesterday 21:40 · this PC only");
+        assert_eq!(progress_line(Dot::Green, "", true, None, 0, None).text, "No progress saved yet");
+        assert_eq!(progress_line(Dot::Gold, "", false, None, 0, None), RailLine { text: "No progress saved yet".into(), dot: Dot::Gold, amber: false, wrap: false });
+        let offline = progress_line(Dot::Amber, "Network folder unreachable: your progress is safe on this PC.", true, Some("2 min ago"), 3, None);
+        assert_eq!(offline, RailLine { text: "Network folder unreachable: your progress is safe on this PC.".into(), dot: Dot::Amber, amber: true, wrap: false });
 
         let facts = AddonsFacts { installed: 6, on: 5, checked: true, ..Default::default() };
-        assert_eq!(addons_line(facts), RailLine { text: "5 addons on · all up to date".into(), dot: Dot::Green, amber: false });
-        assert_eq!(addons_line(AddonsFacts { at_play: 2, ..facts }), RailLine { text: "5 addons on · 2 updates at Play".into(), dot: Dot::Green, amber: false });
-        assert_eq!(addons_line(AddonsFacts { at_play: 1, downloading: true, ..facts }), RailLine { text: "5 addons on · 1 update at Play".into(), dot: Dot::Blue, amber: false });
-        assert_eq!(addons_line(AddonsFacts { waiting_ok: 1, at_play: 2, ..facts }), RailLine { text: "5 addons on · 1 waits for your OK".into(), dot: Dot::Amber, amber: false });
+        assert_eq!(addons_line(facts), RailLine { text: "5 addons on · all up to date".into(), dot: Dot::Green, amber: false, wrap: false });
+        assert_eq!(addons_line(AddonsFacts { at_play: 2, ..facts }), RailLine { text: "5 addons on · 2 updates at Play".into(), dot: Dot::Green, amber: false, wrap: false });
+        assert_eq!(addons_line(AddonsFacts { at_play: 1, downloading: true, ..facts }), RailLine { text: "5 addons on · 1 update at Play".into(), dot: Dot::Blue, amber: false, wrap: false });
+        assert_eq!(addons_line(AddonsFacts { waiting_ok: 1, at_play: 2, ..facts }), RailLine { text: "5 addons on · 1 waits for your OK".into(), dot: Dot::Amber, amber: false, wrap: false });
         assert_eq!(addons_line(AddonsFacts { waiting_ok: 2, ..facts }).text, "5 addons on · 2 wait for your OK");
         assert_eq!(addons_line(AddonsFacts { installed: 1, on: 1, checked: true, ..Default::default() }).text, "1 addon on · all up to date");
         assert_eq!(addons_line(AddonsFacts { installed: 2, on: 0, checked: true, ..Default::default() }).text, "0 addons on · all up to date");
-        assert_eq!(addons_line(AddonsFacts { installed: 5, on: 5, ..Default::default() }), RailLine { text: "Addons not checked yet".into(), dot: Dot::Muted, amber: false });
+        assert_eq!(addons_line(AddonsFacts { installed: 5, on: 5, ..Default::default() }), RailLine { text: "Addons not checked yet".into(), dot: Dot::Muted, amber: false, wrap: false });
         // Not checked this run, but something is known from the last: it shows.
         assert_eq!(addons_line(AddonsFacts { installed: 5, on: 5, waiting_ok: 1, ..Default::default() }).text, "5 addons on · 1 waits for your OK");
-        assert_eq!(addons_line(AddonsFacts::default()), RailLine { text: "No addons yet".into(), dot: Dot::Muted, amber: false });
+        assert_eq!(addons_line(AddonsFacts::default()), RailLine { text: "No addons yet".into(), dot: Dot::Muted, amber: false, wrap: false });
 
         assert_eq!(last_line(None, true, Some(("today", 34, "Laptop"))), "Last played today, 34 min · Laptop");
         assert_eq!(last_line(None, true, Some(("Sun", 252, "Study PC"))), "Last played Sun, 4 h 12 min · Study PC");
         assert_eq!(last_line(None, false, None), "Not played from the Satchel yet");
         assert_eq!(last_line(Some(12), true, Some(("today", 34, "Laptop"))), "Session 12 min · your progress is sent when the game closes");
         assert_eq!(last_line(Some(0), false, None), "Session 0 min · your progress is backed up when the game closes");
+    }
+
+    /// A notice shows on the progress line for its minute whatever the tray's state, in its own
+    /// colour (amber for a problem, the text colour for news, the dot the same), on two lines when
+    /// it needs them; without one the line says the state again.
+    #[test]
+    fn a_notice_shows_on_the_progress_line_whatever_the_state() {
+        let news = Notice { text: " Brought back 3 Nov 21:40.sav. Your save from before is kept as a safety copy. ".into(), problem: false };
+        let problem = Notice { text: "Close the game first, then pick.".into(), problem: true };
+        for dot in [Dot::Green, Dot::Blue, Dot::Gold, Dot::Amber] {
+            assert_eq!(
+                progress_line(dot, "Needs you: two PCs moved on separately.", true, Some("2 min ago"), 3, Some(&news)),
+                RailLine {
+                    text: "Brought back 3 Nov 21:40.sav. Your save from before is kept as a safety copy.".into(),
+                    dot: Dot::Text,
+                    amber: false,
+                    wrap: true
+                },
+                "{dot:?}"
+            );
+            assert_eq!(
+                progress_line(dot, "Needs you: two PCs moved on separately.", false, None, 0, Some(&problem)),
+                RailLine { text: "Close the game first, then pick.".into(), dot: Dot::Amber, amber: true, wrap: true },
+                "{dot:?}"
+            );
+        }
+        // An empty notice says nothing: the state's words stay.
+        let empty = Notice { text: "  ".into(), problem: true };
+        assert_eq!(progress_line(Dot::Gold, "", true, Some("just now"), 1, Some(&empty)).text, "Progress synced just now · 1 PC");
+        // Its minute over, the worker passes none: the state's words come back.
+        assert_eq!(
+            progress_line(Dot::Green, "", true, Some("2 min ago"), 3, None),
+            RailLine { text: "Progress synced 2 min ago · 3 PCs".into(), dot: Dot::Green, amber: false, wrap: false }
+        );
+        assert_eq!(progress_line(Dot::Amber, "Network folder unreachable.", true, None, 3, None).text, "Network folder unreachable.");
     }
 
     fn line(name: &str, on: bool, off: bool, standing: Standing, verdict: Verdict) -> Line {
@@ -520,7 +573,7 @@ mod tests {
         let facts = addons_facts(&lines, 1, false, true);
         assert_eq!(facts, AddonsFacts { installed: 6, on: 4, at_play: 1, waiting_ok: 1, downloading: false, checked: true });
         assert_eq!(addons_line(facts).text, "4 addons on · 1 waits for your OK");
-        assert_eq!(addons_line(addons_facts(&lines, 0, true, true)), RailLine { text: "4 addons on · 1 update at Play".into(), dot: Dot::Blue, amber: false });
+        assert_eq!(addons_line(addons_facts(&lines, 0, true, true)), RailLine { text: "4 addons on · 1 update at Play".into(), dot: Dot::Blue, amber: false, wrap: false });
         assert_eq!(addons_line(addons_facts(&[], 0, false, true)).text, "No addons yet");
     }
 

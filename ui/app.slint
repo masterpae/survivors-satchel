@@ -200,6 +200,8 @@ export struct SettingsForm {
 // columns: who vouches for it (`safety`, coloured by `safety-kind` as its badge, with `safety-by`
 // under it), its tags in a line, its downloads as a number (`popularity`, empty when unknown), and
 // the Install column's button (`install-text`, the primary kind when `install-primary`).
+// `one-word`: the name has no space, so in the table it is cut short with "…" rather than broken
+// inside the word.
 export struct OfferRow {
     id: string,
     initials: string,
@@ -227,6 +229,7 @@ export struct OfferRow {
     popularity: string,
     install-text: string,
     install-primary: bool,
+    one-word: bool,
 }
 
 // A tag chip in Browse's filters, on or off (none on: every tag).
@@ -341,8 +344,9 @@ global Look {
     }
     // The rail's dots: 0 green (synced), 1 blue (busy), 2 gold (playing), 3 amber (needs you or
     // offline), 4 muted (nothing yet).
+    // 0 green, 1 blue, 2 gold, 3 amber, 4 muted, 5 the text colour (a notice's plain news).
     public pure function dot(kind: int) -> color {
-        kind == 1 ? accent : kind == 2 ? gold : kind == 3 ? amber : kind == 4 ? muted : green
+        kind == 1 ? accent : kind == 2 ? gold : kind == 3 ? amber : kind == 4 ? muted : kind == 5 ? text : green
     }
 }
 
@@ -2184,14 +2188,15 @@ component OfferTableRow inherits Rectangle {
                 alignment: center;
                 HorizontalLayout {
                     // As wide as the name, the check mark right after it; at most the column's
-                    // width, then on two lines at most, the second cut short with "…".
+                    // width, then on two lines at most, the second cut short with "…". A name of
+                    // one word longer than the column is cut short on its line instead.
                     Text {
                         width: min(root.name-width, self.preferred-width);
                         height: min(self.preferred-height, root.text-size * 2.6);
                         text: root.offer.name;
                         font-size: root.text-size;
                         font-weight: 600;
-                        wrap: word-wrap;
+                        wrap: root.offer.one-word ? TextWrap.no-wrap : TextWrap.word-wrap;
                         overflow: elide;
                         vertical-alignment: top;
                         color: Look.text;
@@ -2920,13 +2925,19 @@ component RailLine inherits HorizontalLayout {
     in property <bool> filled;
     in property <bool> amber;
     in property <bool> muted;
-    // The muted line without a mark (no build known yet) may take two lines.
+    // The muted line without a mark (no build known yet), and a notice on the progress line, may
+    // take two lines; never more. Wrapped, the words need their own width to know their height:
+    // what the line's width (`room`, from the rail's) leaves beside the mark.
     in property <bool> wrap;
+    in property <length> room: 212px;
+    property <length> words: root.room - (root.mark == 0 ? 13px : root.mark == 1 ? 14px : 0px) - root.spacing;
     callback clicked();
     spacing: 7px;
     height: root.wrap ? self.preferred-height : 16px;
     VerticalLayout {
-        alignment: center;
+        // Wrapped: the mark beside the first line.
+        alignment: root.wrap ? LayoutAlignment.start : LayoutAlignment.center;
+        padding-top: root.wrap ? 3px : 0px;
         if root.mark == 0: HorizontalLayout {
             padding-left: 2px;
             padding-right: 3px;
@@ -2946,11 +2957,21 @@ component RailLine inherits HorizontalLayout {
             background: root.filled ? Look.accent : transparent;
         }
     }
-    Text {
+    // Two lines at most, the second cut short with "…".
+    if root.wrap: Text {
+        width: root.words;
+        height: min(self.preferred-height, 30px);
         text: root.text;
         font-size: 11.5px;
         overflow: elide;
-        wrap: root.wrap ? TextWrap.word-wrap : TextWrap.no-wrap;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        color: root.amber ? Look.amber : root.muted ? Look.muted : Look.text;
+    }
+    if !root.wrap: Text {
+        text: root.text;
+        font-size: 11.5px;
+        overflow: elide;
         vertical-alignment: center;
         horizontal-stretch: root.link == "" ? 1 : 0;
         color: root.amber ? Look.amber : root.muted ? Look.muted : Look.text;
@@ -3044,6 +3065,8 @@ export component MainWindow inherits Window {
     in property <string> progress-line;
     in property <int> progress-dot;
     in property <bool> progress-amber;
+    // A notice, for its minute: it may take two lines.
+    in property <bool> progress-wrap;
     in property <string> addons-line;
     in property <int> addons-dot;
     in property <string> last-line;
@@ -3426,14 +3449,18 @@ export component MainWindow inherits Window {
     in property <string> needs-here;
     in property <string> needs-other;
     in property <string> needs-other-pc;
+    // Why the last pick didn't go through (the game running, …), in red under the buttons.
+    in property <string> needs-note;
     callback keep-here();
     callback use-other();
     callback decide-later();
 
     // First start: one screen over the content; the tabs and Play greyed.
     in property <bool> setup;
-    // "Sync is on · <folder>" when the defaults file beside the exe turned sync on; empty otherwise.
+    // "Sync is on · <folder>" when the defaults file beside the exe turned sync on; why sync stays
+    // off when that folder can't be used (`setup-sync-warn`, in amber); empty otherwise.
     in property <string> setup-sync-line;
+    in property <bool> setup-sync-warn;
     callback finish-setup();
 
     title: "Survivor's Satchel";
@@ -3574,6 +3601,7 @@ export component MainWindow inherits Window {
                         padding-bottom: 0;
                         spacing: 7px;
                         RailLine {
+                            room: rail.width - 20px;
                             text: root.build-line;
                             link: root.build-link ? "What's new" : "";
                             mark: root.build-link ? 1 : -1;
@@ -3583,9 +3611,11 @@ export component MainWindow inherits Window {
                             clicked => { root.open-game-news(); }
                         }
                         if !root.setup: RailLine {
+                            room: rail.width - 20px;
                             text: root.progress-line;
                             dot: root.progress-dot;
                             amber: root.progress-amber;
+                            wrap: root.progress-wrap;
                         }
                         if !root.setup: RailLine {
                             text: root.addons-line;
@@ -5745,11 +5775,17 @@ export component MainWindow inherits Window {
                                         wrap: word-wrap;
                                         color: Look.red;
                                     }
-                                    if root.setup-sync-line != "": Text {
+                                    if root.setup-sync-line != "" && !root.setup-sync-warn: Text {
                                         text: root.setup-sync-line;
                                         font-size: 12px;
                                         overflow: elide;
                                         color: Look.muted;
+                                    }
+                                    if root.setup-sync-line != "" && root.setup-sync-warn: Text {
+                                        text: root.setup-sync-line;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                        color: Look.amber;
                                     }
                                 }
                             }
@@ -6390,6 +6426,11 @@ export component MainWindow inherits Window {
                     horizontal-stretch: 1;
                     clicked => { root.use-other(); }
                 }
+            }
+            if root.needs-note != "": Text {
+                text: "✗ " + root.needs-note;
+                wrap: word-wrap;
+                color: Look.red;
             }
             HorizontalBox {
                 padding: 0;
