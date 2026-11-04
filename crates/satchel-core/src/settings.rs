@@ -65,11 +65,35 @@ pub struct AddonSettings {
     /// SurvivorsForge: more addons, descriptions and trust levels from its registry. Off, nothing
     /// is asked of it and the cache stays unused.
     pub forge: bool,
+    /// How Browse shows the addons on this PC: `list`, `cards` or `table` (`BROWSE_VIEWS`), as its
+    /// switch was left. Absent, or anything else, reads as `cards`. Not in the Settings tab.
+    #[serde(default = "cards", deserialize_with = "browse_view")]
+    pub browse_view: String,
+}
+
+/// Browse's views, as `browse_view` names them.
+pub const BROWSE_VIEWS: [&str; 3] = ["list", "cards", "table"];
+
+fn cards() -> String {
+    "cards".into()
+}
+
+/// One of Browse's views by its name, else `cards`: a name a later Satchel adds, or a value of
+/// another type, reads as the default instead of failing the whole file.
+pub fn browse_view_or_cards(name: &str) -> String {
+    BROWSE_VIEWS.iter().find(|v| **v == name.trim()).map_or_else(cards, |v| v.to_string())
+}
+
+fn browse_view<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(match toml::Value::deserialize(d)? {
+        toml::Value::String(name) => browse_view_or_cards(&name),
+        _ => cards(),
+    })
 }
 
 impl Default for AddonSettings {
     fn default() -> Self {
-        AddonSettings { update_by_themselves: true, shared: true, forge: true }
+        AddonSettings { update_by_themselves: true, shared: true, forge: true, browse_view: cards() }
     }
 }
 
@@ -220,6 +244,27 @@ mod tests {
         let text = toml::to_string_pretty(&off).unwrap();
         assert!(text.contains("forge = false"), "{text}");
         assert_eq!(toml::from_str::<Settings>(&text).unwrap(), off);
+    }
+
+    #[test]
+    fn browses_view_is_kept_and_reads_as_cards_when_absent_or_unknown() {
+        // Absent, as in every settings.toml before 0.7.2: cards.
+        let before: Settings = toml::from_str("pc_name = 'PC 1'\n[addons]\nupdate_by_themselves = true\n").unwrap();
+        assert_eq!(before.addons.browse_view, "cards");
+        assert_eq!(Settings::default().addons.browse_view, "cards");
+        // Written, and read back.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let table = Settings { addons: AddonSettings { browse_view: "table".into(), ..AddonSettings::default() }, ..Settings::default() };
+        table.save(&path).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("browse_view = \"table\""));
+        assert_eq!(Settings::load(&path).unwrap(), Some(table));
+        // A view a later Satchel adds, or a value of another type: cards, and the rest stands.
+        for line in ["browse_view = \"gallery\"", "browse_view = 3", "browse_view = \"\"", "browse_view = [\"list\"]"] {
+            let read: Settings = toml::from_str(&format!("[addons]\nforge = false\n{line}\n")).unwrap();
+            assert_eq!((read.addons.browse_view.as_str(), read.addons.forge), ("cards", false), "{line}");
+        }
+        assert_eq!((browse_view_or_cards(" list "), browse_view_or_cards("Table")), ("list".to_string(), "cards".to_string()));
     }
 
     #[test]

@@ -1,20 +1,23 @@
 //! SurvivorsForge, the worker's side. Its registry is asked for at most every 30 minutes (at start
 //! and on the idle tick, while its switch is on), an addon's details and versions when its panel
-//! opens, a version's findings when the player asks, and a version's word before an install the
-//! player asked for when nothing cached has it. Every answer goes to this PC's cache
+//! opens (or its Versions…), a version's findings when the player asks, and a version's word before
+//! an install the player asked for when nothing cached has it. Every answer goes to this PC's cache
 //! (`forge::Cache`), which reads and remembers it; what it means is the core's (`forge`,
-//! `overview::ForgeView`). The network thread asks; nothing here waits for it.
+//! `overview::ForgeView`). Icons are asked for when the Addons tab shows the addons they belong to,
+//! a screenshot when the viewer shows it: one picture at a time, behind whatever already waits for
+//! the network thread. The network thread asks; nothing here waits for it.
 
 use super::{Worker, clock, when};
 use crate::net::{ForgeAnswer, Job};
-use crate::view::PanelLine;
+use crate::view::{PanelLine, PictureLine};
 use crate::win;
 use chrono::{DateTime, Local, Utc};
 use satchel_core::addons::forge::{self, Counts, Verdict, Why, Word};
 use satchel_core::addons::github;
 use satchel_core::addons::overview::{self, ForgeView, Offer, Standing};
 use satchel_core::log;
-use std::collections::{BTreeMap, BTreeSet};
+use slint::{Rgba8Pixel, SharedPixelBuffer};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -36,14 +39,38 @@ pub(super) enum Held {
     Install { id: String, anyway: bool },
     /// Update now, or Update anyway.
     Update { id: String, anyway: bool },
+    /// The Removed list's Install again, or Install anyway.
+    Again { id: String, anyway: bool },
+    /// Versions…' Install this version, or Install anyway.
+    Version { id: String, tag: String, anyway: bool },
 }
 
 impl Held {
     fn id(&self) -> &str {
         match self {
-            Held::Install { id, .. } | Held::Update { id, .. } => id,
+            Held::Install { id, .. } | Held::Update { id, .. } | Held::Again { id, .. } | Held::Version { id, .. } => id,
         }
     }
+}
+
+/// An icon, by its address, as far as it got this run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Icon {
+    /// Waiting for its turn on the network thread, or on it.
+    Asked,
+    /// The window holds it.
+    Shown,
+    /// Its download or decode failed (one log line): the initials stay, until the next start.
+    Failed,
+}
+
+/// The picture viewer: the screenshot it shows (its place in the strip, its address), and whether
+/// its download still waits for its turn.
+#[derive(Clone, Debug)]
+pub(super) struct Viewer {
+    index: usize,
+    url: String,
+    waiting: bool,
 }
 
 pub(super) struct ForgeState {
@@ -79,6 +106,17 @@ pub(super) struct ForgeState {
     asked: BTreeSet<(String, String)>,
     /// Versions asked about for an addon another PC brings, until the next registry.
     follow_asked: BTreeSet<(String, String)>,
+    /// Icons by address, asked for this run: a line shows its icon once the window holds it.
+    pub(super) icons: BTreeMap<String, Icon>,
+    /// Icons waiting for the network thread, in the order they were asked for.
+    icon_queue: VecDeque<String>,
+    /// The picture on its way now, one at a time: its address.
+    picture_out: Option<String>,
+    /// The viewer, while it is open.
+    viewer: Option<Viewer>,
+    /// The Addons page in view (0 Installed, 1 Browse; -1 neither): the icons of what it lists
+    /// are asked for, also of what it lists later.
+    shown: i32,
 }
 
 impl ForgeState {
@@ -100,7 +138,19 @@ impl ForgeState {
             held: Vec::new(),
             asked: BTreeSet::new(),
             follow_asked: BTreeSet::new(),
+            icons: BTreeMap::new(),
+            icon_queue: VecDeque::new(),
+            picture_out: None,
+            viewer: None,
+            shown: -1,
         }
+    }
+
+    /// The window's name for an icon it holds, for a line whose icon is `url`; `None` until then
+    /// (the initials show).
+    pub(super) fn icon_key(&self, url: Option<&str>) -> Option<String> {
+        let url = url?;
+        (self.icons.get(url) == Some(&Icon::Shown)).then(|| forge::Pictures::name(url))
     }
 
     /// What SurvivorsForge says, for the core's verdicts and offers.
@@ -111,6 +161,11 @@ impl ForgeState {
     /// An install of `id` waits for SurvivorsForge's word: it shows as under way.
     pub(super) fn holds(&self, id: &str) -> bool {
         self.held.iter().any(|(_, _, held)| held.id() == id)
+    }
+
+    /// Versions…' install of version `tag` of `id` waits for SurvivorsForge's word on it.
+    pub(super) fn holds_version(&self, id: &str, tag: &str) -> bool {
+        self.held.iter().any(|(_, _, held)| matches!(held, Held::Version { id: i, tag: t, .. } if i == id && t == tag))
     }
 
     /// The cache's state again, after it changed.
@@ -140,6 +195,15 @@ impl ForgeState {
 /// when SurvivorsForge says nothing about that version, the badge names the version its level is
 /// of. While it is silent only what holds an addon back stays; off, none.
 pub(super) fn forge_badge(view: &ForgeView, slug: Option<&str>, verdict: &Verdict, offered: Option<&str>) -> Option<(String, i32)> {
+    let (level, kind, of) = forge_level(view, slug, verdict, offered)?;
+    let of = of.filter(|tag| !tag.is_empty()).map(|tag| format!(" ({tag})")).unwrap_or_default();
+    Some((format!("SurvivorsForge · {level}{of}"), kind))
+}
+
+/// What `forge_badge` says, in parts: the level as the badge words it ("verified", "flagged", "no
+/// longer listed"…), its kind, and the version it is of when that isn't the one offered. The
+/// table's SurvivorsForge column and its filters use the level alone.
+pub(super) fn forge_level(view: &ForgeView, slug: Option<&str>, verdict: &Verdict, offered: Option<&str>) -> Option<(&'static str, i32, Option<String>)> {
     let slug = slug.filter(|_| view.switch_on)?;
     let level_of = |word: Word| match word {
         Word::Verified => ("verified", 4),
@@ -159,7 +223,7 @@ pub(super) fn forge_badge(view: &ForgeView, slug: Option<&str>, verdict: &Verdic
         (("no longer listed", 5), None)
     } else if let Some((word, _, _)) = offered.and_then(|tag| view.word(slug, tag)) {
         (level_of(word), None)
-    } else if let Some((word, _)) = offered.and_then(|tag| view.restriction(slug, tag)) {
+    } else if let Some((word, _)) = offered.and_then(|tag| view.restriction(slug, tag, None)) {
         // A word that held the offered version back before still holds it back.
         (level_of(word), None)
     } else {
@@ -167,8 +231,7 @@ pub(super) fn forge_badge(view: &ForgeView, slug: Option<&str>, verdict: &Verdic
         // Its latest version's level, and on a card, which version that is.
         (level_of(entry.word()?), offered.and(entry.latest.as_ref()).map(|latest| latest.tag.clone()))
     };
-    let of = of.filter(|tag| !tag.is_empty()).map(|tag| format!(" ({tag})")).unwrap_or_default();
-    (kind != 4 || view.online()).then(|| (format!("SurvivorsForge · {level}{of}"), kind))
+    (kind != 4 || view.online()).then_some((level, kind, of))
 }
 
 /// SurvivorsForge's word against an installed addon's update, or its replacement, as its row says
@@ -309,6 +372,12 @@ impl Worker {
             ForgeAnswer::Body { text, etag } => match f.cache.store_registry(&text, etag.as_deref(), now) {
                 Ok(registry) => {
                     log!("SurvivorsForge's registry: {} addons", registry.addons.len());
+                    // An icon anywhere but on SurvivorsForge's host or GitHub's is never fetched.
+                    let elsewhere: Vec<&str> =
+                        registry.addons.iter().filter(|a| a.icon_url.as_deref().is_some_and(|url| !forge::picture_url_ok(url.trim()))).map(|a| a.id.as_str()).collect();
+                    if !elsewhere.is_empty() {
+                        log!("SurvivorsForge's registry: the icons of {} are on another host, so they aren't fetched", elsewhere.join(", "));
+                    }
                     f.join = forge::join(&self.addons.catalog, &registry);
                     f.registry = Some(registry);
                     // What was fetched under an entry that changed is stale: it is asked for again
@@ -344,7 +413,15 @@ impl Worker {
         f.details_out.remove(slug);
         match answer {
             ForgeAnswer::Body { text, .. } => match f.cache.store_details(slug, &text) {
-                Ok(details) => f.keep_details(slug, details),
+                Ok(details) => {
+                    // A screenshot from anywhere but SurvivorsForge's host or GitHub's is left out
+                    // of the strip, and never fetched.
+                    let refused = details.images.iter().filter(|p| !forge::picture_url_ok(p.url.trim())).count();
+                    if refused > 0 {
+                        log!("SurvivorsForge's details of {slug}: {refused} picture(s) on another host left out");
+                    }
+                    f.keep_details(slug, details);
+                }
                 Err(why) => {
                     log!("{why}");
                     f.failed.insert(slug.to_string(), Instant::now());
@@ -383,6 +460,8 @@ impl Worker {
         f.reload_versions();
         self.addons_lines();
         self.forge_release_held(slug);
+        // An incoming addon OK'd while its version's word was asked for comes in now, if it may.
+        self.share_follow_now(false);
     }
 
     /// A version's findings, asked for by "Show what it found": kept, for the panel.
@@ -445,6 +524,8 @@ impl Worker {
             match held {
                 Held::Install { id, anyway } => self.browse_install_with(&id, anyway),
                 Held::Update { id, anyway } => self.addon_update_as(&id, anyway, true),
+                Held::Again { id, anyway } => self.install_again_as(&id, anyway, true),
+                Held::Version { id, tag, anyway } => self.version_install_as(&id, &tag, anyway, true),
             }
             self.forge.asked.remove(&key);
         }
@@ -478,7 +559,7 @@ impl Worker {
 
     /// The slug SurvivorsForge lists a Browse offer under: its own for `forge:<slug>`, else the one
     /// joined to our catalog id (or listed before with its repository); none with the switch off.
-    fn offer_slug(&self, id: &str) -> Option<String> {
+    pub(super) fn offer_slug(&self, id: &str) -> Option<String> {
         let view = self.forge_view();
         match forge::slug_in(id) {
             Some(slug) => view.switch_on.then(|| slug.to_string()),
@@ -514,9 +595,139 @@ impl Worker {
     }
 
     /// When release `tag` of an addon was published, when that's known: our catalog's date, else
-    /// the one in SurvivorsForge's versions (cached) of the slug it lists the addon under.
+    /// SurvivorsForge's for the slug it lists the addon under: its registry's latest, or one of its
+    /// versions (cached).
     pub(super) fn forge_published(&self, id: &str, slug: Option<&str>, tag: &str) -> Option<DateTime<Utc>> {
-        self.addons.catalog.published(id, tag).or_else(|| self.forge.versions.get(slug?)?.iter().find(|v| v.tag == tag)?.published_at)
+        self.addons.catalog.published(id, tag).or_else(|| {
+            let slug = slug?;
+            let latest = self.forge.registry.as_ref().and_then(|r| r.get(slug)).and_then(|e| e.latest.as_ref()).filter(|l| l.tag == tag);
+            latest.and_then(|l| l.published_at).or_else(|| self.forge.versions.get(slug)?.iter().find(|v| v.tag == tag)?.published_at)
+        })
+    }
+
+    /// An addon's versions on SurvivorsForge, for its Versions…: asked for when it lists the addon
+    /// and they aren't cached under its entry as it stands (nor on their way, nor failed a moment
+    /// ago), as opening its panel does.
+    pub(super) fn forge_fetch_versions(&mut self, slug: &str) {
+        let listed = self.forge_view().entry(slug).is_some();
+        let failed = self.forge.failed.get(slug).is_some_and(|at| at.elapsed() < PANEL_RETRY);
+        if !listed || failed || self.forge.versions.contains_key(slug) || self.forge.versions_out.contains(slug) {
+            return;
+        }
+        if self.addons.net.send(Job::ForgeVersions(slug.to_string())).is_ok() {
+            self.forge.versions_out.insert(slug.to_string());
+        }
+    }
+
+    /// The icons of what the Addons page in view lists now: after the lists changed.
+    pub(super) fn forge_icons_again(&mut self) {
+        if self.forge.shown >= 0 {
+            self.forge_icons_wanted(self.forge.shown);
+        }
+    }
+
+    /// Whether SurvivorsForge's versions of `slug` are on their way.
+    pub(super) fn forge_versions_loading(&self, slug: &str) -> bool {
+        self.forge.versions_out.contains(slug)
+    }
+
+    // Pictures -------------------------------------------------------------------------------------
+
+    /// The icons of what the Addons tab shows on `page` (0 Installed, 1 Browse; -1 neither), with the
+    /// switch on: each one not asked for yet this run joins the queue.
+    pub(super) fn forge_icons_wanted(&mut self, page: i32) {
+        self.forge.shown = page;
+        if !self.forge_on() {
+            return;
+        }
+        let urls: Vec<String> = match page {
+            0 => self.addons.lines.iter().filter_map(|l| l.icon_url.clone()).collect(),
+            1 => self.addons.offers.iter().filter_map(|o| o.icon_url.clone()).collect(),
+            _ => Vec::new(),
+        };
+        for url in urls {
+            if !self.forge.icons.contains_key(&url) {
+                self.forge.icons.insert(url.clone(), Icon::Asked);
+                self.forge.icon_queue.push_back(url);
+            }
+        }
+        self.forge_pictures_next();
+    }
+
+    /// The next picture to the network thread, when none is on its way: the viewer's screenshot
+    /// first, then the icons in the order they were asked for. One at a time, so whatever already
+    /// waits there goes first, and an install asked for meanwhile waits for one picture at most.
+    fn forge_pictures_next(&mut self) {
+        if self.forge.picture_out.is_some() {
+            return;
+        }
+        let next = match self.forge.viewer.as_mut().filter(|v| v.waiting) {
+            Some(viewer) => {
+                viewer.waiting = false;
+                Some((viewer.url.clone(), false))
+            }
+            None => self.forge.icon_queue.pop_front().map(|url| (url, true)),
+        };
+        let Some((url, icon)) = next else { return };
+        if self.addons.net.send(Job::Picture { url: url.clone(), icon }).is_ok() {
+            self.forge.picture_out = Some(url);
+        }
+    }
+
+    /// A picture's answer: an icon goes to the window, which keeps it for this run; the viewer's
+    /// screenshot shows if it is still the one open. A failure is one log line: the initials stay,
+    /// and the viewer says the picture isn't available.
+    pub(super) fn forge_picture_answer(&mut self, url: &str, icon: bool, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String>) {
+        if self.forge.picture_out.as_deref() == Some(url) {
+            self.forge.picture_out = None;
+        }
+        if let Err(why) = &pixels {
+            log!("{url}: the {} wasn't shown: {why}", if icon { "icon" } else { "picture" });
+        }
+        if icon {
+            let state = match pixels {
+                Ok(pixels) => {
+                    self.ui.push_icon(forge::Pictures::name(url), pixels);
+                    Icon::Shown
+                }
+                Err(_) => Icon::Failed,
+            };
+            self.forge.icons.insert(url.to_string(), state);
+        } else if let Some(viewer) = self.forge.viewer.as_mut().filter(|v| v.url == url) {
+            viewer.waiting = false;
+            self.ui.push_shot(viewer.index, pixels.ok());
+        }
+        self.forge_pictures_next();
+    }
+
+    /// The screenshots of the addon SurvivorsForge lists as `slug` that may be shown: those on its
+    /// own host or GitHub's, in their order.
+    fn forge_pictures(&self, slug: Option<&str>) -> Vec<&forge::Picture> {
+        let details = slug.filter(|_| self.forge_on()).and_then(|s| self.forge.details.get(s));
+        details.map(|(d, _)| d.images.iter().filter(|p| forge::picture_url_ok(p.url.trim())).collect()).unwrap_or_default()
+    }
+
+    /// The viewer opened on, or moved to, picture `index` of addon `id`'s strip: its download goes
+    /// ahead of the icons. Only the one shown is held decoded, by the window.
+    pub(super) fn forge_picture_show(&mut self, id: &str, index: usize) {
+        let slug = self.offer_slug(id);
+        let url = self.forge_pictures(slug.as_deref()).get(index).map(|p| p.url.trim().to_string());
+        match url {
+            Some(url) => {
+                self.forge.viewer = Some(Viewer { index, url, waiting: true });
+                self.forge_pictures_next();
+            }
+            None => {
+                log!("{id}: picture {} isn't in its details", index + 1);
+                self.forge.viewer = None;
+                self.ui.push_shot(index, None);
+            }
+        }
+    }
+
+    /// The viewer closed: a screenshot still on its way is dropped when it comes.
+    pub(super) fn forge_picture_close(&mut self) {
+        self.forge.viewer = None;
     }
 
     /// Browse opened an offer's panel (again, perhaps). Its details and versions are fetched when
@@ -630,7 +841,11 @@ impl Worker {
             None => (String::new(), String::new()),
         };
         // Its word on the version shown, or one that held that version back before and still does.
-        let word = slug.and_then(|s| view.word(s, &tag).or_else(|| view.restriction(s, &tag).map(|(word, counts)| (word, counts, None))));
+        let sha = match catalog {
+            Some(entry) => (entry.latest.tag == tag).then_some(entry.latest.sha256.as_str()),
+            None => listed.and_then(|e| e.latest.as_ref()).filter(|l| l.tag == tag).and_then(|l| l.sha256.as_deref()),
+        };
+        let word = slug.and_then(|s| view.word(s, &tag).or_else(|| view.restriction(s, &tag, sha).map(|(word, counts)| (word, counts, None))));
         let found = slug.and_then(|s| self.forge.scans.get(&(s.to_string(), tag.clone())));
         let finding_out = slug.is_some_and(|s| self.forge.findings_out.contains(&(s.to_string(), tag.clone())));
         let flagged = matches!(word, Some((Word::Flagged, counts, _)) if counts.critical > 0 || counts.warn > 0);
@@ -647,6 +862,11 @@ impl Worker {
             scan_more: flagged && found.is_none() && !finding_out,
             findings: found.map(|s| s.worst_first(FINDINGS).into_iter().map(finding_line).collect::<Vec<_>>()).unwrap_or_default(),
             folders: catalog.map(|e| e.folders.clone()).or_else(|| listed.map(|e| e.folders.clone())).unwrap_or_default(),
+            pictures: self
+                .forge_pictures(slug)
+                .iter()
+                .map(|p| PictureLine { width: p.width.unwrap_or(16), height: p.height.unwrap_or(9), caption: p.caption.as_deref().map(str::trim).unwrap_or_default().to_string() })
+                .collect(),
             action,
             reason,
             loading: finding_out || slug.is_some_and(|s| self.forge.details_out.contains(s) || self.forge.versions_out.contains(s)),

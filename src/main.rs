@@ -320,6 +320,73 @@ fn main() {
             }
         });
     }
+    // The table's check boxes: a tag, or a trust word, on or off.
+    {
+        let weak = window.as_weak();
+        window.on_browse_tag_toggled(move |tag| {
+            if let Some(window) = weak.upgrade() {
+                view::toggle_tag(&window, &tag);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_browse_trust_toggled(move |level| {
+            if let Some(window) = weak.upgrade() {
+                view::toggle_trust(&window, &level);
+            }
+        });
+    }
+    // Browse's switch: the window shows the view at once; the worker keeps it in settings.toml.
+    window.on_browse_view_changed(with_id(&tx, Command::BrowseView));
+    // The Addons tab, or its Installed or Browse page, came into view: their icons.
+    {
+        let tx = tx.clone();
+        window.on_addons_shown(move |page| {
+            let _ = tx.send(Command::AddonsShown(page));
+        });
+    }
+    // The picture viewer: the picture held so far goes at once (only the one shown is held), and
+    // the worker sends the next one's pixels.
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        window.on_picture_show(move |id, index| {
+            if let Some(window) = weak.upgrade() {
+                window.set_viewer_image(slint::Image::default());
+                window.set_viewer_state(0);
+                window.set_viewer_index(index);
+                window.set_viewer_open(true);
+            }
+            let _ = tx.send(Command::PictureShow(id.into(), index.max(0) as usize));
+        });
+    }
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        window.on_picture_close(move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_viewer_open(false);
+                window.set_viewer_image(slint::Image::default());
+            }
+            let _ = tx.send(Command::PictureClose);
+        });
+    }
+    // Versions…
+    window.on_versions_open(with_id(&tx, Command::VersionsOpen));
+    window.on_versions_close(sender(&tx, || Command::VersionsClose));
+    {
+        let tx = tx.clone();
+        window.on_version_install(move |id, tag, anyway| {
+            let _ = tx.send(Command::VersionInstall(id.into(), tag.into(), anyway));
+        });
+    }
+    {
+        let tx = tx.clone();
+        window.on_version_back(move |id, backup| {
+            let _ = tx.send(Command::VersionBack(id.into(), backup.into()));
+        });
+    }
+    window.on_install_again_anyway(with_id(&tx, Command::InstallAgainAnyway));
+    window.on_incoming_install_anyway(install_with_id(&window, &tx, Command::IncomingInstallAnyway));
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
         window.on_import_zip(move || {

@@ -46,11 +46,28 @@ pub(super) struct ShareState {
     problem: Option<String>,
     /// The last answer about the game's settings, shown in Settings for a minute.
     game_note: Option<(String, Instant)>,
+    /// The player's OKs for incoming addons SurvivorsForge asks about first here, each for the
+    /// exact file another PC has (Install anyway on its row).
+    oks: forge::Oks,
+    /// Incoming addons the player asked for now (Install anyway): they come in as soon as the game
+    /// is closed and their download is here, not only at the next Play.
+    follow_now: BTreeSet<String>,
 }
 
 impl ShareState {
     pub(super) fn new(memory: Memory) -> ShareState {
-        ShareState { memory, list: None, steps: BTreeMap::new(), settings: BTreeMap::new(), game: None, game_problem: None, problem: None, game_note: None }
+        ShareState {
+            memory,
+            list: None,
+            steps: BTreeMap::new(),
+            settings: BTreeMap::new(),
+            game: None,
+            game_problem: None,
+            problem: None,
+            game_note: None,
+            oks: forge::Oks::default(),
+            follow_now: BTreeSet::new(),
+        }
     }
 }
 
@@ -103,8 +120,10 @@ pub(super) fn load_memory(path: &Path) -> Memory {
 /// What following the list did for one addon.
 enum Followed {
     Done(String),
-    /// Not yet (a download still under way): it comes next time.
+    /// Not yet: SurvivorsForge asks first, and the player hasn't OK'd it.
     Waits(String),
+    /// Not yet: its download is still under way; it comes next time.
+    Downloading(String),
     Failed(String),
     Quiet,
 }
@@ -140,6 +159,7 @@ fn want_of(entry: &Entry, release: &Shipped) -> Want {
         expected_folders: None,
         // Followed only on SurvivorsForge's Go here, and judged again as it goes in.
         ok: false,
+        pin: false,
     }
 }
 
@@ -318,7 +338,7 @@ impl Worker {
                 && self.forge_unknown(slug, tag)
             {
                 ask.push((slug.to_string(), tag.to_string()));
-            } else if self.share_verdict(entry, release).is_go() {
+            } else if forge::admits(&self.share_verdict(entry, release), self.share.oks.has(id, &release.sha256)) {
                 wanted.push((id.clone(), want_of(entry, release).release));
             }
         }
@@ -774,7 +794,7 @@ impl Worker {
                     self.activity(Kind::Addon, &text);
                     self.card_line(&text, true, false);
                 }
-                Followed::Waits(text) => self.card_line(&text, false, false),
+                Followed::Waits(text) | Followed::Downloading(text) => self.card_line(&text, false, false),
                 Followed::Failed(text) => {
                     log!("{text}");
                     self.card_line(&text, false, true);
@@ -852,14 +872,17 @@ impl Worker {
         };
         let mut text = None;
         if !self.has_release(&id, release) {
-            // Only what SurvivorsForge lets in here comes in by itself; its row says why the rest
-            // waits.
-            match self.share_verdict(entry, release) {
-                Verdict::Go => {}
-                Verdict::Ask(_) => return Followed::Waits(format!("{} {} from {from} waits for your OK (Addons)", entry.name, release.shown_version())),
+            // Only what SurvivorsForge lets in here comes in by itself, or what the player OK'd on
+            // its row (that very file); its row says why the rest waits.
+            let verdict = self.share_verdict(entry, release);
+            let ok = self.share.oks.has(&id, &release.sha256);
+            match verdict {
+                _ if forge::admits(&verdict, ok) => {}
                 Verdict::No(_) => return Followed::Quiet,
+                _ => return Followed::Waits(format!("{} {} from {from} waits for your OK (Addons)", entry.name, release.shown_version())),
             }
-            let want = want_of(entry, release);
+            let mut want = want_of(entry, release);
+            want.ok = ok;
             let cache = self.engine.local.addon_cache();
             if release.url.is_empty() {
                 // A zip imported from a file on another PC waits on the NAS.
@@ -874,7 +897,7 @@ impl Worker {
                 let why = self.addons.refused.get(&(id.clone(), want.release.tag.clone())).cloned();
                 return match why {
                     Some(why) => Followed::Failed(format!("{} {} from {from} wasn't downloaded: {why}", entry.name, release.shown_version())),
-                    None => Followed::Waits(format!("{} {} from {from} is still downloading; it comes in next time", entry.name, release.shown_version())),
+                    None => Followed::Downloading(format!("{} {} from {from} is still downloading; it comes in next time", entry.name, release.shown_version())),
                 };
             }
             match self.addons_install(&want) {
@@ -1022,6 +1045,84 @@ impl Worker {
     }
 
     // The player's choices -------------------------------------------------------------------------
+
+    /// An incoming addon's Install anyway: the player's OK for exactly the file another PC has,
+    /// where SurvivorsForge asks first here, through the same verdict as every install (a No stays
+    /// a No). It comes in now, the game closed, once its download is here; else at the next Play.
+    /// One of SurvivorsForge's own in a version its word here doesn't cover is asked about first.
+    pub(super) fn incoming_install_anyway(&mut self, id: &str) {
+        if self.addons_blocked() {
+            return;
+        }
+        let Some(entry) = self.share.list.as_ref().and_then(|l| l.get(id)).cloned() else { return };
+        let Some(release) = entry.release.clone() else { return };
+        match self.share_verdict(&entry, &release) {
+            Verdict::No(why) => return self.addons_say(format!("{} doesn't come here: {}", entry.name, why.text())),
+            Verdict::Ask(_) => self.share.oks.give(id, &release.sha256),
+            Verdict::Go => {}
+        }
+        self.share.follow_now.insert(id.to_string());
+        let tag = release.tag.clone().unwrap_or_default();
+        if let Some(slug) = entry.forge.as_deref().filter(|slug| forge::slug_ok(slug))
+            && self.forge_unknown(slug, &tag)
+        {
+            self.forge_ask_follow(slug, &tag);
+            return self.addons_say(format!("Asking SurvivorsForge about {} {} before it comes in…", entry.name, release.shown_version()));
+        }
+        self.share_follow_now(true);
+        if self.share.follow_now.contains(id) {
+            self.addons_say(format!("{} {} is downloading; it comes in once it's here and the game is closed.", entry.name, release.shown_version()));
+        }
+    }
+
+    /// The incoming addons the player asked for now, in step with the list as at Play: the game
+    /// closed, their downloads here. One still downloading stays asked for; one that came in, that
+    /// asks first again (said when `announce`), or that SurvivorsForge says No to, is done with.
+    pub(super) fn share_follow_now(&mut self, announce: bool) {
+        if self.share.follow_now.is_empty() || self.tracker.game_running() {
+            return;
+        }
+        let (Some((shared, game)), Some(list)) = (self.share_place(), self.share.list.clone()) else { return };
+        let now = Utc::now();
+        let mut changed = false;
+        for id in self.share.follow_now.clone() {
+            let Some(entry) = list.get(&id).filter(|e| self.share.steps.get(&id) == Some(&Step::Follow) && !e.removed()) else {
+                self.share.follow_now.remove(&id);
+                continue;
+            };
+            match self.share_follow(&shared, &game, entry, now) {
+                Followed::Done(text) => {
+                    changed = true;
+                    self.share.follow_now.remove(&id);
+                    self.activity(Kind::Addon, &text);
+                    self.addons_say(text);
+                }
+                // It asks first again (another file, say): its row's Install anyway is the way on.
+                Followed::Waits(text) => {
+                    self.share.follow_now.remove(&id);
+                    if announce {
+                        self.addons_say(text);
+                    }
+                }
+                Followed::Downloading(_) => {}
+                Followed::Failed(text) => {
+                    self.share.follow_now.remove(&id);
+                    log!("{text}");
+                    self.addons_say(text);
+                }
+                Followed::Quiet => {
+                    self.share.follow_now.remove(&id);
+                }
+            }
+        }
+        self.share_save();
+        if changed {
+            self.addons_scan();
+            self.share_look();
+        } else {
+            self.addons_fetch();
+        }
+    }
 
     /// The player removed a shared addon here: the other PCs remove it too, once the list hears.
     /// The player removed an addon here. A shared one goes from the other PCs too, once the list
@@ -1268,19 +1369,25 @@ impl Worker {
                 };
                 // SurvivorsForge's word as this PC's own cache has it, never the other PC's.
                 let verdict = self.share_verdict(entry, release);
-                let theirs = forge_badge(&view, self.entry_slug(entry).as_deref(), &verdict, None);
+                let slug = self.entry_slug(entry);
+                let theirs = forge_badge(&view, slug.as_deref(), &verdict, None);
                 let badges: Vec<(String, i32)> =
                     if own { theirs.into_iter().collect() } else { std::iter::once((badge.to_string(), badge_kind)).chain(theirs).collect() };
+                // OK'd on its row (Install anyway, for exactly this file): it comes as one SurvivorsForge lets in.
+                let okd = self.share.oks.has(id, &release.sha256);
                 let (reason, reason_kind) = match &verdict {
-                    Verdict::Go => (String::new(), 0),
-                    // No button here: Browse's Install anyway is the player's OK.
-                    Verdict::Ask(why) => (format!("Waits for your OK: {} · OK it in Browse", why.text()), 1),
+                    _ if forge::admits(&verdict, okd) => (String::new(), 0),
+                    // Its row's Install anyway is the player's OK.
+                    Verdict::Ask(why) => (format!("Waits for your OK: {}", why.text()), 1),
                     Verdict::No(why) => (why.text(), 2),
+                    Verdict::Go => (String::new(), 0),
                 };
-                let comes = verdict.is_go();
+                let comes = forge::admits(&verdict, okd);
+                let now = self.share.follow_now.contains(id);
                 Some(AddonLine {
                     id: id.clone(),
                     initials: initials(&entry.name),
+                    icon: self.forge.icon_key(view.icon(slug.as_deref()).as_deref()).unwrap_or_default(),
                     name: entry.name.clone(),
                     badge: badges.first().map_or_else(|| badge.to_string(), |(text, _)| text.clone()),
                     badge_kind,
@@ -1289,9 +1396,14 @@ impl Worker {
                     reason_kind,
                     author: entry.repo.as_deref().and_then(|r| r.split('/').next()).unwrap_or_default().to_string(),
                     version: release.shown_version(),
-                    state: if comes { format!("From {}: it comes here at the next Play", entry.pc) } else { format!("From {}", entry.pc) },
+                    state: match (comes, now) {
+                        (true, true) => format!("From {}: it comes here as soon as its download is in", entry.pc),
+                        (true, false) => format!("From {}: it comes here at the next Play", entry.pc),
+                        (false, _) => format!("From {}", entry.pc),
+                    },
                     state_kind: if comes { 1 } else { 0 },
                     has_page: entry.repo.is_some(),
+                    installing: comes && now,
                     incoming: true,
                     ..AddonLine::default()
                 })

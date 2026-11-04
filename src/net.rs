@@ -1,9 +1,10 @@
 //! The network, on its own thread, so a slow answer never holds up the worker's checkpoints:
 //! what's new on GitHub for the installed addons, downloads into the addon cache, the one-off
 //! lookup behind "Add from a link", the Satchel's own newest release once its repository is
-//! public, and SurvivorsForge's registry and an addon's details, versions and findings there.
-//! Jobs come from the worker and the answers go back to it as `Command::Net`, one job at a time.
-//! Nothing here touches AddOns.
+//! public, SurvivorsForge's registry and an addon's details, versions and findings there, and the
+//! icons and screenshots it names, decoded here into pixels the window only has to show. Jobs come
+//! from the worker and the answers go back to it as `Command::Net`, one job at a time. Nothing
+//! here touches AddOns.
 //!
 //! What's new is read from two plain GitHub pages that don't count against the 60 API calls an
 //! hour (the `/releases/latest` redirect and a release's assets page, with its checksums). Only
@@ -21,10 +22,11 @@ use satchel_core::addons::overview::{Watch, plain};
 use satchel_core::addons::package;
 use satchel_core::{fsx, gate, log, signing};
 use serde::de::DeserializeOwned;
+use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
 // ureq puts Windows' TLS in its connector only with its `native-tls` feature: with
@@ -44,6 +46,11 @@ const MAX_PAGE: u64 = 4 << 20;
 /// behind it; a release file gets longer.
 const PAGE_TIME: Duration = Duration::from_secs(30);
 const FILE_TIME: Duration = Duration::from_secs(180);
+/// A picture's redirects followed at most, each to an allowed host only (`forge::redirect_target`).
+const PICTURE_HOPS: usize = 3;
+/// What a picture's decoder may allocate: a picture as large as `forge::PICTURE_SIDE` a side, and
+/// room for its decoding.
+const PICTURE_ALLOC: u64 = 96 << 20;
 
 pub enum Job {
     /// What's new for these installed addons.
@@ -63,6 +70,9 @@ pub enum Job {
     ForgeVersions(String),
     /// What SurvivorsForge's scan found in one version of an addon.
     ForgeFindings { slug: String, tag: String },
+    /// An icon (`icon`) or a screenshot from SurvivorsForge's host or GitHub's: from the pictures
+    /// kept on this PC, else downloaded and kept; decoded either way.
+    Picture { url: String, icon: bool },
 }
 
 pub enum Answer {
@@ -77,6 +87,9 @@ pub enum Answer {
     ForgeDetails { slug: String, answer: ForgeAnswer },
     ForgeVersions { slug: String, answer: ForgeAnswer },
     ForgeFindings { slug: String, tag: String, answer: ForgeAnswer },
+    /// A picture decoded into RGBA pixels, scaled down to its use (an icon to `forge::ICON_SIDE`,
+    /// a screenshot to `forge::SHOT_SIDE`), or why not, for the log.
+    Picture { url: String, icon: bool, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String> },
 }
 
 /// How SurvivorsForge answered one request. A body goes to the cache as it came
@@ -123,17 +136,18 @@ pub struct Lookup {
     pub current: bool,
 }
 
-/// Starts the network thread; answers come back on `commands`.
-pub fn start(cache: PathBuf, commands: Sender<Command>) -> Sender<Job> {
+/// Starts the network thread; answers come back on `commands`. `cache` is the addon cache,
+/// `forge` SurvivorsForge's cache folder, whose pictures it keeps.
+pub fn start(cache: PathBuf, forge: PathBuf, commands: Sender<Command>) -> Sender<Job> {
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
         .name("satchel-net".into())
-        .spawn(move || run(rx, &cache, &commands))
+        .spawn(move || run(rx, &cache, &forge::Pictures::open(&forge), &commands))
         .expect("the network thread could not start");
     tx
 }
 
-fn run(jobs: Receiver<Job>, cache: &Path, commands: &Sender<Command>) {
+fn run(jobs: Receiver<Job>, cache: &Path, pictures: &forge::Pictures, commands: &Sender<Command>) {
     let net = Net::new();
     for job in jobs {
         let answer = match job {
@@ -145,6 +159,7 @@ fn run(jobs: Receiver<Job>, cache: &Path, commands: &Sender<Command>) {
             Job::ForgeDetails(slug) => Answer::ForgeDetails { answer: net.forge(forge_addon_url(&slug, ""), None), slug },
             Job::ForgeVersions(slug) => Answer::ForgeVersions { answer: net.forge(forge_addon_url(&slug, "/versions"), None), slug },
             Job::ForgeFindings { slug, tag } => Answer::ForgeFindings { answer: net.forge(forge_findings_url(&slug, &tag), None), slug, tag },
+            Job::Picture { url, icon } => Answer::Picture { pixels: guarded(|| net.picture(&url, icon, pictures)), url, icon },
         };
         if commands.send(Command::Net(answer)).is_err() {
             break;
@@ -335,6 +350,44 @@ impl Net {
         }
     }
 
+    /// An icon or a screenshot as pixels: only from an address `forge::picture_url_ok` allows; from
+    /// the pictures kept on this PC when it is there (it is static, so it shows offline too), else
+    /// downloaded and kept. Every failure is the answer's error, which the worker logs once.
+    fn picture(&self, url: &str, icon: bool, pictures: &forge::Pictures) -> Result<SharedPixelBuffer<Rgba8Pixel>, String> {
+        if !forge::picture_url_ok(url) {
+            return Err("not on SurvivorsForge's host or GitHub's, so it wasn't fetched".into());
+        }
+        let bytes = match pictures.get(url, SystemTime::now()) {
+            Some(bytes) => bytes,
+            None => {
+                let bytes = self.picture_bytes(url)?;
+                if let Err(e) = pictures.put(url, &bytes, SystemTime::now()) {
+                    log!("{url}: the picture wasn't kept: {e}");
+                }
+                bytes
+            }
+        };
+        decode(&bytes, if icon { forge::ICON_SIDE } else { forge::SHOT_SIDE }, icon)
+    }
+
+    /// A picture's bytes, at most `forge::PICTURE_MAX`, over https; a redirect is followed only to
+    /// a host pictures may be fetched from (`forge::redirect_target`).
+    fn picture_bytes(&self, url: &str) -> Result<Vec<u8>, String> {
+        let mut url = url.to_string();
+        for _ in 0..=PICTURE_HOPS {
+            let mut response = self.agent.get(url.as_str()).config().max_redirects(0).build().call().map_err(|e| format!("no answer ({e})"))?;
+            match response.status().as_u16() {
+                200 => return response.body_mut().with_config().limit(forge::PICTURE_MAX).read_to_vec().map_err(|e| format!("not read whole ({e})")),
+                301 | 302 | 303 | 307 | 308 => {
+                    let location = response.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or_default();
+                    url = forge::redirect_target(&url, location).ok_or_else(|| format!("it redirects to a host pictures aren't fetched from ({location})"))?;
+                }
+                status => return Err(format!("its host answered {status}")),
+            }
+        }
+        Err("too many redirects".into())
+    }
+
     /// The bytes behind `url`, refused past the size cap.
     fn download(&self, url: &str) -> Result<Vec<u8>, String> {
         self.download_limited(url, MAX_FILE)
@@ -522,6 +575,42 @@ impl Net {
             version: first.and_then(|t| t.version.clone()),
             current: found.folders.iter().all(|f| f.toc.current()),
         })
+    }
+}
+
+/// A PNG, JPEG or WebP decoded into RGBA pixels, here on the network thread: refused when it is
+/// larger than `forge::PICTURE_SIDE` a side, and scaled down to fit within `side` (never up). An
+/// icon gets the rounded corners of the square it shows in (`icon`).
+fn decode(bytes: &[u8], side: u32, icon: bool) -> Result<SharedPixelBuffer<Rgba8Pixel>, String> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(forge::PICTURE_SIDE);
+    limits.max_image_height = Some(forge::PICTURE_SIDE);
+    limits.max_alloc = Some(PICTURE_ALLOC);
+    reader.limits(limits);
+    let picture = reader.decode().map_err(|e| format!("not decoded ({e})"))?;
+    let (width, height) = forge::fit_within(picture.width(), picture.height(), side);
+    let picture = if (width, height) == (picture.width(), picture.height()) { picture } else { picture.thumbnail_exact(width, height) };
+    let mut rgba = picture.into_rgba8();
+    if icon {
+        round_corners(&mut rgba);
+    }
+    Ok(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height()))
+}
+
+/// An icon's corners rounded as the 34 px square's (7 px of 34), smoothly: the window's software
+/// renderer doesn't round a picture itself.
+fn round_corners(icon: &mut image::RgbaImage) {
+    let (width, height) = icon.dimensions();
+    let radius = width.min(height) as f32 * 7.0 / 34.0;
+    for (x, y, pixel) in icon.enumerate_pixels_mut() {
+        // How far into a corner's square the pixel's centre is, from the corner's circle's centre.
+        let dx = (radius - (x as f32 + 0.5)).max(x as f32 + 0.5 - (width as f32 - radius)).max(0.0);
+        let dy = (radius - (y as f32 + 0.5)).max(y as f32 + 0.5 - (height as f32 - radius)).max(0.0);
+        if dx > 0.0 && dy > 0.0 {
+            let inside = (radius - dx.hypot(dy) + 0.5).clamp(0.0, 1.0);
+            pixel.0[3] = (pixel.0[3] as f32 * inside).round() as u8;
+        }
     }
 }
 

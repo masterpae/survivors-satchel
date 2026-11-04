@@ -4,7 +4,9 @@
 //! player opens or installs it, a checksum before every install, never a blocked or changed file,
 //! a question before a flagged or unscanned one. Its word can restrict our Discord Verified list,
 //! and it is the only one that can permit its own addons (`decide`). Its answers are kept on this
-//! PC (`Cache`). No network here: the app fetches; this reads, remembers and decides.
+//! PC (`Cache`), and so are its addons' icons and screenshots, once shown (`Pictures`), from its
+//! own host and GitHub's only (`picture_url_ok`). No network here: the app fetches; this reads,
+//! remembers and decides.
 
 use super::catalog::{Catalog, Release};
 use super::github::{percent_decode, repo_from_input, tag_version};
@@ -16,8 +18,11 @@ use serde::de::{DeserializeOwned, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::SystemTime;
 
 /// Its API for launchers. Requests are built only from this and a slug that passes `slug_ok`.
 pub const API: &str = "https://forgeapi.rezondes.net";
@@ -130,6 +135,13 @@ pub struct ForgeAddon {
     /// The version to install.
     #[serde(default, deserialize_with = "lenient")]
     pub latest: Option<Latest>,
+    /// Its icon: a WebP on SurvivorsForge's own host, named by its content. Some addons have none.
+    #[serde(default, deserialize_with = "lenient")]
+    pub icon_url: Option<String>,
+    /// GitHub's downloads over all its versions, refreshed about every 15 minutes; none for an
+    /// addon published by tag, whose files GitHub doesn't count.
+    #[serde(default, deserialize_with = "lenient")]
+    pub downloads: Option<u64>,
 }
 
 impl ForgeAddon {
@@ -171,6 +183,9 @@ pub struct Latest {
     pub game_min: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     pub game_max: Option<String>,
+    /// When its author published it on GitHub: the addon's Last updated in Browse.
+    #[serde(default, deserialize_with = "lenient")]
+    pub published_at: Option<DateTime<Utc>>,
 }
 
 /// What a scan found, by severity: critical and warn make a version flagged; info counts as clean.
@@ -215,7 +230,7 @@ pub struct Details {
     pub block_reason: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     pub icon_url: Option<String>,
-    /// Read, and unused until pictures come.
+    /// Its screenshots, in their order: the pictures strip, and the viewer behind it.
     #[serde(default, deserialize_with = "lenient_list")]
     pub images: Vec<Picture>,
 }
@@ -273,6 +288,11 @@ pub struct Version {
     pub findings: Counts,
     #[serde(default, deserialize_with = "lenient")]
     pub deleted_on_github: bool,
+    /// The game versions it says it works with, when its author gave them.
+    #[serde(default, deserialize_with = "lenient")]
+    pub game_min: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub game_max: Option<String>,
 }
 
 /// `GET /v1/addons/{slug}/versions/{tag}/findings`: one version's latest scan. Its findings are
@@ -690,6 +710,33 @@ pub fn decide(origin: Origin, target_sha: Option<&str>, facts: &Facts) -> Verdic
     }
 }
 
+/// Whether an install goes in on its verdict: Go does; an Ask only with the player's OK (Install
+/// anyway, Update anyway, an incoming addon's Install anyway); a No never, OK or not. Every path
+/// that installs asks this, so an OK means the same everywhere.
+pub fn admits(verdict: &Verdict, ok: bool) -> bool {
+    match verdict {
+        Verdict::Go => true,
+        Verdict::Ask(_) => ok,
+        Verdict::No(_) => false,
+    }
+}
+
+/// The player's OKs for versions SurvivorsForge asks about first, each for one addon's one file
+/// (its id and checksum): an OK lets in exactly the file it was given for, never a newer release
+/// or another file under the same tag. Kept until the Satchel closes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Oks(BTreeSet<(String, String)>);
+
+impl Oks {
+    pub fn give(&mut self, id: &str, sha256: &str) {
+        self.0.insert((id.to_string(), sha256.trim().to_ascii_lowercase()));
+    }
+
+    pub fn has(&self, id: &str, sha256: &str) -> bool {
+        !sha256.trim().is_empty() && self.0.contains(&(id.to_string(), sha256.trim().to_ascii_lowercase()))
+    }
+}
+
 // Reading the registry ---------------------------------------------------------------------------
 
 /// Whether two `owner/name` repositories are the same one: GitHub doesn't tell case apart.
@@ -724,13 +771,15 @@ pub fn dropped(s: &State, registry: Option<&Registry>, slug: &str) -> bool {
     registry.is_some_and(|r| r.get(slug).is_none()) && s.listed.contains(slug) && !s.deleted.contains(slug) && !s.blocked.contains_key(slug)
 }
 
-/// SHA-256 of a registry entry with its keys sorted: the same entry, the same fingerprint, however
-/// its keys come.
+/// SHA-256 of a registry entry with its keys sorted and without its download count: the same
+/// entry, the same fingerprint, however its keys come. The count moves about every 15 minutes and
+/// says nothing about the addon's files, so what was fetched under an entry stays current through
+/// it. Only the entry's own `downloads` is left out; anything else that changes, changes it.
 pub fn fingerprint(entry: &Value) -> String {
-    fn canonical(value: &Value, out: &mut String) {
+    fn canonical(value: &Value, out: &mut String, top: bool) {
         match value {
             Value::Object(map) => {
-                let mut fields: Vec<(&String, &Value)> = map.iter().collect();
+                let mut fields: Vec<(&String, &Value)> = map.iter().filter(|(key, _)| !(top && key.as_str() == "downloads")).collect();
                 fields.sort_by(|a, b| a.0.cmp(b.0));
                 out.push('{');
                 for (i, (key, value)) in fields.into_iter().enumerate() {
@@ -739,7 +788,7 @@ pub fn fingerprint(entry: &Value) -> String {
                     }
                     out.push_str(&Value::String(key.clone()).to_string());
                     out.push(':');
-                    canonical(value, out);
+                    canonical(value, out, false);
                 }
                 out.push('}');
             }
@@ -749,7 +798,7 @@ pub fn fingerprint(entry: &Value) -> String {
                     if i > 0 {
                         out.push(',');
                     }
-                    canonical(item, out);
+                    canonical(item, out, false);
                 }
                 out.push(']');
             }
@@ -757,7 +806,7 @@ pub fn fingerprint(entry: &Value) -> String {
         }
     }
     let mut text = String::new();
-    canonical(entry, &mut text);
+    canonical(entry, &mut text, true);
     fsx::fingerprint(text.as_bytes())
 }
 
@@ -778,9 +827,11 @@ pub fn asset_url_ok(url: &str, repo: &str) -> bool {
 }
 
 /// The registry's latest version of an addon as a release: what a SurvivorsForge-only addon
-/// installs and updates to. The registry carries no dates, so `published` is `seen`, when this PC
-/// first saw it as latest; no folder fingerprints either. No checksum yet, or a download that isn't
-/// its own GitHub's: no address, so nothing downloads it.
+/// installs and updates to. Its `published` is `seen`, when this PC first saw it as latest: that,
+/// not the day its author published it (`Latest::published_at`, which Browse and the record show),
+/// places it among the versions this PC had, so going back to one is never undone by itself. No
+/// folder fingerprints. No checksum yet, or a download that isn't its own GitHub's: no address, so
+/// nothing downloads it.
 pub fn latest_release(entry: &ForgeAddon, seen: DateTime<Utc>) -> Option<Release> {
     let latest = entry.latest.as_ref().filter(|l| !l.tag.is_empty())?;
     let sha256 = latest.sha256.as_deref().map(str::trim).unwrap_or_default().to_ascii_lowercase();
@@ -799,6 +850,30 @@ pub fn latest_release(entry: &ForgeAddon, seen: DateTime<Utc>) -> Option<Release
         notes: None,
         downloads: None,
     })
+}
+
+/// One of an addon's versions (its versions endpoint) as a release, for Versions…: installable only
+/// with SurvivorsForge's checksum and a download on the addon's own GitHub (`asset_url_ok`), the
+/// same check as for its latest; else it has no address, and nothing downloads it.
+pub fn version_release(entry: &ForgeAddon, version: &Version) -> Release {
+    let sha256 = version.sha256.as_deref().map(str::trim).unwrap_or_default().to_ascii_lowercase();
+    let asset = version.asset_url.clone().unwrap_or_default();
+    let usable = !sha256.is_empty() && asset_url_ok(&asset, &entry.repo);
+    let file = version.asset_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| asset.rsplit('/').next().map(percent_decode).unwrap_or_default());
+    Release {
+        tag: version.tag.clone(),
+        version: tag_version(&version.tag),
+        published: version.published_at.unwrap_or(DateTime::<Utc>::MIN_UTC),
+        prerelease: version.prerelease,
+        file,
+        url: if usable { asset } else { String::new() },
+        sha256,
+        size: version.size.unwrap_or(0),
+        interface: 0,
+        folders: BTreeMap::new(),
+        notes: None,
+        downloads: version.downloads,
+    }
 }
 
 /// An addon's About text from its Markdown description: flattened like release notes, at about
@@ -904,8 +979,9 @@ pub struct State {
     /// its slug and shows as dropped.
     pub repos: BTreeMap<String, String>,
     /// Slug → tag → a word that held that version back (flagged, unscanned, blocked,
-    /// source_changed). It keeps holding it back after the answer that gave it stops being current,
-    /// until a current answer says otherwise: old data can't let anything in, but still holds back.
+    /// source_changed), with the file it was about. It keeps holding that file back after the answer
+    /// that gave it stops being current, until a current answer about that file says otherwise: old
+    /// data can't let anything in, but still holds back.
     pub restrictions: BTreeMap<String, BTreeMap<String, Restriction>>,
 }
 
@@ -916,15 +992,36 @@ pub struct Restriction {
     /// `flagged`, `unscanned`, `blocked` or `source_changed`.
     pub trust: String,
     pub findings: Counts,
+    /// SurvivorsForge's checksum of the file the word was about (lowercase hex): a file replaced
+    /// under the same tag isn't the one judged, so it is judged again. `None`: kept before 0.7.2,
+    /// or given without a checksum; it speaks for the tag, whatever its file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
-/// A current answer's word on one version: one that holds it back is kept, any other lifts what
-/// was kept.
-fn note_word(s: &mut State, slug: &str, tag: &str, word: Word, findings: Counts) {
+impl Restriction {
+    /// Whether the word speaks for the file with this checksum: the one it was about, or any when
+    /// either checksum isn't known.
+    pub fn covers(&self, sha256: Option<&str>) -> bool {
+        match (self.sha256.as_deref(), sha256.map(str::trim).filter(|s| !s.is_empty())) {
+            (Some(judged), Some(file)) => judged.eq_ignore_ascii_case(file),
+            _ => true,
+        }
+    }
+}
+
+/// A current answer's word on one version, about the file with checksum `sha256`: one that holds
+/// it back is kept, any other lifts what was kept about that file (a word about another file under
+/// the same tag stays).
+fn note_word(s: &mut State, slug: &str, tag: &str, word: Word, findings: Counts, sha256: Option<&str>) {
+    let sha256 = sha256.map(str::trim).filter(|s| !s.is_empty()).map(str::to_ascii_lowercase);
     if word.restricts() {
-        s.restrictions.entry(slug.to_string()).or_default().insert(tag.to_string(), Restriction { trust: word.as_str().to_string(), findings });
+        let kept = Restriction { trust: word.as_str().to_string(), findings, sha256 };
+        s.restrictions.entry(slug.to_string()).or_default().insert(tag.to_string(), kept);
     } else if let Some(tags) = s.restrictions.get_mut(slug) {
-        tags.remove(tag);
+        if tags.get(tag).is_some_and(|kept| kept.covers(sha256.as_deref())) {
+            tags.remove(tag);
+        }
         if tags.is_empty() {
             s.restrictions.remove(slug);
         }
@@ -1008,7 +1105,7 @@ impl Cache {
                 s.blocked.remove(&addon.id);
                 if let Some(latest) = addon.latest.as_ref().filter(|l| !l.tag.is_empty()) {
                     s.seen.entry(addon.id.clone()).or_default().entry(latest.tag.clone()).or_insert(now);
-                    note_word(s, &addon.id, &latest.tag, latest_word(addon, latest), latest.findings);
+                    note_word(s, &addon.id, &latest.tag, latest_word(addon, latest), latest.findings, latest.sha256.as_deref());
                 }
             }
         });
@@ -1060,7 +1157,7 @@ impl Cache {
         // what an older one said.
         self.change(|s| {
             for version in &versions {
-                note_word(s, slug, &version.tag, version_word(version), version.findings);
+                note_word(s, slug, &version.tag, version_word(version), version.findings, version.sha256.as_deref());
             }
         });
         Ok(versions)
@@ -1209,6 +1306,161 @@ impl Cache {
         log!("SurvivorsForge's cache: {} can't be read ({why}); dropped, to be fetched again", path.display());
         if let Err(e) = fsx::remove_if_present(path) {
             log!("SurvivorsForge's cache: {} not removed: {e}", path.display());
+        }
+    }
+}
+
+// Pictures: icons and screenshots ------------------------------------------------------------------
+
+/// The largest picture or icon fetched, counted by the bytes as they stream in.
+pub const PICTURE_MAX: u64 = 2 << 20;
+/// A picture wider or taller than this isn't decoded at all.
+pub const PICTURE_SIDE: u32 = 4096;
+/// An icon is kept in memory at most this many pixels a side.
+pub const ICON_SIDE: u32 = 128;
+/// A screenshot is held at most this many pixels a side for the viewer, which fits it to the
+/// window: a large screen's worth, and about 16 MB at most while it is shown.
+pub const SHOT_SIDE: u32 = 2048;
+/// The pictures folder holds at most this many bytes.
+pub const PICTURES_CAP: u64 = 50 << 20;
+const PICTURES_DIR: &str = "pictures";
+
+/// The host of an `https://` address in lower case, when it is a plain host name: `None` for any
+/// other scheme, and for a user name, a port, or anything a host name can't hold.
+fn https_host(url: &str) -> Option<String> {
+    if !url.get(..8).is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://")) || url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\') {
+        return None;
+    }
+    let rest = &url[8..];
+    let host = rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())].to_ascii_lowercase();
+    let label = |l: &str| {
+        !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    (host.len() <= 253 && host.contains('.') && host.split('.').all(label)).then_some(host)
+}
+
+/// Whether a picture or an icon may be fetched from this address: over https, from SurvivorsForge's
+/// own host (`forge.rezondes.net`), from `github.com` or from one of GitHub's
+/// `*.githubusercontent.com` hosts. Anything else is refused, and the caller logs it.
+pub fn picture_url_ok(url: &str) -> bool {
+    https_host(url).is_some_and(|host| {
+        host == "forge.rezondes.net" || host == "github.com" || host.strip_suffix(".githubusercontent.com").is_some_and(|sub| !sub.is_empty())
+    })
+}
+
+/// Where a picture's redirect may lead (`location`, absolute or a path on the same host): the
+/// address to follow, only when it is one a picture may be fetched from (`picture_url_ok`: the
+/// same hosts, over https; GitHub sends a picture on from `github.com` to one of its
+/// `*.githubusercontent.com` hosts); `None` for a redirect anywhere else, which isn't followed.
+pub fn redirect_target(from: &str, location: &str) -> Option<String> {
+    let host = https_host(from)?;
+    let location = location.trim();
+    let target = if location.starts_with('/') && !location.starts_with("//") { format!("https://{host}{location}") } else { location.to_string() };
+    picture_url_ok(&target).then_some(target)
+}
+
+/// The size a picture is kept at: as it is when it fits within `side` pixels a side, else scaled
+/// down to fit with its shape kept; never scaled up, and never below one pixel.
+pub fn fit_within(width: u32, height: u32, side: u32) -> (u32, u32) {
+    if width <= side && height <= side {
+        return (width, height);
+    }
+    let scale = side as f64 / width.max(height) as f64;
+    let scaled = |n: u32| ((n as f64 * scale).round() as u32).clamp(1, side);
+    (scaled(width), scaled(height))
+}
+
+/// Icons and screenshots exactly as received, in `pictures` in the cache folder, each named by
+/// the first 16 hex digits of its address's SHA-256: the address names the content, so a changed
+/// picture is a new file. At most `PICTURES_CAP` bytes: when a write goes over, the least recently
+/// used files go first (reading one counts as a use). Written atomically, like the rest of the
+/// cache. The network thread reads and writes it; nothing here touches the network.
+#[derive(Clone, Debug)]
+pub struct Pictures {
+    dir: PathBuf,
+    cap: u64,
+}
+
+impl Pictures {
+    /// The pictures kept in the cache folder `forge_dir`.
+    pub fn open(forge_dir: &Path) -> Pictures {
+        Pictures::with_cap(forge_dir.join(PICTURES_DIR), PICTURES_CAP)
+    }
+
+    /// The pictures in `dir`, at most `cap` bytes of them.
+    pub fn with_cap(dir: PathBuf, cap: u64) -> Pictures {
+        Pictures { dir, cap }
+    }
+
+    /// A picture's file name, from its address.
+    pub fn name(url: &str) -> String {
+        fsx::fingerprint(url.as_bytes())[..16].to_string()
+    }
+
+    /// The bytes kept for `url`, when they are here; reading them counts as a use at `now`.
+    pub fn get(&self, url: &str, now: SystemTime) -> Option<Vec<u8>> {
+        let path = self.dir.join(Pictures::name(url));
+        let bytes = match fsx::read_optional(&path) {
+            Ok(bytes) => bytes?,
+            Err(e) => {
+                log!("SurvivorsForge's pictures: {} not read: {e}", path.display());
+                return None;
+            }
+        };
+        self.touch(&path, now);
+        Some(bytes)
+    }
+
+    /// Keeps the bytes received for `url`, used at `now`, then makes room: the least recently used
+    /// other files go until the folder is within its cap.
+    pub fn put(&self, url: &str, bytes: &[u8], now: SystemTime) -> io::Result<()> {
+        let name = Pictures::name(url);
+        let path = self.dir.join(&name);
+        fsx::write_atomic(&path, bytes)?;
+        self.touch(&path, now);
+        self.trim(&name);
+        Ok(())
+    }
+
+    /// A use, as the file's modification time.
+    fn touch(&self, path: &Path, now: SystemTime) {
+        if let Err(e) = fs::OpenOptions::new().write(true).open(path).and_then(|file| file.set_modified(now)) {
+            log!("SurvivorsForge's pictures: {} not marked as used: {e}", path.display());
+        }
+    }
+
+    /// This cache's files (named by 16 hex digits; nothing else here counts), with their sizes,
+    /// the least recently used first.
+    fn files(&self) -> Vec<(String, u64, SystemTime)> {
+        let Ok(entries) = fs::read_dir(&self.dir) else { return Vec::new() };
+        let mut files: Vec<(String, u64, SystemTime)> = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let ours = name.len() == 16 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+                let meta = entry.metadata().ok().filter(|m| ours && m.is_file())?;
+                Some((name, meta.len(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH)))
+            })
+            .collect();
+        files.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
+        files
+    }
+
+    /// The least recently used files go, `keep` aside, until the folder is within its cap.
+    fn trim(&self, keep: &str) {
+        let files = self.files();
+        let mut total: u64 = files.iter().map(|(_, size, _)| size).sum();
+        for (name, size, _) in files {
+            if total <= self.cap {
+                break;
+            }
+            if name == keep {
+                continue;
+            }
+            match fsx::remove_if_present(&self.dir.join(&name)) {
+                Ok(()) => total -= size,
+                Err(e) => log!("SurvivorsForge's pictures: {name} not removed: {e}"),
+            }
         }
     }
 }
@@ -1795,5 +2047,205 @@ mod tests {
         assert_eq!(origin_of(Badge::Added, Some("totems")), Origin::ForgeOnly { slug: "totems" });
         assert_eq!(origin_of(Badge::Verified, None), Origin::OurList);
         assert_eq!(origin_of(Badge::File, None), Origin::Other);
+    }
+
+    #[test]
+    fn the_registrys_icon_download_count_and_publish_date_read_leniently() {
+        // Written for this test in schema 1's shape as it grew in November 2026: an icon, a count
+        // and a date; a tag-based addon's null count and no icon; and fields of other types.
+        let body = r#"{"schema": 1, "addons": [
+            {"id": "totems", "name": "Totems", "repo": "sam/Totems", "icon_url": "https://forge.rezondes.net/img/0a1b2c.webp",
+             "downloads": 1234, "latest": {"tag": "v1.1", "published_at": "2026-11-01T08:30:00Z"}},
+            {"id": "kma", "name": "KMA", "repo": "sam/KMA", "downloads": null, "latest": {"tag": "1", "published_at": "2026-10-28T19:05:12.25+00:00"}},
+            {"id": "odd", "name": "Odd", "repo": "sam/Odd", "icon_url": 7, "downloads": "many", "latest": {"tag": "v2", "published_at": "last week"}}
+        ]}"#;
+        let registry = parse_registry(body).unwrap();
+        let totems = registry.get("totems").unwrap();
+        assert_eq!((totems.icon_url.as_deref(), totems.downloads), (Some("https://forge.rezondes.net/img/0a1b2c.webp"), Some(1234)));
+        assert_eq!(totems.latest.as_ref().unwrap().published_at, Some(Utc.with_ymd_and_hms(2026, 11, 1, 8, 30, 0).unwrap()));
+        let kma = registry.get("kma").unwrap();
+        assert_eq!((kma.icon_url.as_deref(), kma.downloads), (None, None), "no icon, and no count for an addon published by tag");
+        let published = Utc.with_ymd_and_hms(2026, 10, 28, 19, 5, 12).unwrap() + TimeDelta::milliseconds(250);
+        assert_eq!(kma.latest.as_ref().unwrap().published_at, Some(published));
+        let odd = registry.get("odd").unwrap();
+        let latest = odd.latest.as_ref().unwrap();
+        assert_eq!((odd.icon_url.as_deref(), odd.downloads, latest.published_at), (None, None, None), "another type reads as none");
+        assert_eq!(latest.tag, "v2", "and costs nothing else");
+    }
+
+    #[test]
+    fn a_download_count_alone_keeps_the_fingerprint() {
+        let print = |text: &str| fingerprint(&serde_json::from_str::<Value>(text).unwrap());
+        let entry = |downloads: &str, tag: &str| print(&format!(r#"{{"id": "totems", "downloads": {downloads}, "latest": {{"tag": "{tag}", "size": 3}}}}"#));
+        let counted = entry("1234", "v1.1");
+        assert_eq!(counted, entry("1250", "v1.1"), "the count moved: the same entry");
+        assert_eq!(counted, entry("null", "v1.1"));
+        assert_eq!(counted, print(r#"{"latest": {"size": 3, "tag": "v1.1"}, "id": "totems"}"#), "or without one");
+        assert_ne!(counted, entry("1234", "v1.2"), "a new latest: another entry");
+        // Only the entry's own count is left out.
+        assert_ne!(print(r#"{"id": "x", "latest": {"downloads": 1}}"#), print(r#"{"id": "x", "latest": {"downloads": 2}}"#));
+
+        // In the cache, what was fetched under the entry stays current through a new count.
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::open(dir.path().join("forge"));
+        let body = |downloads: u64, tag: &str| {
+            format!(r#"{{"schema": 1, "addons": [{{"id": "totems", "name": "Totems", "repo": "sam/Totems", "downloads": {downloads}, "latest": {{"tag": "{tag}"}}}}]}}"#)
+        };
+        cache.store_registry(&body(10, "v1.1"), None, t(12)).unwrap();
+        cache.store_versions("totems", r#"[{"tag": "v1.1", "downloads": 10}]"#).unwrap();
+        cache.store_details("totems", r#"{"name": "Totems", "summary": "Keeps your totems in view"}"#).unwrap();
+        cache.store_registry(&body(25, "v1.1"), None, t(13)).unwrap();
+        assert!(cache.versions("totems").is_some() && cache.details("totems").is_some(), "still current");
+        cache.store_registry(&body(25, "v1.2"), None, t(14)).unwrap();
+        assert!(cache.versions("totems").is_none() && cache.details("totems").is_none(), "stale under a new latest");
+    }
+
+    #[test]
+    fn pictures_come_only_from_survivorsforge_and_github() {
+        for url in [
+            "https://forge.rezondes.net/img/9f86d081884c7d65.webp",
+            "https://FORGE.Rezondes.net/img/a.webp",
+            "https://github.com/user-attachments/assets/1b2c.png",
+            "https://raw.githubusercontent.com/sam/Totems/main/shot.png",
+            "https://user-images.githubusercontent.com/7/shot.jpg",
+            "https://private-user-images.githubusercontent.com/7/shot.png?jwt=abc",
+        ] {
+            assert!(picture_url_ok(url), "{url}");
+        }
+        for url in [
+            "http://forge.rezondes.net/img/a.webp",
+            "https://rezondes.net/img/a.webp",
+            "https://cdn.forge.rezondes.net/img/a.webp",
+            "https://forge.rezondes.net.example.com/a.webp",
+            "https://example.com/a.png",
+            "https://githubusercontent.com/a.png",
+            "https://evilgithubusercontent.com/a.png",
+            "https://raw.githubusercontent.com.example.com/a.png",
+            "https://gist.github.com/a.png",
+            "https://user@github.com/a.png",
+            "https://github.com:8443/a.png",
+            "https://github.com\\@example.com/a.png",
+            "https://github.com /a.png",
+            "https://%67ithub.com/a.png",
+            "ftp://github.com/a.png",
+            "https://",
+            "",
+        ] {
+            assert!(!picture_url_ok(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_pictures_redirect_is_followed_only_to_an_allowed_host() {
+        let from = "https://forge.rezondes.net/img/a.webp";
+        assert_eq!(redirect_target(from, "/img/b.webp").as_deref(), Some("https://forge.rezondes.net/img/b.webp"));
+        assert_eq!(redirect_target(from, " https://forge.rezondes.net/img/c.webp").as_deref(), Some("https://forge.rezondes.net/img/c.webp"));
+        for location in ["https://example.com/x.png", "http://forge.rezondes.net/img/b.webp", "//example.com/x.png", "", "https://forge.rezondes.net.example.com/x"] {
+            assert_eq!(redirect_target(from, location), None, "{location}");
+        }
+        // Between the allowed hosts: GitHub sends a picture on to one of its own hosts.
+        let sent_on = "https://private-user-images.githubusercontent.com/7/shot.png?jwt=abc";
+        assert_eq!(redirect_target("https://github.com/user-attachments/assets/1b2c", sent_on).as_deref(), Some(sent_on));
+        assert_eq!(redirect_target(from, "https://github.com/x.png").as_deref(), Some("https://github.com/x.png"));
+    }
+
+    #[test]
+    fn pictures_are_scaled_down_never_up() {
+        assert_eq!(fit_within(64, 64, ICON_SIDE), (64, 64));
+        assert_eq!(fit_within(512, 512, ICON_SIDE), (128, 128));
+        assert_eq!(fit_within(1000, 250, ICON_SIDE), (128, 32));
+        assert_eq!(fit_within(3, 4000, ICON_SIDE), (1, 128), "never below one pixel");
+    }
+
+    #[test]
+    fn the_pictures_cache_keeps_to_its_cap_dropping_the_least_recently_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("pictures");
+        let pictures = Pictures::with_cap(folder.clone(), 100);
+        let at = |s: u64| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000 + s);
+        let url = |n: &str| format!("https://forge.rezondes.net/img/{n}.webp");
+        let held = |n: &str| folder.join(Pictures::name(&url(n))).is_file();
+        assert_eq!(Pictures::name(&url("a")), fsx::fingerprint(url("a").as_bytes())[..16], "named by its address");
+        assert_eq!(pictures.get(&url("a"), at(0)), None);
+        pictures.put(&url("a"), &[1; 40], at(1)).unwrap();
+        pictures.put(&url("b"), &[2; 40], at(2)).unwrap();
+        assert_eq!(pictures.get(&url("a"), at(3)), Some(vec![1; 40]), "as received; and used now");
+        // 120 bytes: b, the least recently used, goes.
+        pictures.put(&url("c"), &[3; 40], at(4)).unwrap();
+        assert_eq!((held("a"), held("b"), held("c")), (true, false, true));
+        // As many as it takes: both older ones.
+        pictures.put(&url("d"), &[4; 70], at(5)).unwrap();
+        assert_eq!((held("a"), held("c"), held("d")), (false, false, true));
+        // The one just written stays even when it is over the cap alone; files not named by an
+        // address are neither counted nor removed, and no write leaves a temporary file behind.
+        fs::write(folder.join("notes.txt"), [0; 500]).unwrap();
+        pictures.put(&url("e"), &[5; 120], at(6)).unwrap();
+        assert_eq!((held("d"), held("e")), (false, true));
+        let mut names: Vec<String> = fs::read_dir(&folder).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        let mut expected = vec![Pictures::name(&url("e")), "notes.txt".to_string()];
+        expected.sort();
+        assert_eq!(names, expected);
+        assert_eq!(Pictures::open(dir.path()).get(&url("e"), at(7)), Some(vec![5; 120]), "the cache folder's pictures");
+    }
+
+    #[test]
+    fn a_word_holds_back_only_the_file_it_was_about() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::open(dir.path().join("forge"));
+        // The registry flags Totems' v1.1, whose file is "b…".
+        cache.store_registry(&registry_body("v2.0", true), None, t(12)).unwrap();
+        let kept = cache.state().restrictions["totems"]["v1.1"].clone();
+        assert_eq!((kept.trust.as_str(), kept.sha256.clone()), ("flagged", Some("b".repeat(64))));
+        assert!(kept.covers(Some(&"B".repeat(64))) && kept.covers(None), "that file, or one not known");
+        assert!(!kept.covers(Some(&"c".repeat(64))), "a file replaced under the same tag is judged again");
+        // A current word letting in another file under v1.1 lifts nothing about this one; one about
+        // this file does.
+        let lifting = |sha: &str| format!(r#"[{{"tag": "v1.1", "trust": "verified", "sha256": "{sha}"}}]"#);
+        cache.store_versions("totems", &lifting(&"c".repeat(64))).unwrap();
+        assert_eq!(cache.state().restrictions["totems"]["v1.1"].sha256, Some("b".repeat(64)));
+        cache.store_versions("totems", &lifting(&"b".repeat(64))).unwrap();
+        assert!(!cache.state().restrictions.contains_key("totems"));
+        // A word kept before 0.7.2 has no checksum: it speaks for its tag, whatever the file, and is
+        // written as it was.
+        let before: Restriction = serde_json::from_str(r#"{"trust": "flagged", "findings": {"critical": 0, "warn": 1}}"#).unwrap();
+        assert!(before.sha256.is_none() && before.covers(Some(&"c".repeat(64))));
+        assert!(!serde_json::to_string(&before).unwrap().contains("sha256"));
+    }
+
+    #[test]
+    fn an_ok_lets_in_exactly_the_file_it_was_given_for() {
+        let ask = Ask(Why::Flagged { critical: 0, warn: 2 });
+        assert!(admits(&Go, false) && admits(&Go, true));
+        assert!(!admits(&ask, false) && admits(&ask, true), "a question goes in with the player's OK only");
+        assert!(!admits(&No(Why::Blocked(None)), true), "never, OK or not");
+        let mut oks = Oks::default();
+        oks.give("forge:totems", &"B".repeat(64));
+        assert!(oks.has("forge:totems", &"b".repeat(64)));
+        assert!(!oks.has("forge:totems", &"c".repeat(64)), "another file");
+        assert!(!oks.has("totems", &"b".repeat(64)), "another addon");
+        assert!(!oks.has("forge:totems", ""), "a file not known");
+    }
+
+    #[test]
+    fn a_version_from_its_list_as_a_release() {
+        let entry = listed("https://github.com/sam/Totems/releases/download/v1.1/Totems.zip");
+        let list = format!(
+            r#"[{{"tag": "v1.0", "published_at": "2026-10-20T10:00:00Z", "asset_name": "Totems.zip",
+                "asset_url": "https://github.com/sam/Totems/releases/download/v1.0/Totems.zip", "size": 900, "sha256": "{d}",
+                "downloads": 40, "game_min": "1.0", "game_max": "1.2"}},
+              {{"tag": "v0.9", "asset_url": "https://example.com/Totems.zip", "sha256": "{e}"}},
+              {{"tag": "v0.8", "asset_url": "https://github.com/sam/Totems/releases/download/v0.8/Totems.zip"}}]"#,
+            d = "D".repeat(64),
+            e = "e".repeat(64)
+        );
+        let versions = parse_versions(&list).unwrap();
+        let release = version_release(&entry, &versions[0]);
+        assert_eq!((release.tag.as_str(), release.version.as_deref(), release.file.as_str(), release.size, release.downloads), ("v1.0", Some("1.0"), "Totems.zip", 900, Some(40)));
+        assert_eq!((release.url.as_str(), release.sha256.clone()), ("https://github.com/sam/Totems/releases/download/v1.0/Totems.zip", "d".repeat(64)));
+        assert_eq!(release.published, Utc.with_ymd_and_hms(2026, 10, 20, 10, 0, 0).unwrap());
+        assert_eq!((versions[0].game_min.as_deref(), versions[0].game_max.as_deref()), (Some("1.0"), Some("1.2")), "the game range when given");
+        assert_eq!(version_release(&entry, &versions[1]).url, "", "not on its own GitHub: nothing downloads it");
+        assert_eq!(version_release(&entry, &versions[2]).url, "", "no checksum yet");
     }
 }
