@@ -1433,14 +1433,16 @@ impl Worker {
     }
 
     /// Browse's switch: the view is kept in settings.toml as soon as it is picked, on its own, so
-    /// fields being edited in Settings stay as they are (the form isn't pushed again).
+    /// fields being edited in Settings stay as they are (the form isn't pushed again). It is the
+    /// player's pick from then on (`AddonSettings::pick_view`): the cards too stay, where a cards
+    /// nobody picked loads as the table.
     fn browse_view(&mut self, view: &str) {
-        let view = satchel_core::settings::browse_view_or_default(view);
-        if self.engine.settings.addons.browse_view == view {
+        let addons = &self.engine.settings.addons;
+        if addons.browse_view_picked && addons.browse_view == satchel_core::settings::browse_view_or_default(view) {
             return;
         }
         let mut settings = self.engine.settings.clone();
-        settings.addons.browse_view = view;
+        settings.addons.pick_view(view);
         match settings.save(&self.engine.local.settings()) {
             Ok(()) => self.engine.settings = settings,
             Err(e) => log!("Browse's view not saved: {e}"),

@@ -20,9 +20,10 @@ The game's patch notes in the app, and a wider window built around Browse's tabl
 ### Changed
 - The window opens at 16:9 (1,120 × 630) and never smaller than 960 × 540, so the table and the
   addon beside it fit; the other tabs keep their width, centred, until the design pass.
-- The table is Browse's default view, sorted by popularity with the top addon open. The Lists
-  column is gone; the "SurvivorsForge" column is "Safety", and says "Discord Verified" for an
-  addon that is on the game's verified-addons channel only.
+- The table is Browse's default view, also on a PC updated from 0.7.2, unless you had picked
+  another view, sorted by popularity with the top addon open. The Lists column is gone; the
+  "SurvivorsForge" column is "Safety", and says "Discord Verified" for an addon that is on the
+  game's verified-addons channel only.
 - The addon pane has two tabs, About and Versions; the scan and the folders are one line each in
   About.
 - The picture viewer is a box over the darkened window, with previous and next on the picture's

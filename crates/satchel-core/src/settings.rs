@@ -66,10 +66,17 @@ pub struct AddonSettings {
     /// is asked of it and the cache stays unused.
     pub forge: bool,
     /// How Browse shows the addons on this PC: `list`, `cards` or `table` (`BROWSE_VIEWS`), as its
-    /// switch was left. Absent, or anything else, reads as `table`, the default since 0.8.0. Not in
-    /// the Settings tab.
+    /// switch was left. Absent, or anything else, reads as `table`, the default since 0.8.0; so does
+    /// a `cards` the player never picked (`browse_view_picked`, `Settings::load`). Not in the
+    /// Settings tab.
     #[serde(default = "default_view", deserialize_with = "browse_view")]
     pub browse_view: String,
+    /// The player picked `browse_view` with Browse's own switch (`pick_view`). Every settings.toml
+    /// 0.7.2 wrote holds `browse_view = "cards"` without this key, its Save writing every field: a
+    /// cards nobody picked, which loads as the table. Kept by Save, as every field is; absent in
+    /// older files, it is false.
+    #[serde(default)]
+    pub browse_view_picked: bool,
 }
 
 /// Browse's views, as `browse_view` names them.
@@ -97,7 +104,24 @@ fn browse_view<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Erro
 
 impl Default for AddonSettings {
     fn default() -> Self {
-        AddonSettings { update_by_themselves: true, shared: true, forge: true, browse_view: default_view() }
+        AddonSettings { update_by_themselves: true, shared: true, forge: true, browse_view: default_view(), browse_view_picked: false }
+    }
+}
+
+impl AddonSettings {
+    /// Browse's switch: the view the player picked, kept from now on, the cards too.
+    pub fn pick_view(&mut self, name: &str) {
+        self.browse_view = browse_view_or_default(name);
+        self.browse_view_picked = true;
+    }
+
+    /// A cards nobody picked (every settings.toml 0.7.2 wrote has one) is the table, the default
+    /// since 0.8.0, and is written back so with the next save. A view the player picked stays, and
+    /// so does a list or a table.
+    fn settle_view(&mut self) {
+        if !self.browse_view_picked && self.browse_view == "cards" {
+            self.browse_view = default_view();
+        }
     }
 }
 
@@ -135,10 +159,16 @@ fn invalid(path: &Path, e: impl std::fmt::Display) -> io::Error {
 }
 
 impl Settings {
-    /// `None` when this PC has no settings yet (its first start).
+    /// `None` when this PC has no settings yet (its first start). A cards view nobody picked loads
+    /// as the table (`AddonSettings::settle_view`).
     pub fn load(path: &Path) -> io::Result<Option<Settings>> {
         match fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text).map(Some).map_err(|e| invalid(path, e)),
+            Ok(text) => toml::from_str::<Settings>(&text)
+                .map(|mut settings| {
+                    settings.addons.settle_view();
+                    Some(settings)
+                })
+                .map_err(|e| invalid(path, e)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
         }
@@ -261,7 +291,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         for view in ["cards", "list", "table"] {
-            let chosen = Settings { addons: AddonSettings { browse_view: view.into(), ..AddonSettings::default() }, ..Settings::default() };
+            let mut chosen = Settings::default();
+            chosen.addons.pick_view(view);
             chosen.save(&path).unwrap();
             assert!(fs::read_to_string(&path).unwrap().contains(&format!("browse_view = \"{view}\"")));
             assert_eq!(Settings::load(&path).unwrap(), Some(chosen), "{view}");
@@ -272,6 +303,47 @@ mod tests {
             assert_eq!((read.addons.browse_view.as_str(), read.addons.forge), ("table", false), "{line}");
         }
         assert_eq!((browse_view_or_default(" list "), browse_view_or_default("Cards")), ("list".to_string(), "table".to_string()));
+    }
+
+    /// Every settings.toml 0.7.2 wrote holds the cards, its Save writing every field: a cards
+    /// nobody picked loads as the table, and is written back so; one picked with Browse's switch
+    /// stays, as does a list.
+    #[test]
+    fn a_cards_nobody_picked_loads_as_the_table_and_a_pick_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        // As 0.7.2 wrote it: every field, browse_view = "cards", no browse_view_picked.
+        let from_0_7_2 = "game_dir = 'C:\\games\\AzerothSurvivors'\npc_name = 'PC 1'\nstart_with_windows = false\ndesktop_shortcut = true\nnotifications = true\npause_when_away = false\ntheme = 'system'\n\n[sync]\nenabled = true\nfolder = '\\\\homenas\\games\\Saves'\n\n[addons]\nupdate_by_themselves = true\nshared = true\nforge = true\nbrowse_view = 'cards'\n\n[game]\nshared = true\n";
+        fs::write(&path, from_0_7_2).unwrap();
+        let updated = Settings::load(&path).unwrap().unwrap();
+        assert_eq!((updated.addons.browse_view.as_str(), updated.addons.browse_view_picked), ("table", false));
+        assert_eq!((updated.pc_name.as_str(), updated.sync.enabled), ("PC 1", true), "the rest stands");
+        // Written back with the next save, and read so again.
+        updated.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("browse_view = \"table\"") && text.contains("browse_view_picked = false"), "{text}");
+        assert_eq!(Settings::load(&path).unwrap().unwrap().addons.browse_view, "table");
+
+        // Picked with the switch: the cards stay, from now on.
+        fs::write(&path, "[addons]\nbrowse_view = 'cards'\nbrowse_view_picked = true\n").unwrap();
+        let picked = Settings::load(&path).unwrap().unwrap();
+        assert_eq!((picked.addons.browse_view.as_str(), picked.addons.browse_view_picked), ("cards", true));
+
+        // A list from 0.7.2, which only the switch could have set: it stays, picked key or not.
+        fs::write(&path, "[addons]\nbrowse_view = 'list'\n").unwrap();
+        assert_eq!(Settings::load(&path).unwrap().unwrap().addons.browse_view, "list");
+
+        // The switch: the view it names, picked; the cards survive a save and a load.
+        let mut settings = updated.clone();
+        settings.addons.pick_view("cards");
+        assert_eq!((settings.addons.browse_view.as_str(), settings.addons.browse_view_picked), ("cards", true));
+        settings.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap(), Some(settings.clone()));
+        // A name it doesn't know picks the default, the table.
+        settings.addons.pick_view("gallery");
+        assert_eq!((settings.addons.browse_view.as_str(), settings.addons.browse_view_picked), ("table", true));
+        // A new settings.toml has picked nothing.
+        assert!(!Settings::default().addons.browse_view_picked);
     }
 
     #[test]
