@@ -3,6 +3,33 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.9.0 (2026-11-04)
+
+The design pass: a new shape for every screen, dark by default.
+
+### Added
+- A Home page: the game's newest patch notes, what needs you, your PCs, recent activity and your
+  playtime, as cards.
+- The game and Play live in a rail on the left of every page; the rail says which game build is
+  current, how your progress stands and whether your addons are up to date.
+- Settings apply as you change them: switches as you click, a typed folder or name with Enter; each
+  one says "✓ Saved". Restore defaults resets the other switches and the theme, and leaves sync, the
+  two sharing switches, your folders and this PC's name as they are.
+- The first start is one screen: your game, found, and Start.
+
+### Changed
+- Three pages: Home, Addons and Settings. The Saves tab is the last section of Settings, "Progress
+  versions"; the Playtime tab is a Home card that opens on click.
+- Browse's sub-pages sit above the table; search and the filters sit in the rail. The installed check
+  mark is much bigger.
+- The window opens at 1,280 × 720 and never smaller than 1,120 × 630; maximised, the pages grow with it,
+  and a maximised window reopens maximised.
+- Dark is the default theme; the title bar follows the theme.
+- Uninstall in Browse's table removes an addon only when its folders match the installed copy exactly.
+
+### Removed
+- The Save and Default buttons in Settings, and the "Cloud (maybe later)" line.
+
 ## 0.8.0 (2026-11-04)
 
 The game's patch notes in the app, and a wider window built around Browse's table.

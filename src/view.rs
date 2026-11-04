@@ -4,14 +4,16 @@
 //! (`slint::Image::from_rgba8`), and the lines name an icon by its key.
 
 use crate::{
-    AddonRow, BadgeRow, BarRow, CardLine, ChangelogBlock, ChangelogEntry, MainWindow, OfferRow, PanelRow, PcTime, PictureRow, PlayCard,
-    RecentLine, RemovedRow, SatchelTray, SettingsForm, TagRow, TrayState, VersionItem, VersionsRow, about, win,
+    AddonRow, BadgeRow, BarRow, CardLine, ChangelogBlock, ChangelogEntry, DayBar, MainWindow, OfferRow, PanelRow, PcRow, PcTime, PictureRow,
+    PlayCard, QuestionButton, QuestionRow, RecentLine, RemovedRow, SatchelTray, SaveRow, SessionRow, SettingsForm, TagRow, TrayState,
+    VersionItem, VersionsRow, about, win,
 };
 use satchel_core::activity::Kind;
 use satchel_core::addons::forge;
 use satchel_core::addons::overview::{self, SafetyCell, Sort, SortKeys, browse_order};
 use satchel_core::changelog::Block;
-use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, StandardListViewItem, VecModel};
+use satchel_core::shell::{self, Action, Dot, Question, RailLine as Rail};
+use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
@@ -24,11 +26,71 @@ pub enum Tray {
     Offline,
 }
 
-/// A line of "Recent on this PC", with the kind its icon shows.
+/// A line of Home's Recent activity, with the kind its icon shows and when it happened, as the
+/// card says it ("2 min ago", "yesterday 21:40").
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recent {
     pub kind: Kind,
     pub text: String,
+    pub when: String,
+}
+
+/// The rail's status lines and its last line.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RailView {
+    /// "Build 0.141.0" with the What's new link (`true`), or the muted line without a build.
+    pub build: (String, bool),
+    pub progress: Option<Rail>,
+    pub addons: Option<Rail>,
+    pub last: String,
+}
+
+/// The top bar's update pill: its words, its link's words, and what the link does (0 none: no
+/// pill; 1 Update now; 2 see what's new).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Pill {
+    pub text: String,
+    pub link: String,
+    pub kind: i32,
+}
+
+/// One PC in Home's Your PCs card.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PcLine {
+    pub name: String,
+    pub this_pc: bool,
+    /// "played today · synced 2 min ago".
+    pub line: String,
+}
+
+/// Home's playtime card.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PlaytimeView {
+    /// "4 h 12 min", and the sessions this week.
+    pub week: String,
+    pub week_sessions: u32,
+    pub today: String,
+    pub all: String,
+    /// The last seven days: the weekday ("Today" for the last), the bar's share of the tallest
+    /// day, the minutes.
+    pub days: Vec<(String, f32, u32)>,
+    /// This week per PC (sync on): the name, the minutes as words, the share of the most.
+    pub per_pc: Vec<(String, String, f32)>,
+    /// The last sessions, newest first, 30 at most: the day, the PC, the minutes as words.
+    pub sessions: Vec<(String, String, String)>,
+}
+
+/// One row of Settings' Progress versions.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SaveLine {
+    pub version: String,
+    pub when: String,
+    pub from: String,
+    pub size: String,
+    pub note: String,
+    /// The one you play: bold, no button.
+    pub current: bool,
+    pub can_bring: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -38,19 +100,29 @@ pub struct View {
     pub banner: String,
     pub busy: bool,
     pub sync_on: bool,
-    /// Heading, main line, detail of the two cards on the Play tab.
-    pub here: [String; 3],
-    pub other: [String; 3],
+    /// The game runs: Play reads "Playing…".
+    pub playing: bool,
+    pub rail: RailView,
+    pub pill: Pill,
+    /// Home: the newest note's version, its paragraph and first lines (as What's new shows them)
+    /// and whether lines were left out ("More ▾"); the PCs, the questions, the activity, the
+    /// playtime.
+    pub news_version: String,
+    pub news_blocks: Vec<(i32, String)>,
+    pub news_more: bool,
+    pub pcs: Vec<PcLine>,
+    pub pcs_week: String,
+    pub questions: Vec<Question>,
     pub recent: Vec<Recent>,
-    pub saves: Vec<[String; 5]>,
+    pub playtime: PlaytimeView,
+    /// Settings' Progress versions, newest first, and their summary line.
+    pub saves: Vec<SaveLine>,
+    pub saves_summary: String,
     pub saves_note: String,
-    pub today: String,
-    pub week: String,
-    pub all_time: String,
-    pub pc_times: Vec<(String, String, f32)>,
-    pub sessions: Vec<String>,
-    /// "Needs you": this PC's save, the other one, the other PC's name.
+    /// "Needs you" at Play: this PC's save, the other one, the other PC's name; and why the last
+    /// pick didn't go through, under its buttons (empty: none).
     pub needs_you: Option<[String; 3]>,
+    pub needs_note: String,
     /// The Play card's lines (text, done, warning) and whether it asks "Play anyway?".
     pub card: Option<(Vec<(String, bool, bool)>, bool)>,
     pub setup: Option<Setup>,
@@ -60,9 +132,6 @@ pub struct View {
     pub system_dark: bool,
     /// "released today", for About and What's new.
     pub app_released: String,
-    /// The Play tab's last line, and whether it is "Updated to …".
-    pub version_line: String,
-    pub version_new: bool,
     /// The game is in its folder: else Play, Addons, Saves and Playtime say it isn't.
     pub game_found: bool,
     /// Settings' line under "The game's own settings on every PC".
@@ -84,10 +153,7 @@ pub struct View {
 /// The game's patch notes as the window shows them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GameNewsView {
-    /// The Play tab's line, "Azeroth Survivors 0.141.0 · what's new"; empty when no build is
-    /// known on this PC (the line hides).
-    pub line: String,
-    /// The panel hasn't been opened for that build yet: the line is marked as new.
+    /// The panel hasn't been opened for the newest build yet: the rail's square is filled.
     pub new: bool,
     /// The newest build the game's update server names; empty when none is known.
     pub version: String,
@@ -176,6 +242,8 @@ pub struct AddonsView {
     pub removed: Vec<RemovedLine>,
     /// Versions…, for the addon it is open for (the last `VersionsOpen`).
     pub versions: Option<VersionsView>,
+    /// The Installed tab's state in numbers, for the rail's addons line.
+    pub rail: shell::AddonsFacts,
 }
 
 /// Versions…: every version of one addon known here, newest first.
@@ -435,15 +503,16 @@ pub struct LinkView {
     pub installing: bool,
 }
 
+/// The first start: one screen. `sync_line`: "Sync is on · <folder>" when the defaults file beside
+/// the exe turned sync on, or why sync stays off when that folder can't be used (`sync_warn`, in
+/// amber); empty otherwise.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Setup {
-    /// This PC's progress and the shared folder's, when both exist and differ.
-    pub pick: Option<[String; 2]>,
-    /// The pre-selected one: the newer.
-    pub choice: i32,
+    pub sync_line: String,
+    pub sync_warn: bool,
 }
 
-/// The Settings fields, as the user edits them.
+/// The Settings fields, as saved.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Form {
     pub game_dir: String,
@@ -461,29 +530,42 @@ pub struct Form {
     /// 0 System, 1 Light, 2 Dark.
     pub theme: i32,
     pub game_shared: bool,
-    /// Browse's view as its switch left it (`list`, `cards`, `table`): not one of Settings' fields,
-    /// so Save doesn't light up for it, but Save keeps it as it is.
+    /// Browse's view as its switch left it (`list`, `cards`, `table`): not one of Settings' fields.
     pub browse_view: String,
 }
 
+/// The change a form answers: its row (`key`, as the window names it), the text the window sent
+/// for it, and what came of it: `applied` (its value changed and was written: "✓ Saved"), or the
+/// reason it was refused (`why`; nothing was written).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct FormView {
-    pub form: Form,
-    /// The fields as saved: Save lights up only when `form` differs.
-    pub saved: Form,
-    pub game_status: String,
-    pub folder_status: String,
-    /// Why the name typed isn't saved (another PC syncing there has it); empty otherwise.
-    pub name_status: String,
-    pub settings_path: String,
+pub struct Answered {
+    pub key: String,
+    pub typed: String,
+    pub applied: bool,
+    pub why: String,
 }
 
-/// The worker's handle on the UI: weak references, used through the event loop.
+/// Settings as the app has them: the saved fields, the game's and the network folder's status
+/// lines, and the change this form answers, if any.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FormView {
+    pub saved: Form,
+    pub game_status: String,
+    /// The game is in the saved folder (at the first start, the one chosen there).
+    pub game_ok: bool,
+    pub folder_status: String,
+    pub settings_path: String,
+    pub answered: Option<Answered>,
+}
+
+/// The worker's handle on the UI: weak references, used through the event loop; `maximised`:
+/// the window was closed maximised last time, so its first show maximises it.
 #[derive(Clone)]
 pub struct Ui {
     pub window: slint::Weak<MainWindow>,
     pub tray: slint::Weak<SatchelTray>,
     pub card: slint::Weak<PlayCard>,
+    pub maximised: bool,
 }
 
 impl Ui {
@@ -496,17 +578,20 @@ impl Ui {
         });
     }
 
-    /// Overwrites the Settings fields: only on start, after Save or Cancel, and after Find it.
+    /// Settings as saved, at start, after each Settings change (applied or refused), after Find
+    /// it and at the first start's steps; `apply_form` decides what each field takes of it.
     pub fn push_form(&self, form: FormView) {
         let _ = self.window.upgrade_in_event_loop(move |window| apply_form(&window, &form));
     }
 
     pub fn show(&self, tab: Option<i32>) {
+        let maximised = self.maximised;
         let _ = self.window.upgrade_in_event_loop(move |window| {
             if let Some(tab) = tab {
                 window.set_tab(tab);
             }
             let _ = window.show();
+            place_main(&window, maximised);
             after_show(window.window(), window.get_dark());
             win::bring_to_front(&window.window().window_handle());
         });
@@ -576,13 +661,44 @@ thread_local! {
     static PANEL: RefCell<Option<PanelLine>> = const { RefCell::new(None) };
     // How many times Check for updates was clicked (`View::checks` counts those taken up).
     static CHECKS_ASKED: Cell<u32> = const { Cell::new(0) };
+    // The main window has been sized and placed once.
+    static PLACED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Right after a window is shown (Windows has made it): its title bar in the window's colours,
-/// and its name and pin on the taskbar.
+/// Right after a window is shown (Windows has made it): its frame in the theme's colours, and its
+/// name and pin on the taskbar.
 pub fn after_show(window: &slint::Window, dark: bool) {
-    win::dark_title_bar(&window.window_handle(), dark);
+    win::paint_frame(&window.window_handle(), dark);
     win::app_identity(&window.window_handle());
+}
+
+/// The main window's size the first time it shows: 1,280 × 720 centred on the work area, the
+/// minimum when that doesn't fit, else maximised; maximised when it was closed so last time.
+/// Its smallest size is never larger than the work area (`shell::min_size`), so a maximised window
+/// fits a small screen at a high scale. Later shows leave it where it is.
+pub fn place_main(window: &MainWindow, maximised: bool) {
+    if PLACED.replace(true) {
+        return;
+    }
+    let scale = window.window().scale_factor();
+    let open = match win::work_area() {
+        Some((left, top, right, bottom)) => {
+            let (min_w, min_h) = shell::min_size(right - left, bottom - top, scale);
+            window.set_min_w(min_w as f32);
+            window.set_min_h(min_h as f32);
+            let open = shell::open_size(right - left, bottom - top, scale);
+            if let shell::Open::Size(w, h) = open {
+                let (pw, ph) = ((w as f32 * scale) as i32, (h as f32 * scale) as i32);
+                window.window().set_size(slint::PhysicalSize::new(pw as u32, ph as u32));
+                window.window().set_position(slint::PhysicalPosition::new(left + (right - left - pw) / 2, top + (bottom - top - ph) / 2));
+            }
+            open
+        }
+        None => shell::Open::Size(shell::DEFAULT_SIZE.0, shell::DEFAULT_SIZE.1),
+    };
+    if maximised || open == shell::Open::Maximised {
+        window.window().set_maximized(true);
+    }
 }
 
 /// What doesn't change while the Satchel runs: About's version and build, and What's new.
@@ -624,12 +740,43 @@ fn strings(values: &[String]) -> ModelRc<SharedString> {
     ModelRc::new(VecModel::from(values.iter().map(|v| text(v)).collect::<Vec<_>>()))
 }
 
-fn table(rows: &[[String; 5]]) -> ModelRc<ModelRc<StandardListViewItem>> {
-    let rows: Vec<ModelRc<StandardListViewItem>> = rows
-        .iter()
-        .map(|row| ModelRc::new(VecModel::from(row.iter().map(|cell| StandardListViewItem::from(cell.as_str())).collect::<Vec<_>>())))
-        .collect();
-    ModelRc::new(VecModel::from(rows))
+/// The number a Needs-you button's action goes by in the window, and the addon it names.
+fn question_button(label: &str, action: &Action) -> QuestionButton {
+    let (code, id) = match action {
+        Action::ChooseProgress => (0, ""),
+        Action::GameKeepHere => (1, ""),
+        Action::GameUseOther => (2, ""),
+        Action::GameUseOwn => (3, ""),
+        Action::AddonKeepHere(id) => (4, id.as_str()),
+        Action::AddonUseOther(id) => (5, id.as_str()),
+        Action::InstallAnyway(id) => (6, id.as_str()),
+        Action::ShowScan(id) => (7, id.as_str()),
+        Action::OpenSettings => (8, ""),
+    };
+    QuestionButton { text: text(label), action: code, id: text(id) }
+}
+
+fn questions(list: &[Question]) -> ModelRc<QuestionRow> {
+    ModelRc::new(VecModel::from(
+        list.iter()
+            .map(|q| QuestionRow {
+                text: text(&q.text),
+                buttons: ModelRc::new(VecModel::from(q.buttons.iter().map(|(label, action)| question_button(label, action)).collect::<Vec<_>>())),
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+/// A rail dot's number in the window.
+fn dot(dot: Dot) -> i32 {
+    match dot {
+        Dot::Green => 0,
+        Dot::Blue => 1,
+        Dot::Gold => 2,
+        Dot::Amber => 3,
+        Dot::Muted => 4,
+        Dot::Text => 5,
+    }
 }
 
 /// The icon a kind of activity shows (`RecentLine.kind` in the UI).
@@ -787,6 +934,8 @@ fn offer_row(offer: &OfferLine) -> OfferRow {
         popularity: text(&offer.downloads.map(thousands).unwrap_or_default()),
         install_text: text(cell.text),
         install_primary: cell.primary,
+        // A one-word name is cut short with "…" in a narrow column, not broken inside the word.
+        one_word: !offer.name.trim().contains(char::is_whitespace),
     }
 }
 
@@ -910,7 +1059,6 @@ pub fn installing(window: &MainWindow, id: Option<&str>) {
                 if let Some(panel) = view.addons.panel.as_mut().filter(|p| p.id == id && matches!(p.action, 0 | 1 | 4 | 5)) {
                     panel.action = 2;
                 }
-                window.set_addon_rows(ModelRc::new(VecModel::from(view.addons.rows.iter().map(addon_row).collect::<Vec<_>>())));
             }
             None => {
                 view.addons.link.installing = true;
@@ -929,20 +1077,24 @@ pub fn checking(window: &MainWindow) {
     window.set_checking(true);
 }
 
-/// `OfferLine::origin`: our list only, both lists, SurvivorsForge only. `browse-origin` has these
-/// (0 all, 1 Discord Verified, 2 SurvivorsForge) and one more of the table's: neither list ticked.
+/// `OfferLine::origin`: our list only, both lists, SurvivorsForge only.
 const ORIGIN_OURS: i32 = 0;
 const ORIGIN_FORGE: i32 = 2;
-const ORIGIN_NONE: i32 = 3;
 
-/// The window's Addons tab, and its Browse page.
+/// The window's Addons tab, and its pages.
 const TAB_ADDONS: i32 = 1;
 const PAGE_BROWSE: i32 = 1;
 
-/// How much wider than a chip the table's check box for the same tag is: its box and the gap.
-const CHECK_WIDER: usize = 14;
+/// The rail's filter groups, as `filter-toggled` numbers them.
+const GROUP_LISTS: i32 = 0;
+const GROUP_SAFETY: i32 = 1;
+const GROUP_GROUPS: i32 = 2;
 
-/// Every tag of the lines, once each, A to Z.
+/// The two lists, as the Lists group names them.
+const LIST_OURS: &str = "Discord Verified";
+const LIST_FORGE: &str = "SurvivorsForge";
+
+/// Every group (our catalog's groups and SurvivorsForge's categories) of the lines, once each, A to Z.
 fn tags(offers: &[OfferLine]) -> Vec<String> {
     let mut tags: Vec<String> = offers.iter().flat_map(|o| o.tags.iter().cloned()).collect();
     tags.sort_by_key(|t| t.to_lowercase());
@@ -950,95 +1102,65 @@ fn tags(offers: &[OfferLine]) -> Vec<String> {
     tags
 }
 
-/// The tag chips line by line: Slint has no layout that wraps, so the lines are made here, for the
-/// narrowest window (540 px), from a generous guess at each chip's width (12 px text, its padding
-/// and the gap after it), `widen` more for a check box. A wider window just has room to spare.
-fn tag_lines(tags: &[String], widen: usize) -> Vec<Vec<String>> {
-    const ROOM: usize = 470;
-    let mut lines: Vec<Vec<String>> = Vec::new();
-    let mut used = 0;
-    for tag in tags {
-        let width = tag.chars().count() * 7 + 24 + widen;
-        match lines.last_mut() {
-            Some(line) if used + width <= ROOM => {
-                line.push(tag.clone());
-                used += width;
-            }
-            _ => {
-                lines.push(vec![tag.clone()]);
-                used = width;
-            }
-        }
-    }
-    lines
+/// The boxes ticked in one of the rail's groups.
+fn ticked(rows: &ModelRc<TagRow>) -> Vec<String> {
+    rows.iter().filter(|t| t.on).map(|t| t.text.to_string()).collect()
 }
 
-/// The tags the player has on.
-fn tags_on(window: &MainWindow) -> Vec<String> {
-    let lines = window.get_browse_tags();
-    lines.iter().flat_map(|line| line.iter().filter(|t| t.on).map(|t| t.text.to_string()).collect::<Vec<_>>()).collect()
+fn tag_rows(names: &[String], on: &[String]) -> ModelRc<TagRow> {
+    ModelRc::new(VecModel::from(names.iter().map(|t| TagRow { text: text(t), on: on.iter().any(|o| o.eq_ignore_ascii_case(t)) }).collect::<Vec<_>>()))
 }
 
-/// The table's trust words that are on.
-fn trust_on(window: &MainWindow) -> Vec<String> {
-    window.get_browse_trust().iter().filter(|t| t.on).map(|t| t.text.to_string()).collect()
-}
-
-/// SurvivorsForge's levels in the order the Legend gives them, for the table's filters.
+/// SurvivorsForge's levels in the order the Legend gives them, for the Safety group.
 const LEVELS: [&str; 8] = ["verified", "scanned", "flagged", "unscanned", "no longer listed", "source changed", "another file", "blocked"];
 
-/// The tag lines again, as chips (`browse-tags`) and as the table's check boxes
-/// (`browse-tag-checks`, wider each), with the tags in `on` on.
-fn set_tag_lines(window: &MainWindow, tags: &[String], on: &[String]) {
-    let lines = |widen: usize| -> ModelRc<ModelRc<TagRow>> {
-        let lines: Vec<ModelRc<TagRow>> = tag_lines(tags, widen)
-            .iter()
-            .map(|line| ModelRc::new(VecModel::from(line.iter().map(|t| TagRow { text: text(t), on: on.contains(t) }).collect::<Vec<_>>())))
-            .collect();
-        ModelRc::new(VecModel::from(lines))
-    };
-    window.set_browse_tags(lines(0));
-    window.set_browse_tag_checks(lines(CHECK_WIDER));
-}
-
-/// When the offers change: the list choice's counts, the tag chips and check boxes (those still
-/// offered keep being on), the table's trust words, and the Legend's tag line.
+/// When the offers change: the rail's three groups (the boxes still offered keep being on), the
+/// counts and the Legend's groups line.
 fn set_browse_lists(window: &MainWindow, offers: &[OfferLine]) {
-    let on = tags_on(window);
-    let tags = tags(offers);
-    set_tag_lines(window, &tags, &on);
-    let trust = trust_on(window);
-    let levels: Vec<TagRow> = LEVELS
-        .iter()
-        .filter(|level| offers.iter().any(|o| o.trust == **level))
-        .map(|level| TagRow { text: text(level), on: trust.iter().any(|t| t == level) })
-        .collect();
-    window.set_browse_trust(ModelRc::new(VecModel::from(levels)));
-    window.set_browse_tag_line(text(&tags.join(" · ")));
-    window.set_browse_count_all(offers.len() as i32);
-    window.set_browse_count_ours(offers.iter().filter(|o| o.origin != ORIGIN_FORGE).count() as i32);
-    window.set_browse_count_forge(offers.iter().filter(|o| o.origin != ORIGIN_OURS).count() as i32);
+    let lists = ticked(&window.get_filter_lists());
+    window.set_filter_lists(tag_rows(&[LIST_OURS.to_string(), LIST_FORGE.to_string()], &lists));
+    let safety = ticked(&window.get_filter_safety());
+    let levels: Vec<String> = LEVELS.iter().filter(|level| offers.iter().any(|o| o.trust == **level)).map(|l| l.to_string()).collect();
+    window.set_filter_safety(tag_rows(&levels, &safety));
+    let groups = ticked(&window.get_filter_groups());
+    let all = tags(offers);
+    window.set_filter_groups(tag_rows(&all, &groups));
+    window.set_browse_tag_line(text(&all.join(" · ")));
+    count_filters(window);
 }
 
-/// A tag turned on or off by the table's check box: the chips follow, and Browse is filtered again.
-pub fn toggle_tag(window: &MainWindow, tag: &str) {
-    let mut on = tags_on(window);
-    match on.iter().position(|t| t == tag) {
-        Some(at) => {
-            on.remove(at);
-        }
-        None => on.push(tag.to_string()),
+/// The headings' counts and the Clear link.
+fn count_filters(window: &MainWindow) {
+    let lists = ticked(&window.get_filter_lists()).len() as i32;
+    let safety = ticked(&window.get_filter_safety()).len() as i32;
+    let groups = ticked(&window.get_filter_groups()).len() as i32;
+    window.set_groups_on(groups);
+    window.set_filters_on(lists + safety + groups);
+}
+
+/// A box of one of the rail's groups turned on or off: the Installed table and Browse filter again.
+pub fn filter_toggled(window: &MainWindow, group: i32, name: &str) {
+    let flip = |rows: ModelRc<TagRow>| -> ModelRc<TagRow> {
+        ModelRc::new(VecModel::from(rows.iter().map(|t| TagRow { on: if t.text == name { !t.on } else { t.on }, ..t }).collect::<Vec<_>>()))
+    };
+    match group {
+        GROUP_LISTS => window.set_filter_lists(flip(window.get_filter_lists())),
+        GROUP_SAFETY => window.set_filter_safety(flip(window.get_filter_safety())),
+        GROUP_GROUPS => window.set_filter_groups(flip(window.get_filter_groups())),
+        _ => {}
     }
-    let lines = window.get_browse_tags();
-    let tags: Vec<String> = lines.iter().flat_map(|line| line.iter().map(|t| t.text.to_string()).collect::<Vec<_>>()).collect();
-    set_tag_lines(window, &tags, &on);
+    count_filters(window);
     filter_offers(window);
 }
 
-/// A trust word turned on or off by the table's check box.
-pub fn toggle_trust(window: &MainWindow, level: &str) {
-    let rows: Vec<TagRow> = window.get_browse_trust().iter().map(|t| TagRow { on: if t.text == level { !t.on } else { t.on }, ..t }).collect();
-    window.set_browse_trust(ModelRc::new(VecModel::from(rows)));
+/// Clear: every box unticked.
+pub fn filters_clear(window: &MainWindow) {
+    let clear = |rows: ModelRc<TagRow>| -> ModelRc<TagRow> { ModelRc::new(VecModel::from(rows.iter().map(|t| TagRow { on: false, ..t }).collect::<Vec<_>>())) };
+    window.set_filter_lists(clear(window.get_filter_lists()));
+    window.set_filter_safety(clear(window.get_filter_safety()));
+    window.set_filter_groups(clear(window.get_filter_groups()));
+    window.set_browse_installed_only(false);
+    count_filters(window);
     filter_offers(window);
 }
 
@@ -1046,26 +1168,54 @@ fn keys(offer: &OfferLine) -> SortKeys<'_> {
     SortKeys { name: &offer.name, id: &offer.id, date: offer.sort_date, downloads: offer.downloads }
 }
 
-/// Browse's addons for the search (name, summary, author, tags), the list, the tags that are on
-/// (any of them; none on: all) and the sort (`browse_order`), on the UI thread: typing never waits
-/// for the worker. The table adds its own: the trust words on (any; none on: all), installed only,
-/// no list at all, and its column's direction. The open addon's card is kept current, and its
-/// content shown when the window doesn't hold it yet (opened again); one no longer offered closes.
+/// The lists an offer is on, as the Lists group names them.
+fn offer_lists(offer: &OfferLine) -> Vec<String> {
+    let mut lists = Vec::new();
+    if offer.origin != ORIGIN_FORGE {
+        lists.push(LIST_OURS.to_string());
+    }
+    if offer.origin != ORIGIN_OURS {
+        lists.push(LIST_FORGE.to_string());
+    }
+    lists
+}
+
+/// The lists an installed addon is on and SurvivorsForge's level for it, from its badges.
+fn row_lists_and_level(line: &AddonLine) -> (Vec<String>, Vec<String>) {
+    let badges = if line.badges.is_empty() { vec![(line.badge.clone(), line.badge_kind)] } else { line.badges.clone() };
+    let mut lists = Vec::new();
+    let mut level = Vec::new();
+    for (badge, _) in &badges {
+        match badge.strip_prefix("SurvivorsForge · ") {
+            Some(word) => {
+                lists.push(LIST_FORGE.to_string());
+                // "verified (v1.2)": the level alone.
+                level.push(word.split(" (").next().unwrap_or_default().to_string());
+            }
+            None if badge == LIST_FORGE => lists.push(LIST_FORGE.to_string()),
+            None if badge == LIST_OURS => lists.push(LIST_OURS.to_string()),
+            None => {}
+        }
+    }
+    (lists, level)
+}
+
+/// Browse's addons for the rail's search (name, summary, author, groups), its filters (within a
+/// group any ticked box matches, across groups all must; installed only) and the sort
+/// (`browse_order`), on the UI thread: typing never waits for the worker. The Installed table takes
+/// the search and the Lists and Safety groups too; Removed the search only. The open addon's card
+/// is kept current, and its content shown when the window doesn't hold it yet (opened again); one
+/// no longer offered closes. When the selected addon leaves the filtered list, the top row is
+/// selected.
 pub fn filter_offers(window: &MainWindow) {
     let search = window.get_browse_search().to_lowercase();
-    // With SurvivorsForge off (as saved), its choice is greyed: the list falls back to all.
-    if window.get_browse_origin() == ORIGIN_FORGE && !window.get_saved_form().addons_forge {
-        window.set_browse_origin(0);
-    }
-    let origin = window.get_browse_origin();
     let sort = Sort::from_index(window.get_browse_sort());
-    let on = tags_on(window);
-    window.set_browse_tags_on(on.len() as i32);
-    let table = window.get_browse_view() == "table";
-    let trust = if table { trust_on(window) } else { Vec::new() };
-    let installed_only = table && window.get_browse_installed_only();
-    let reverse = table && window.get_browse_sort_reverse();
-    window.set_browse_trust_on(trust.len() as i32 + i32::from(installed_only));
+    let lists = ticked(&window.get_filter_lists());
+    let safety = ticked(&window.get_filter_safety());
+    let groups = ticked(&window.get_filter_groups());
+    let installed_only = window.get_browse_installed_only();
+    let reverse = window.get_browse_view() == "table" && window.get_browse_sort_reverse();
+    let hit = |field: &str| field.to_lowercase().contains(search.as_str());
     // Browse entered or the table picked since the last filter: the table's top row may open.
     let fresh = window.get_table_fresh();
     window.set_table_fresh(false);
@@ -1073,26 +1223,17 @@ pub fn filter_offers(window: &MainWindow) {
         let shown = shown.borrow();
         let Some(view) = shown.as_ref() else { return };
         let offers = &view.addons.offers;
+        let ticked_groups = vec![lists.clone(), safety.clone(), groups.clone()];
         let mut picked: Vec<&OfferLine> = offers
             .iter()
-            .filter(|o| match origin {
-                1 => o.origin != ORIGIN_FORGE,
-                2 => o.origin != ORIGIN_OURS,
-                // The table's two lists, both unticked.
-                ORIGIN_NONE => false,
-                _ => true,
-            })
-            .filter(|o| on.is_empty() || o.tags.iter().any(|t| on.contains(t)))
-            .filter(|o| trust.is_empty() || trust.contains(&o.trust))
+            .filter(|o| shell::filter_match(&ticked_groups, &[offer_lists(o), vec![o.trust.clone()], o.tags.clone()]))
             .filter(|o| !installed_only || o.installed)
-            .filter(|o| {
-                let hit = |field: &String| field.to_lowercase().contains(search.as_str());
-                search.is_empty() || hit(&o.name) || hit(&o.summary) || hit(&o.author) || o.tags.iter().any(hit)
-            })
+            .filter(|o| search.is_empty() || hit(&o.name) || hit(&o.summary) || hit(&o.author) || o.tags.iter().any(|t| hit(t)))
             .collect();
         picked.sort_by(|a, b| browse_order(&keys(a), &keys(b), sort, reverse));
         // The table on screen selects its top row when the addon selected left what it shows, and,
         // at a fresh look (Browse entered, the table picked), when none is selected either.
+        let table = window.get_browse_view() == "table";
         let on_screen = table && window.get_tab() == TAB_ADDONS && window.get_addons_page() == PAGE_BROWSE;
         let pick = if on_screen {
             let ids: Vec<&str> = picked.iter().map(|o| o.id.as_str()).collect();
@@ -1119,7 +1260,38 @@ pub fn filter_offers(window: &MainWindow) {
                 }
             }
         }
+        // The Installed table: the search, and the Lists and Safety groups by the rows' badges.
+        let ticked_rows = vec![lists.clone(), safety.clone()];
+        let rows: Vec<AddonRow> = view
+            .addons
+            .rows
+            .iter()
+            .filter(|r| {
+                let (on_lists, level) = row_lists_and_level(r);
+                shell::filter_match(&ticked_rows, &[on_lists, level])
+            })
+            .filter(|r| search.is_empty() || hit(&r.name) || hit(&r.author))
+            .map(addon_row)
+            .collect();
+        window.set_addon_rows(ModelRc::new(VecModel::from(rows)));
+        // Removed: the search only.
+        let removed: Vec<RemovedRow> = view.addons.removed.iter().filter(|r| search.is_empty() || hit(&r.name)).map(removed_row).collect();
+        window.set_removed_rows(ModelRc::new(VecModel::from(removed)));
     });
+}
+
+/// Home's "Show what it found" for an addon: Browse with its pane open when it is on offer (the
+/// findings are asked for by the caller), else Installed with its row opened.
+pub fn show_scan(window: &MainWindow, id: &str) {
+    let offer = SHOWN.with(|shown| shown.borrow().as_ref().and_then(|v| v.addons.offers.iter().find(|o| o.id == id).map(offer_row)));
+    match offer {
+        Some(offer) => {
+            window.invoke_show_scan(text(id), true);
+            window.invoke_open_offer(offer);
+            filter_offers(window);
+        }
+        None => window.invoke_show_scan(text(id), false),
+    }
 }
 
 /// How many lines the Play card's text takes: about 44 characters fit on one at its width.
@@ -1151,16 +1323,17 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
         tray.set_status(text(&view.status));
         tray.set_sync_on(view.sync_on);
 
-        window.set_dark(view.dark);
-        card.set_dark(view.dark);
-        // Windows draws the title bar: set at the first view (the window may be shown already) and
-        // again when the colours or Windows' own mode change.
+        // The colours and the frame Windows draws: at the first view (the window may be shown
+        // already) and when the theme or Windows' own mode change, and only then: Settings' theme
+        // applies them the moment it is clicked, and a view made before that click mustn't put
+        // the old ones back.
         if old.is_none_or(|o| o.dark != view.dark || o.system_dark != view.system_dark) {
-            win::dark_title_bar(&window.window().window_handle(), view.dark);
+            set_theme(window, card, view.dark);
         }
         window.set_app_released(text(&view.app_released));
-        window.set_version_line(text(&view.version_line));
-        window.set_version_new(view.version_new);
+        window.set_pill_text(text(&view.pill.text));
+        window.set_pill_link(text(&view.pill.link));
+        window.set_pill_kind(view.pill.kind);
         window.set_game_found(view.game_found);
         window.set_game_line(text(&view.game_settings.text));
         window.set_game_line_kind(view.game_settings.kind);
@@ -1175,9 +1348,10 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
         // GitHub, until the answer.
         window.set_checking(view.checking || CHECKS_ASKED.get() > view.checks);
         let news = &view.game_news;
-        window.set_game_news_line(text(&news.line));
         window.set_game_news_new(news.new);
         window.set_game_news_version(text(&news.version));
+        window.set_news_version(text(&view.news_version));
+        window.set_news_more(view.news_more);
         window.set_game_notes_footer(text(&news.footer));
         window.set_game_notes_empty(text(&news.empty));
         window.set_game_news_latest_answer(text(&news.latest_answer));
@@ -1187,48 +1361,86 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
         }
 
         window.set_state(state);
-        window.set_banner(text(&view.banner));
         window.set_busy(view.busy);
         window.set_sync_on(view.sync_on);
-        let [heading, main, detail] = &view.here;
-        window.set_here_title(text(heading));
-        window.set_here_main(text(main));
-        window.set_here_detail(text(detail));
-        let [heading, main, detail] = &view.other;
-        window.set_other_title(text(heading));
-        window.set_other_main(text(main));
-        window.set_other_detail(text(detail));
+        window.set_playing(view.playing);
+        // The rail.
+        let rail = &view.rail;
+        window.set_build_line(text(&rail.build.0));
+        window.set_build_link(rail.build.1);
+        match &rail.progress {
+            Some(line) => {
+                window.set_progress_line(text(&line.text));
+                window.set_progress_dot(dot(line.dot));
+                window.set_progress_amber(line.amber);
+                window.set_progress_wrap(line.wrap);
+            }
+            None => window.set_progress_line("".into()),
+        }
+        match &rail.addons {
+            Some(line) => {
+                window.set_addons_line(text(&line.text));
+                window.set_addons_dot(dot(line.dot));
+            }
+            None => window.set_addons_line("".into()),
+        }
+        window.set_last_line(text(&rail.last));
+        // Home.
+        if old.is_none_or(|o| o.news_blocks != view.news_blocks) {
+            let blocks: Vec<ChangelogBlock> = view.news_blocks.iter().map(|(kind, t)| ChangelogBlock { kind: *kind, text: text(t) }).collect();
+            window.set_news_blocks(ModelRc::new(VecModel::from(blocks)));
+        }
+        if old.is_none_or(|o| o.pcs != view.pcs) {
+            let rows: Vec<PcRow> = view.pcs.iter().map(|p| PcRow { name: text(&p.name), this_pc: p.this_pc, line: text(&p.line) }).collect();
+            window.set_pcs(ModelRc::new(VecModel::from(rows)));
+        }
+        window.set_pcs_week(text(&view.pcs_week));
+        if old.is_none_or(|o| o.questions != view.questions) {
+            window.set_questions(questions(&view.questions));
+        }
         if old.is_none_or(|o| o.recent != view.recent) {
-            let lines: Vec<RecentLine> = view.recent.iter().map(|r| RecentLine { kind: kind_icon(r.kind), text: text(&r.text) }).collect();
+            let lines: Vec<RecentLine> = view.recent.iter().map(|r| RecentLine { kind: kind_icon(r.kind), text: text(&r.text), when: text(&r.when) }).collect();
             window.set_recent(ModelRc::new(VecModel::from(lines)));
         }
-        if old.is_none_or(|o| o.saves != view.saves) {
-            window.set_save_rows(table(&view.saves));
-            window.set_save_row(-1);
+        let playtime = &view.playtime;
+        window.set_playtime_week(text(&playtime.week));
+        window.set_playtime_week_sessions(playtime.week_sessions as i32);
+        window.set_playtime_today(text(&playtime.today));
+        window.set_playtime_all(text(&playtime.all));
+        if old.is_none_or(|o| o.playtime.days != playtime.days) {
+            let days: Vec<DayBar> = playtime.days.iter().map(|(label, share, minutes)| DayBar { label: text(label), share: *share, minutes: *minutes as i32 }).collect();
+            window.set_playtime_days(ModelRc::new(VecModel::from(days)));
         }
-        window.set_saves_note(text(&view.saves_note));
-        window.set_today(text(&view.today));
-        window.set_week(text(&view.week));
-        window.set_all_time(text(&view.all_time));
-        if old.is_none_or(|o| o.pc_times != view.pc_times) {
-            let rows: Vec<PcTime> = view
-                .pc_times
-                .iter()
-                .map(|(name, time, share)| PcTime { name: text(name), time: text(time), share: *share })
-                .collect();
+        if old.is_none_or(|o| o.playtime.per_pc != playtime.per_pc) {
+            let rows: Vec<PcTime> = playtime.per_pc.iter().map(|(name, time, share)| PcTime { name: text(name), time: text(time), share: *share }).collect();
             window.set_pc_times(ModelRc::new(VecModel::from(rows)));
         }
-        if old.is_none_or(|o| o.sessions != view.sessions) {
-            window.set_sessions(strings(&view.sessions));
+        if old.is_none_or(|o| o.playtime.sessions != playtime.sessions) {
+            let rows: Vec<SessionRow> = playtime.sessions.iter().map(|(day, pc, minutes)| SessionRow { day: text(day), pc: text(pc), minutes: text(minutes) }).collect();
+            window.set_sessions(ModelRc::new(VecModel::from(rows)));
         }
+        // Settings' Progress versions.
+        if old.is_none_or(|o| o.saves != view.saves) {
+            let rows: Vec<SaveRow> = view
+                .saves
+                .iter()
+                .map(|s| SaveRow {
+                    version: text(&s.version),
+                    when: text(&s.when),
+                    from: text(&s.from),
+                    size: text(&s.size),
+                    note: text(&s.note),
+                    current: s.current,
+                    can_bring: s.can_bring,
+                })
+                .collect();
+            window.set_save_rows(ModelRc::new(VecModel::from(rows)));
+        }
+        window.set_saves_summary(text(&view.saves_summary));
+        window.set_saves_note(text(&view.saves_note));
 
         let addons = &view.addons;
-        if old.is_none_or(|o| o.addons.rows != addons.rows) {
-            window.set_addon_rows(ModelRc::new(VecModel::from(addons.rows.iter().map(addon_row).collect::<Vec<_>>())));
-        }
-        if old.is_none_or(|o| o.addons.removed != addons.removed) {
-            window.set_removed_rows(ModelRc::new(VecModel::from(addons.removed.iter().map(removed_row).collect::<Vec<_>>())));
-        }
+        let rows_changed = old.is_none_or(|o| o.addons.rows != addons.rows || o.addons.removed != addons.removed);
         if old.is_none_or(|o| o.addons.versions != addons.versions) {
             window.set_versions(addons.versions.as_ref().map(versions_row).unwrap_or_default());
         }
@@ -1268,17 +1480,12 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
             }
             None => window.set_needs_you(false),
         }
+        window.set_needs_note(text(&view.needs_note));
 
         match &view.setup {
             Some(setup) => {
-                if let Some([here, other]) = &setup.pick {
-                    window.set_setup_here(text(here));
-                    window.set_setup_other(text(other));
-                }
-                window.set_setup_pick(setup.pick.is_some());
-                if old.is_none_or(|o| o.setup.is_none()) {
-                    window.set_setup_choice(setup.choice);
-                }
+                window.set_setup_sync_line(text(&setup.sync_line));
+                window.set_setup_sync_warn(setup.sync_warn);
                 window.set_setup(true);
             }
             None => window.set_setup(false),
@@ -1310,7 +1517,7 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
             set_browse_lists(window, &addons.offers);
         }
         *shown.borrow_mut() = Some(view.clone());
-        if offers_changed {
+        if offers_changed || rows_changed {
             filter_offers(window);
         }
         // The panel, when it's for the addon open now (a late answer for another one waits).
@@ -1318,27 +1525,76 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
     });
 }
 
+/// The window's colours and its frame, light or dark: the window, the Play card, and the caption
+/// Windows draws.
+pub fn set_theme(window: &MainWindow, card: &PlayCard, dark: bool) {
+    window.set_dark(dark);
+    card.set_dark(dark);
+    win::paint_frame(&window.window().window_handle(), dark);
+}
+
+/// Settings as the app answers them. Every switch and choice shows the saved value. Of the three
+/// typed fields (the network folder, this PC's name, the game's folder):
+/// - the one this answer refused keeps the text typed, with why under it in red; it stays so until
+///   it is typed in again or applies (another row's answer leaves it as it is);
+/// - the one this answer applied shows the value as saved (a mapped drive as its network path),
+///   and "✓ Saved" lights on its row;
+/// - the one being typed in (`focused-field`: Alt-Tab or a popup doesn't end that, a click on
+///   another control does) is never touched, unless the answer is for the very text it holds;
+/// - any other shows the saved value: text typed there and never applied with Enter goes.
+/// A form that answers no change (at start, at the first start's steps) clears every refusal.
 pub fn apply_form(window: &MainWindow, view: &FormView) {
-    let form = &view.form;
-    window.set_game_dir(text(&form.game_dir));
-    window.set_game_status(text(&view.game_status));
-    window.set_sync_switch(form.sync);
-    window.set_sync_folder(text(&form.folder));
-    window.set_folder_status(text(&view.folder_status));
-    window.set_pc_name(text(&form.pc_name));
-    window.set_name_status(text(&view.name_status));
-    window.set_start_with_windows(form.start_with_windows);
-    window.set_desktop_shortcut(form.desktop_shortcut);
-    window.set_notifications(form.notifications);
-    window.set_addons_auto(form.addons_auto);
-    window.set_addons_shared(form.addons_shared);
-    window.set_addons_forge(form.addons_forge);
-    window.set_pause_when_away(form.pause_when_away);
-    window.set_theme(form.theme);
-    window.set_game_shared(form.game_shared);
-    window.set_browse_view(text(&form.browse_view));
-    window.set_settings_path(text(&view.settings_path));
     let saved = &view.saved;
+    let focused = window.get_focused_field();
+    let answered = view.answered.as_ref();
+    for (key, value) in [("folder", &saved.folder), ("pc-name", &saved.pc_name), ("game-dir", &saved.game_dir)] {
+        let now = field_text(window, key);
+        // Typed in again since the change went out: what the player types now wins.
+        let typed_since = |sent: &str| focused.as_str() == key && now.as_str() != sent;
+        match answered.filter(|a| a.key == key) {
+            Some(a) if !a.why.is_empty() => {
+                if !typed_since(&a.typed) {
+                    set_field(window, key, &a.typed);
+                    set_refusal(window, key, &a.why);
+                }
+            }
+            Some(a) => {
+                if !typed_since(&a.typed) {
+                    set_field(window, key, value);
+                }
+                set_refusal(window, key, "");
+            }
+            None if focused.as_str() == key || (answered.is_some() && !refusal(window, key).is_empty()) => {}
+            None => {
+                set_field(window, key, value);
+                set_refusal(window, key, "");
+            }
+        }
+    }
+    // The sync switch turned on with a network folder that can't be used or doesn't answer: why,
+    // under the folder.
+    if let Some(a) = answered.filter(|a| a.key == "sync" && !a.why.is_empty()) {
+        set_refusal(window, "folder", &a.why);
+    }
+    if let Some(a) = answered.filter(|a| a.applied) {
+        window.invoke_show_saved(text(&a.key));
+    }
+    window.set_game_status(text(&view.game_status));
+    window.set_game_ok(view.game_ok);
+    window.set_sync_switch(saved.sync);
+    window.set_folder_status(text(&view.folder_status));
+    window.set_folder_status_kind(if view.folder_status.starts_with('✓') { 1 } else if view.folder_status.starts_with('✗') { 2 } else { 0 });
+    window.set_start_with_windows(saved.start_with_windows);
+    window.set_desktop_shortcut(saved.desktop_shortcut);
+    window.set_notifications(saved.notifications);
+    window.set_addons_auto(saved.addons_auto);
+    window.set_addons_shared(saved.addons_shared);
+    window.set_addons_forge(saved.addons_forge);
+    window.set_pause_when_away(saved.pause_when_away);
+    window.set_theme(saved.theme);
+    window.set_game_shared(saved.game_shared);
+    window.set_browse_view(text(&saved.browse_view));
+    window.set_settings_path(text(&view.settings_path));
     window.set_saved_form(SettingsForm {
         game_dir: text(&saved.game_dir),
         sync: saved.sync,
@@ -1357,21 +1613,34 @@ pub fn apply_form(window: &MainWindow, view: &FormView) {
     });
 }
 
-pub fn read_form(window: &MainWindow) -> Form {
-    Form {
-        game_dir: window.get_game_dir().to_string(),
-        sync: window.get_sync_switch(),
-        folder: window.get_sync_folder().to_string(),
-        pc_name: window.get_pc_name().to_string(),
-        start_with_windows: window.get_start_with_windows(),
-        desktop_shortcut: window.get_desktop_shortcut(),
-        notifications: window.get_notifications(),
-        addons_auto: window.get_addons_auto(),
-        addons_shared: window.get_addons_shared(),
-        addons_forge: window.get_addons_forge(),
-        pause_when_away: window.get_pause_when_away(),
-        theme: window.get_theme(),
-        game_shared: window.get_game_shared(),
-        browse_view: window.get_browse_view().to_string(),
+fn field_text(window: &MainWindow, key: &str) -> SharedString {
+    match key {
+        "folder" => window.get_sync_folder(),
+        "pc-name" => window.get_pc_name(),
+        _ => window.get_game_dir(),
+    }
+}
+
+fn set_field(window: &MainWindow, key: &str, value: &str) {
+    match key {
+        "folder" => window.set_sync_folder(text(value)),
+        "pc-name" => window.set_pc_name(text(value)),
+        _ => window.set_game_dir(text(value)),
+    }
+}
+
+fn refusal(window: &MainWindow, key: &str) -> SharedString {
+    match key {
+        "folder" => window.get_folder_refused(),
+        "pc-name" => window.get_name_refused(),
+        _ => window.get_game_refused(),
+    }
+}
+
+fn set_refusal(window: &MainWindow, key: &str, why: &str) {
+    match key {
+        "folder" => window.set_folder_refused(text(why)),
+        "pc-name" => window.set_name_refused(text(why)),
+        _ => window.set_game_refused(text(why)),
     }
 }

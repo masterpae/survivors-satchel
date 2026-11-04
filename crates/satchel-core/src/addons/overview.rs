@@ -852,19 +852,28 @@ pub fn table_pick<'a>(open: &str, shown: &[&'a str], fresh: bool) -> Option<&'a 
 
 /// The Installed tab's line an offer of Browse stands for, the one its Uninstall removes: the
 /// addon's own record (`id`); else the one line from its repository (`repo`), or holding its main
-/// folder, whose folders are all the addon's own (`folders`: our catalog's, or SurvivorsForge's).
-/// A line holding other addons' folders too, as a zip pack imported from a file does, is never it:
-/// removing it would remove them all. `None` when no line is it, or more than one could be.
+/// folder, whose folders are exactly the addon's own (`folders`: our catalog's, or
+/// SurvivorsForge's), no more and no fewer (since 0.9.0; 0.8 took a line holding a subset, so a
+/// pack holding only some of the addon's folders could go whole). A line holding other addons'
+/// folders too, as a zip pack imported from a file does, is never it: removing it would remove
+/// them all. `None` when no line is it, or more than one could be.
 pub fn installed_line<'a>(id: &str, repo: &str, folders: &[String], lines: &'a [Line]) -> Option<&'a Line> {
     if let Some(own) = lines.iter().find(|l| l.id == id) {
         return Some(own);
     }
-    let ours = |folder: &String| folders.iter().any(|f| f.eq_ignore_ascii_case(folder));
+    let same = |a: &String, b: &String| a.eq_ignore_ascii_case(b);
+    // Exactly the addon's folders, as Windows names them: every one of the line's is the addon's,
+    // and every one of the addon's is the line's.
+    let exact = |l: &Line| {
+        !l.folders.is_empty()
+            && l.folders.iter().all(|f| folders.iter().any(|o| same(f, o)))
+            && folders.iter().all(|o| l.folders.iter().any(|f| same(f, o)))
+    };
     let main = folders.first();
     let mut candidates = lines.iter().filter(|l| {
         let same_repo = !repo.trim().is_empty() && l.repo.as_deref().is_some_and(|r| forge::same_repo(r, repo));
         let holds_main = main.is_some_and(|m| l.folders.iter().any(|f| f.eq_ignore_ascii_case(m)));
-        (same_repo || holds_main) && !l.folders.is_empty() && l.folders.iter().all(ours)
+        (same_repo || holds_main) && exact(l)
     });
     match (candidates.next(), candidates.next()) {
         (Some(one), None) => Some(one),
@@ -2054,6 +2063,48 @@ mod tests {
         assert_eq!(table_pick("", &[], true), None);
     }
 
+    /// Uninstall takes a line only when its folders are exactly the addon's: a superset (a pack
+    /// holding the addon and more) and a subset (a pack holding only some of a many-folder addon)
+    /// are both left to the Installed tab's Remove….
+    #[test]
+    fn uninstall_takes_an_exact_match_and_leaves_a_superset_a_subset_and_none() {
+        let line = |id: &str, folders: &[&str]| Line {
+            id: id.into(),
+            name: id.into(),
+            badge: None,
+            author: String::new(),
+            repo: Some("threenox/BordoUI".into()),
+            version: "1.0".into(),
+            released: None,
+            standing: Standing::Current,
+            on: true,
+            off: false,
+            switchable: true,
+            folders: folders.iter().map(|f| f.to_string()).collect(),
+            problems: Vec::new(),
+            notes: None,
+            back_to: None,
+            pinned: false,
+            replace_with: None,
+            verdict: Verdict::Go,
+            forge_slug: None,
+            icon_url: None,
+        };
+        let bordo = vec!["BordoUI".to_string(), "BordoUI_Media".to_string()];
+        let found = |lines: &[Line]| installed_line("bordo-ui", "threenox/BordoUI", &bordo, lines).map(|l| l.id.clone());
+        // Exact match, in any case: it.
+        assert_eq!(found(&[line("threenox/bordoui", &["bordoui", "BORDOUI_MEDIA"])]), Some("threenox/bordoui".into()));
+        // A superset: the pack holds a listed addon's folders plus more; never.
+        assert_eq!(found(&[line("file:pack", &["BordoUI", "BordoUI_Media", "LocalClock"])]), None);
+        // A subset: only one of the addon's two folders; never (0.8 took it).
+        assert_eq!(found(&[line("threenox/bordoui-part", &["BordoUI"])]), None);
+        // None at all.
+        assert_eq!(found(&[line("other/thing", &["Other"])]), None);
+        assert_eq!(found(&[]), None);
+        // Its own record is it whatever its folders are.
+        assert_eq!(found(&[line("bordo-ui", &["BordoUI"])]), Some("bordo-ui".into()));
+    }
+
     #[test]
     fn uninstall_removes_only_a_line_that_is_this_addon_alone() {
         let line = |id: &str, repo: Option<&str>, folders: &[&str]| Line {
@@ -2093,7 +2144,7 @@ mod tests {
         // Its own record first, whatever else is there.
         let own = line(id, Some(repo), &["SurvivorUI"]);
         assert_eq!(found(&[pack.clone(), linked.clone(), own]), Some(id.into()));
-        // Two lines from the same repository: the one whose folders are its own, else none.
+        // Two lines from the same repository: the one whose folders are exactly its own, else none.
         let wider = line("morderous/survivorui-plus", Some(repo), &["SurvivorUI", "SurvivorUIPlates"]);
         assert_eq!(found(&[wider.clone(), linked.clone()]), Some("morderous/survivorui".into()));
         let twin = line("morderous/survivorui-copy", Some(repo), &["SurvivorUI"]);

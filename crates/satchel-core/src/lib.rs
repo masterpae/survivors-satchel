@@ -19,5 +19,6 @@ pub mod playtime;
 pub mod savefile;
 pub mod session;
 pub mod settings;
+pub mod shell;
 pub mod signing;
 pub mod state;

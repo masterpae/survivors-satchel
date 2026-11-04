@@ -155,6 +155,8 @@ fn main() {
         Theme::Light => false,
         Theme::Dark => true,
     };
+    // A window closed maximised reopens maximised.
+    let remember_maximised = settings.window.maximised;
     let engine = Engine::new(local, settings, state);
 
     let window = MainWindow::new().expect("the window could not be created");
@@ -170,18 +172,11 @@ fn main() {
     window.on_play(sender(&tx, || Command::Play));
     window.on_sync_now(sender(&tx, || Command::SyncNow));
     window.on_open_folder(sender(&tx, || Command::OpenFolder));
+    window.on_open_game_folder(sender(&tx, || Command::OpenGameFolder));
     window.on_keep_here(sender(&tx, || Command::KeepHere));
     window.on_use_other(sender(&tx, || Command::UseOther));
     window.on_decide_later(sender(&tx, || Command::DecideLater));
-    window.on_default_settings(sender(&tx, || Command::DefaultSettings));
-    {
-        let tx = tx.clone();
-        window.on_show_in_folder(move |row| {
-            if row >= 0 {
-                let _ = tx.send(Command::ShowInFolder(row as usize));
-            }
-        });
-    }
+    window.on_open_saves_folder(sender(&tx, || Command::OpenSavesFolder));
     {
         let tx = tx.clone();
         window.on_bring_back(move |row| {
@@ -190,30 +185,133 @@ fn main() {
             }
         });
     }
+    // Home's Needs-you card: each button is one of today's callbacks; the progress question's
+    // Choose… opens the question over the window, where the choice is made.
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_save_settings(move || {
+        window.on_question_action(move |action, id| {
+            let id: String = id.into();
+            let command = match action {
+                0 => Command::ChooseProgress,
+                1 => Command::GameSettingsChoice(true),
+                2 => Command::GameSettingsChoice(false),
+                3 => Command::GameSettingsOwn,
+                4 => Command::AddonSettingsChoice(id, true),
+                5 => Command::AddonSettingsChoice(id, false),
+                6 => {
+                    if let Some(window) = weak.upgrade() {
+                        view::installing(&window, Some(&id));
+                    }
+                    // An update that waits for an OK, or an addon another PC brings: the worker
+                    // tells the two apart.
+                    Command::OkAnyway(id)
+                }
+                7 => {
+                    if let Some(window) = weak.upgrade() {
+                        view::show_scan(&window, &id);
+                    }
+                    Command::ForgeShowScan(id)
+                }
+                _ => {
+                    if let Some(window) = weak.upgrade() {
+                        window.set_tab(2);
+                    }
+                    return;
+                }
+            };
+            let _ = tx.send(command);
+        });
+    }
+    // Settings apply one change at a time, the moment it's made: a switch or the theme on click, a
+    // typed field with Enter, the network folder's Browse… once a folder is picked. The worker
+    // checks only that row and answers with the form as saved. A click on another control than
+    // the field being typed in ends that field's typing: the answer may then put its saved value
+    // back.
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        window.on_setting_bool(move |key, on| {
             if let Some(window) = weak.upgrade() {
-                let _ = tx.send(Command::SaveSettings(view::read_form(&window)));
+                window.set_focused_field("".into());
             }
+            let _ = tx.send(Command::Setting(key.into(), on.to_string()));
+        });
+    }
+    // The theme: its colours and the frame at once; the worker saves it.
+    {
+        let (tx, weak, card) = (tx.clone(), window.as_weak(), card.as_weak());
+        window.on_setting_theme(move |index| {
+            let (theme, name) = match index {
+                1 => (Theme::Light, "light"),
+                2 => (Theme::Dark, "dark"),
+                _ => (Theme::System, "system"),
+            };
+            if let (Some(window), Some(card)) = (weak.upgrade(), card.upgrade()) {
+                window.set_focused_field("".into());
+                let dark = match theme {
+                    Theme::System => win::apps_use_dark(),
+                    Theme::Light => false,
+                    Theme::Dark => true,
+                };
+                view::set_theme(&window, &card, dark);
+            }
+            let _ = tx.send(Command::Setting("theme".into(), name.into()));
+        });
+    }
+    {
+        let tx = tx.clone();
+        window.on_setting_text(move |key, value| {
+            let _ = tx.send(Command::Setting(key.into(), value.into()));
+        });
+    }
+    // The network folder's Browse…: Windows' folder picker, on a thread of its own; the folder
+    // picked applies at once.
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        window.on_pick_sync_folder(move || {
+            let Some(window) = weak.upgrade() else { return };
+            window.set_focused_field("".into());
+            let owner = win::native_handle(&window.window().window_handle());
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                if let Some(path) = win::pick_folder(owner, "The network folder for your progress") {
+                    let _ = tx.send(Command::Setting("folder".into(), path.display().to_string()));
+                }
+            });
+        });
+    }
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        window.on_restore_defaults(move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_focused_field("".into());
+            }
+            let _ = tx.send(Command::RestoreDefaults);
         });
     }
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
         window.on_detect_game(move || {
             if let Some(window) = weak.upgrade() {
-                let _ = tx.send(Command::DetectGame(view::read_form(&window)));
+                window.set_focused_field("".into());
             }
+            let _ = tx.send(Command::DetectGame);
         });
     }
+    // The first start's Change… and Find it: Windows' folder picker, on a thread of its own.
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_finish_setup(move || {
-            if let Some(window) = weak.upgrade() {
-                let _ = tx.send(Command::FinishSetup(view::read_form(&window), window.get_setup_choice()));
-            }
+        window.on_pick_game_folder(move || {
+            let Some(window) = weak.upgrade() else { return };
+            let owner = win::native_handle(&window.window().window_handle());
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                if let Some(path) = win::pick_folder(owner, "Where is Azeroth Survivors?") {
+                    let _ = tx.send(Command::GameFolderPicked(path));
+                }
+            });
         });
     }
+    window.on_finish_setup(sender(&tx, || Command::FinishSetup));
     // The Addons tab. Rows are named by an id (a record's, a catalog entry's, or `folder:<name>`).
     window.on_addons_check(sender(&tx, || Command::AddonsCheck));
     window.on_addons_update_all(sender(&tx, || Command::AddonsUpdateAll));
@@ -232,14 +330,7 @@ fn main() {
     window.on_install_again(with_id(&tx, Command::InstallAgain));
     window.on_whats_new_seen(sender(&tx, || Command::WhatsNewSeen));
     window.on_game_news_seen(sender(&tx, || Command::GameNewsSeen));
-    {
-        let (tx, weak) = (tx.clone(), window.as_weak());
-        window.on_find_game(move || {
-            if let Some(window) = weak.upgrade() {
-                let _ = tx.send(Command::FindGame(view::read_form(&window)));
-            }
-        });
-    }
+    window.on_find_game(sender(&tx, || Command::FindGame));
     window.on_update_now(sender(&tx, || Command::UpdateNow));
     // Check for updates shows "Checking…" at once; the worker's answer replaces that.
     {
@@ -337,20 +428,20 @@ fn main() {
             }
         });
     }
-    // The table's check boxes: a tag, or a trust word, on or off.
+    // The rail's filters: a box of a group on or off, or every box off.
     {
         let weak = window.as_weak();
-        window.on_browse_tag_toggled(move |tag| {
+        window.on_filter_toggled(move |group, name| {
             if let Some(window) = weak.upgrade() {
-                view::toggle_tag(&window, &tag);
+                view::filter_toggled(&window, group, &name);
             }
         });
     }
     {
         let weak = window.as_weak();
-        window.on_browse_trust_toggled(move |level| {
+        window.on_filters_clear(move || {
             if let Some(window) = weak.upgrade() {
-                view::toggle_trust(&window, &level);
+                view::filters_clear(&window);
             }
         });
     }
@@ -416,20 +507,41 @@ fn main() {
             });
         });
     }
-    // Closing the window only hides it; the Satchel lives on in the tray.
-    window.window().on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+    // Closing the window only hides it; the Satchel lives on in the tray. Whether it was maximised
+    // is remembered, so it reopens so.
+    {
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        window.window().on_close_requested(move || {
+            if let Some(window) = weak.upgrade() {
+                let _ = tx.send(Command::WindowClosed(window.window().is_maximized()));
+            }
+            slint::CloseRequestResponse::HideWindow
+        });
+    }
 
     tray.on_play(sender(&tx, || Command::Play));
     tray.on_sync_now(sender(&tx, || Command::SyncNow));
-    tray.on_quit(sender(&tx, || Command::Quit));
+    // Exit: a window open maximised is remembered so first, as closing it would.
     {
-        let weak = window.as_weak();
+        let (tx, weak) = (tx.clone(), window.as_weak());
+        tray.on_quit(move || {
+            if let Some(window) = weak.upgrade()
+                && window.window().is_visible()
+            {
+                let _ = tx.send(Command::WindowClosed(window.window().is_maximized()));
+            }
+            let _ = tx.send(Command::Quit);
+        });
+    }
+    {
+        let (weak, maximised) = (window.as_weak(), remember_maximised);
         tray.on_open_tab(move |tab| {
             if let Some(window) = weak.upgrade() {
                 if tab >= 0 {
                     window.set_tab(tab);
                 }
                 let _ = window.show();
+                view::place_main(&window, maximised);
                 view::after_show(window.window(), window.get_dark());
                 win::bring_to_front(&window.window().window_handle());
             }
@@ -443,11 +555,13 @@ fn main() {
     {
         let weak = Mutex::new(window.as_weak());
         let play_tx = Mutex::new(tx.clone());
+        let maximised = remember_maximised;
         win::start_message_window(
             move || {
                 if let Ok(weak) = weak.lock() {
-                    let _ = weak.upgrade_in_event_loop(|window| {
+                    let _ = weak.upgrade_in_event_loop(move |window| {
                         let _ = window.show();
+                        view::place_main(&window, maximised);
                         view::after_show(window.window(), window.get_dark());
                         win::bring_to_front(&window.window().window_handle());
                     });
@@ -461,7 +575,7 @@ fn main() {
         );
     }
 
-    let ui = view::Ui { window: window.as_weak(), tray: tray.as_weak(), card: card.as_weak() };
+    let ui = view::Ui { window: window.as_weak(), tray: tray.as_weak(), card: card.as_weak(), maximised: remember_maximised };
     let worker = worker::Worker::new(engine, ui, first_start, tx.clone());
     std::thread::Builder::new()
         .name("satchel-worker".into())
@@ -472,6 +586,7 @@ fn main() {
         let _ = tx.send(Command::Play);
     } else if !tray_only && !first_start {
         let _ = window.show();
+        view::place_main(&window, remember_maximised);
         view::after_show(window.window(), window.get_dark());
     }
     // Up and running: the Satchel an update replaced can go.
