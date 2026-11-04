@@ -76,6 +76,14 @@ export struct AddonRow {
     // player's OK (Update anyway), 2: never (no update button).
     reason: string,
     reason-kind: int,
+    // The Safety column: SurvivorsForge's level (`safety`, coloured by `safety-kind` as its badge)
+    // with "SurvivorsForge" under it (`safety-by`), else its badge's word on one line.
+    safety: string,
+    safety-kind: int,
+    safety-by: string,
+    // The Status column's one line; `status-kind` 0 plain, 1 good news, 2 needs a look, 3 never.
+    status: string,
+    status-kind: int,
 }
 
 // An addon removed on this PC (the Addons tab's Removed page).
@@ -97,7 +105,7 @@ export struct RemovedRow {
 }
 
 // A block of a version's changes: `kind` 0 a paragraph, 1 a heading, 2 a point, 3 a point inside
-// a point.
+// a point, 4 an aside in muted text (the game's notes: "The full notes are on the game's Discord").
 export struct ChangelogBlock {
     kind: int,
     text: string,
@@ -131,10 +139,15 @@ export struct SettingsForm {
 
 // An addon on offer in Browse: one card, list row or table row. `initials-kind` colours its
 // Initials (0 our list, 4 SurvivorsForge only); `icon` stands in for them once the window holds it.
-// `downloads`: "8,382 downloads", or empty. `action`: 0 Install, 1 Install… (it asks first: the
-// panel opens), 2 Installing…, 3 Installed. The table's columns: the lists it is on (`ours`,
-// `forge`), SurvivorsForge's level (`trust`, coloured by `trust-kind` as its badge), its tags in a
-// line, and its downloads as a number (`popularity`, empty when unknown).
+// `downloads`: "8,382 downloads", or empty. `action`, as its pane's: 0 Install, 1 Install anyway
+// (it asks first: a click opens it), 2 Installing…, 3 Installed, 4 Update, 5 Update anyway (asks
+// first, as 1). `installed`: in AddOns (a check mark after its name); `installed-id`: its row in
+// the Installed tab, which Uninstall removes, and `installed-name` that row's name, which the
+// question names (both empty when no row is this addon alone: no Uninstall). The lists it is on
+// (`ours`, `forge`). The table's
+// columns: who vouches for it (`safety`, coloured by `safety-kind` as its badge, with `safety-by`
+// under it), its tags in a line, its downloads as a number (`popularity`, empty when unknown), and
+// the Install column's button (`install-text`, the primary kind when `install-primary`).
 export struct OfferRow {
     id: string,
     initials: string,
@@ -150,12 +163,18 @@ export struct OfferRow {
     action: int,
     reason: string,
     warning: string,
+    installed: bool,
+    installed-id: string,
+    installed-name: string,
     ours: bool,
     forge: bool,
-    trust: string,
-    trust-kind: int,
+    safety: string,
+    safety-kind: int,
+    safety-by: string,
     tags: string,
     popularity: string,
+    install-text: string,
+    install-primary: bool,
 }
 
 // A tag chip in Browse's filters, on or off (none on: every tag).
@@ -171,16 +190,18 @@ export struct BarRow {
     share: float,
 }
 
-// One screenshot in an addon's strip: its shape, as its details give it, and its caption.
+// One screenshot in an addon's pictures row: its shape, as its details give it, its caption, and
+// its thumbnail once the window holds it (empty until then: the placeholder frame shows).
 export struct PictureRow {
     width: int,
     height: int,
     caption: string,
+    thumb: image,
 }
 
 // What Browse shows of the addon opened (the cards' panel, the list's open row, the table's pane);
 // `id` names the offer it is for. `action`: 0 Install, 1 Install anyway, 2 Installing…,
-// 3 Installed, 4 Update, 5 Update anyway (`reason` above 1 and 5). `pictures`: its strip.
+// 3 Installed, 4 Update, 5 Update anyway (`reason` above 1 and 5). `pictures`: its pictures row.
 export struct PanelRow {
     id: string,
     verified-author: bool,
@@ -537,28 +558,129 @@ component Badge inherits Rectangle {
 }
 
 // An install under way, where its button was; `text` names another wait (a check for updates).
+// `small`: in a table's cell, its spinner and words smaller.
 component Installing inherits HorizontalLayout {
     in property <string> text: "Installing…";
-    spacing: 6px;
+    in property <bool> small;
+    spacing: root.small ? 4px : 6px;
     alignment: start;
     // A fixed size overrides the spinner's own 30px minimum.
     Spinner {
         indeterminate: true;
-        width: 20px;
-        height: 20px;
+        width: root.small ? 14px : 20px;
+        height: root.small ? 14px : 20px;
     }
-    Text {
+    if !root.small: Text {
         text: root.text;
+        vertical-alignment: center;
+        color: Look.muted;
+    }
+    if root.small: Text {
+        text: root.text;
+        font-size: 11px;
         vertical-alignment: center;
         color: Look.muted;
     }
 }
 
-// One installed addon; a click opens what can be done with it.
-component AddonItem inherits Rectangle {
+// The green check mark after an installed addon's name.
+component CheckMark inherits Rectangle {
+    width: 12px;
+    height: 12px;
+    accessible-role: image;
+    accessible-label: "installed";
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 2 6.5 L 5 9.5 L 10.5 3";
+        stroke: Look.green;
+        stroke-width: 2px;
+        fill: transparent;
+    }
+}
+
+// A small button in a table's cell: the primary kind filled, the plain one outlined.
+component RowButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 24px;
+    border-radius: 4px;
+    border-width: root.primary ? 0 : 1px;
+    border-color: Palette.border;
+    background: !root.enabled ? Palette.alternate-background
+        : root.primary ? (touch.has-hover ? Palette.accent-background.darker(10%) : Palette.accent-background)
+        : touch.has-hover ? Palette.alternate-background : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        Text {
+            text: root.text;
+            font-size: 11px;
+            font-weight: root.primary ? 600 : 400;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: !root.enabled ? Look.muted : root.primary ? Palette.accent-foreground : Palette.foreground;
+        }
+    }
+    // Greyed, a click on it still does nothing else: it never falls through to the row under it.
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+}
+
+// The Safety column's cell: who vouches for an addon, its level coloured as its badge, and who gave
+// the level under it (`by`, empty: one line).
+component SafetyText inherits VerticalLayout {
+    in property <string> word;
+    in property <int> kind;
+    in property <string> by;
+    alignment: center;
+    Text {
+        text: root.word;
+        font-size: 11px;
+        font-weight: 600;
+        overflow: elide;
+        color: Look.badge-ink(root.kind);
+    }
+    if root.by != "": Text {
+        text: root.by;
+        font-size: 10px;
+        overflow: elide;
+        color: Look.muted;
+    }
+}
+
+// The Installed tab's columns, as wide as its rows and its headings both take them.
+global InstalledColumns {
+    out property <length> safety: 96px;
+    out property <length> version: 120px;
+    out property <length> released: 84px;
+    out property <length> on: 52px;
+    out property <length> spacing: 8px;
+}
+
+// One installed addon, a row of the Installed tab's columns: its square, name and author; who
+// vouches for it; its version, and the one an update brings; when it was released; its status in
+// one line (`status-width` wide); its switch. A click on the row opens what can be done with it
+// under the row: its badges, every line about it whole, the problems, the notes, the buttons and the
+// check boxes.
+component AddonTableRow inherits Rectangle {
     in property <AddonRow> addon;
     in property <bool> open;
     in property <bool> busy;
+    in property <length> status-width;
     callback toggle();
     callback switched(bool);
     callback update();
@@ -577,108 +699,150 @@ component AddonItem inherits Rectangle {
     callback versions();
     // An incoming addon that waits for the player's OK: Install anyway.
     callback install-anyway();
-    border-width: 1px;
-    border-color: root.open ? Palette.accent-background : Palette.border;
-    border-radius: 6px;
+    border-radius: 4px;
+    border-width: root.open ? 1px : 0;
+    border-color: Palette.accent-background;
+    property <color> status-ink: root.addon.status-kind == 1 ? Look.green
+        : root.addon.status-kind == 2 ? Look.amber : root.addon.status-kind == 3 ? Look.red : Look.muted;
 
-    TouchArea {
-        clicked => { root.toggle(); }
-    }
     VerticalLayout {
-        padding: 10px;
-        spacing: 6px;
-        HorizontalLayout {
-            spacing: 10px;
-            VerticalLayout {
-                alignment: start;
-                Initials {
-                    text: root.addon.initials;
-                    kind: root.addon.badge-kind;
-                    icon: root.addon.icon;
-                }
+        Rectangle {
+            height: 44px;
+            border-radius: 4px;
+            background: root.open ? Look.note-paper : row-touch.has-hover ? Palette.alternate-background : transparent;
+            row-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.toggle(); }
             }
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 3px;
+            HorizontalLayout {
+                padding-left: 4px;
+                // Clear of the scroll bar, as the headings are.
+                padding-right: 14px;
+                spacing: InstalledColumns.spacing;
                 HorizontalLayout {
-                    spacing: 6px;
+                    horizontal-stretch: 1;
+                    min-width: 140px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Initials {
+                            text: root.addon.initials;
+                            kind: root.addon.badge-kind;
+                            icon: root.addon.icon;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: root.addon.name;
+                            font-size: 12px;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        if root.addon.author != "": Text {
+                            text: root.addon.author;
+                            font-size: 11px;
+                            color: Look.muted;
+                            overflow: elide;
+                        }
+                    }
+                }
+                SafetyText {
+                    width: InstalledColumns.safety;
+                    word: root.addon.safety;
+                    kind: root.addon.safety-kind;
+                    by: root.addon.safety-by;
+                }
+                HorizontalLayout {
+                    width: InstalledColumns.version;
+                    spacing: 4px;
                     Text {
-                        text: root.addon.name;
-                        font-weight: 600;
+                        text: root.addon.version;
+                        font-size: 11px;
                         overflow: elide;
                         vertical-alignment: center;
                     }
-                    // Every badge that applies; a row without them shows its one badge.
-                    if root.addon.badges.length == 0: VerticalLayout {
-                        alignment: center;
-                        Badge {
-                            text: root.addon.badge;
-                            kind: root.addon.badge-kind;
-                        }
-                    }
-                    for badge in root.addon.badges: VerticalLayout {
-                        alignment: center;
-                        Badge {
-                            text: badge.text;
-                            kind: badge.kind;
-                        }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                HorizontalLayout {
-                    spacing: 4px;
-                    Text {
-                        text: (root.addon.author != "" ? root.addon.author + " · " : "") + root.addon.version
-                            + (root.addon.released != "" ? " · " + root.addon.released : "");
-                        font-size: 12px;
-                        color: Look.muted;
-                        overflow: elide;
-                    }
                     if root.addon.update != "": Text {
                         text: "→ " + root.addon.update;
-                        font-size: 12px;
+                        font-size: 11px;
                         font-weight: 600;
                         color: Look.green;
+                        overflow: elide;
+                        vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
                 }
-                if root.addon.state != "": Text {
-                    text: root.addon.state;
+                Text {
+                    width: InstalledColumns.released;
+                    text: root.addon.released;
                     font-size: 11px;
-                    wrap: word-wrap;
-                    color: root.addon.state-kind == 1 ? Look.green : root.addon.state-kind == 2 ? Look.amber : Look.muted;
+                    overflow: elide;
+                    vertical-alignment: center;
                 }
-                // SurvivorsForge's word: it waits for the player's OK (amber), or never (red).
-                if root.addon.reason != "": Text {
-                    text: root.addon.reason;
+                Text {
+                    width: root.status-width;
+                    text: root.addon.status;
                     font-size: 11px;
-                    wrap: word-wrap;
-                    color: root.addon.reason-kind == 2 ? Look.red : Look.amber;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    color: root.status-ink;
                 }
-                if root.addon.share != "": Text {
-                    text: root.addon.share;
-                    font-size: 11px;
-                    wrap: word-wrap;
-                    color: root.addon.share-kind == 1 ? Look.green : root.addon.share-kind == 2 ? Look.amber : Look.muted;
-                }
-                if root.addon.problem != "" && !root.open: Text {
-                    text: "⚠ " + root.addon.problem;
-                    font-size: 11px;
-                    wrap: word-wrap;
-                    color: Look.amber;
-                }
-            }
-            if !root.addon.incoming: VerticalLayout {
-                alignment: start;
-                Switch {
-                    checked: root.addon.on;
-                    enabled: root.addon.switchable && !root.busy;
-                    toggled => { root.switched(self.checked); }
+                VerticalLayout {
+                    width: InstalledColumns.on;
+                    alignment: center;
+                    if !root.addon.incoming: HorizontalLayout {
+                        alignment: end;
+                        Switch {
+                            checked: root.addon.on;
+                            enabled: root.addon.switchable && !root.busy;
+                            toggled => { root.switched(self.checked); }
+                        }
+                    }
                 }
             }
         }
         if root.open: VerticalLayout {
+            padding: 10px;
+            padding-top: 6px;
             spacing: 6px;
+            // Every badge that applies; a row without them shows its one badge.
+            HorizontalLayout {
+                spacing: 4px;
+                if root.addon.badges.length == 0: VerticalLayout {
+                    alignment: center;
+                    Badge {
+                        text: root.addon.badge;
+                        kind: root.addon.badge-kind;
+                    }
+                }
+                for badge in root.addon.badges: VerticalLayout {
+                    alignment: center;
+                    Badge {
+                        text: badge.text;
+                        kind: badge.kind;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            // Every line about it, whole: where it stands, SurvivorsForge's word, the other PCs.
+            if root.addon.state != "": Text {
+                text: root.addon.state;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: root.addon.state-kind == 1 ? Look.green : root.addon.state-kind == 2 ? Look.amber : Look.muted;
+            }
+            if root.addon.reason != "": Text {
+                text: root.addon.reason;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: root.addon.reason-kind == 2 ? Look.red : Look.amber;
+            }
+            if root.addon.share != "": Text {
+                text: root.addon.share;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: root.addon.share-kind == 1 ? Look.green : root.addon.share-kind == 2 ? Look.amber : Look.muted;
+            }
             if root.addon.problems != "": Text {
                 text: root.addon.problems;
                 font-size: 12px;
@@ -875,7 +1039,8 @@ component OfferItem inherits Rectangle {
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
-            if root.offer.action == 3: Text {
+            // Installed, with a newer version or not (its panel has Update).
+            if root.offer.action >= 3: Text {
                 text: "Installed";
                 font-size: 12px;
                 color: Look.green;
@@ -1033,65 +1198,79 @@ component ViewButton inherits Rectangle {
     }
 }
 
-// An addon's screenshots: "Pictures · N" over a frame for each of the first ones that fit the
-// width it has (`room`), and "+N" for the rest. No picture is fetched before the viewer opens, so
-// the frames hold a small landscape; a click opens the viewer on that picture.
-component PicturesStrip inherits VerticalLayout {
+// An addon's pictures as a row of thumbnails: as many 88 × 55 px frames as fit the width it has
+// (`room`; four at the narrowest pane, five from about 490 px), the last one carrying "+N" over it
+// when more pictures exist. Their thumbnails come from the app, asked for as soon as the row shows
+// (`frames` says how many frames it shows); until one is here, or when it couldn't be decoded, its
+// frame holds a small landscape. A click on a frame opens the viewer on that picture.
+component PicturesRow inherits HorizontalLayout {
     in property <[PictureRow]> pictures;
     in property <length> room: 400px;
     callback open(int);
-    // Frames of 64 px and their gaps, leaving room for the "+N".
-    property <int> fit: max(1, floor((root.room - 34px) / 70px));
+    callback frames(int);
+    // Frames of 88 px and their 6 px gaps.
+    property <int> fit: max(1, floor((root.room + 6px) / 94px));
     property <int> shown: min(root.fit, root.pictures.length);
-    spacing: 4px;
-    Text {
-        text: "Pictures · " + root.pictures.length;
-        font-weight: 600;
-    }
-    HorizontalLayout {
-        spacing: 6px;
-        alignment: start;
-        for i in root.shown: Rectangle {
-            width: 64px;
-            height: 42px;
-            border-radius: 4px;
-            border-width: 1px;
-            border-color: frame-touch.has-hover ? Palette.accent-background : Palette.border;
-            background: Palette.alternate-background;
-            accessible-role: button;
-            accessible-label: "Picture " + (i + 1) + (root.pictures[i].caption != "" ? ": " + root.pictures[i].caption : "");
-            // A sun and a hill.
+    property <int> more: root.pictures.length - root.shown;
+    init => { root.frames(root.shown); }
+    changed shown => { root.frames(root.shown); }
+    spacing: 6px;
+    alignment: start;
+    for i in root.shown: Rectangle {
+        width: 88px;
+        height: 55px;
+        background: Palette.alternate-background;
+        accessible-role: button;
+        accessible-label: "Picture " + (i + 1) + (root.pictures[i].caption != "" ? ": " + root.pictures[i].caption : "")
+            + (i == root.shown - 1 && root.more > 0 ? ", and " + root.more + " more" : "");
+        // Until its thumbnail is here: a sun and a hill.
+        if root.pictures[i].thumb.width == 0: Rectangle {
             Rectangle {
-                x: parent.width / 2 + 4px;
-                y: 9px;
-                width: 6px;
-                height: 6px;
-                border-radius: 3px;
+                x: parent.width / 2 + 6px;
+                y: 13px;
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
                 background: Look.muted;
             }
             Path {
-                x: parent.width / 2 - 10px;
-                y: 16px;
-                width: 20px;
-                height: 14px;
+                x: parent.width / 2 - 14px;
+                y: 22px;
+                width: 28px;
+                height: 20px;
                 viewbox-width: 20;
                 viewbox-height: 14;
                 commands: "M 0 14 L 6 5 L 10 10 L 13 7 L 20 14 Z";
                 fill: Look.muted;
             }
-            frame-touch := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.open(i); }
+        }
+        if root.pictures[i].thumb.width > 0: Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.pictures[i].thumb;
+            image-fit: cover;
+        }
+        // The last frame, when more pictures exist: how many more, over it.
+        if i == root.shown - 1 && root.more > 0: Rectangle {
+            background: #0b0e13a8;
+            Text {
+                text: "+" + root.more;
+                font-size: 15px;
+                font-weight: 700;
+                color: #ffffff;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
         }
-        if root.pictures.length > root.shown: VerticalLayout {
-            alignment: center;
-            LinkText {
-                text: "+" + (root.pictures.length - root.shown);
-                ink: Look.blue;
-                font-size: 12px;
-                clicked => { root.open(root.shown); }
-            }
+        // The frame's edge, over the picture.
+        Rectangle {
+            border-width: 1px;
+            border-radius: 3px;
+            border-color: frame-touch.has-hover ? Palette.accent-background : Palette.border;
+        }
+        frame-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.open(i); }
         }
     }
 }
@@ -1383,6 +1562,8 @@ component OfferListItem inherits Rectangle {
     callback toggle();
     callback toggle-more();
     callback picture(int);
+    // Its pictures row shows this many frames.
+    callback frames(int);
     callback versions();
     callback page();
     callback install();
@@ -1449,7 +1630,8 @@ component OfferListItem inherits Rectangle {
                     overflow: elide;
                 }
             }
-            if !root.open && root.action == 3: VerticalLayout {
+            // Installed, with a newer version or not (the row opened has Update).
+            if !root.open && root.action >= 3: VerticalLayout {
                 alignment: center;
                 Text {
                     text: "Installed";
@@ -1473,6 +1655,12 @@ component OfferListItem inherits Rectangle {
                 wrap: word-wrap;
                 color: Look.amber;
             }
+            if root.ready && root.panel.pictures.length > 0: PicturesRow {
+                pictures: root.panel.pictures;
+                room: root.width - 16px;
+                open(i) => { root.picture(i); }
+                frames(n) => { root.frames(n); }
+            }
             AboutBlock {
                 panel: root.panel;
                 ready: root.ready;
@@ -1482,17 +1670,12 @@ component OfferListItem inherits Rectangle {
                 bars: false;
                 toggle-more => { root.toggle-more(); }
             }
-            if root.ready && root.panel.pictures.length > 0: PicturesStrip {
-                pictures: root.panel.pictures;
-                room: root.width - 16px;
-                open(i) => { root.picture(i); }
-            }
             if root.ready && root.panel.scan != "": Text {
                 text: "Scan: " + root.panel.scan;
                 font-size: 12px;
                 overflow: elide;
             }
-            if root.offer.warning != "" && root.action != 3: Text {
+            if root.offer.warning != "" && root.action < 3: Text {
                 text: "⚠ " + root.offer.warning;
                 font-size: 11px;
                 wrap: word-wrap;
@@ -1561,13 +1744,30 @@ component TableHead inherits Rectangle {
     }
 }
 
-// One addon in Browse's table: the square and its name, the lists it is on, its version,
-// SurvivorsForge's level, its tags (`wide` only), Last updated and Popularity. A click selects it.
+// Browse's table's columns, as wide as its rows and its headings both take them.
+global TableColumns {
+    out property <length> safety: 96px;
+    out property <length> version: 54px;
+    out property <length> tags: 120px;
+    out property <length> updated: 80px;
+    out property <length> popularity: 64px;
+    out property <length> install: 84px;
+    out property <length> spacing: 6px;
+}
+
+// One addon in Browse's table: the square, its name (a check mark after it when it is installed)
+// and author; who vouches for it; its version; its tags (`wide` only); Last updated; Popularity;
+// and its Install column's button. A click on the row selects it; a click on the button does what
+// it says, and selects the row only where the pane must say why it asks first (Install…, Update…).
 component OfferTableRow inherits Rectangle {
     in property <OfferRow> offer;
     in property <bool> current;
     in property <bool> wide;
+    in property <bool> busy;
     callback select();
+    callback install();
+    callback update();
+    callback uninstall();
     height: 44px;
     border-radius: 4px;
     background: root.current ? Look.note-paper : row-touch.has-hover ? Palette.alternate-background : transparent;
@@ -1580,7 +1780,7 @@ component OfferTableRow inherits Rectangle {
         padding-left: 4px;
         // Clear of the scroll bar, as the headings are.
         padding-right: 14px;
-        spacing: 4px;
+        spacing: TableColumns.spacing;
         HorizontalLayout {
             horizontal-stretch: 1;
             min-width: 110px;
@@ -1595,11 +1795,20 @@ component OfferTableRow inherits Rectangle {
             }
             VerticalLayout {
                 alignment: center;
-                Text {
-                    text: root.offer.name;
-                    font-size: 12px;
-                    font-weight: 600;
-                    overflow: elide;
+                HorizontalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: root.offer.name;
+                        font-size: 12px;
+                        font-weight: 600;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    if root.offer.installed: VerticalLayout {
+                        alignment: center;
+                        CheckMark {}
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                 }
                 Text {
                     text: root.offer.author;
@@ -1609,42 +1818,21 @@ component OfferTableRow inherits Rectangle {
                 }
             }
         }
-        VerticalLayout {
-            width: 80px;
-            alignment: center;
-            if root.offer.ours: Text {
-                text: "Discord Verified";
-                font-size: 10px;
-                font-weight: 600;
-                color: Look.badge-ink(0);
-                overflow: elide;
-            }
-            if root.offer.forge: Text {
-                text: "SurvivorsForge";
-                font-size: 10px;
-                font-weight: 600;
-                color: Look.badge-ink(4);
-                overflow: elide;
-            }
+        SafetyText {
+            width: TableColumns.safety;
+            word: root.offer.safety;
+            kind: root.offer.safety-kind;
+            by: root.offer.safety-by;
         }
         Text {
-            width: 54px;
+            width: TableColumns.version;
             text: root.offer.version;
             font-size: 11px;
             overflow: elide;
             vertical-alignment: center;
         }
-        Text {
-            width: 88px;
-            text: root.offer.trust;
-            font-size: 11px;
-            font-weight: 600;
-            overflow: elide;
-            vertical-alignment: center;
-            color: Look.badge-ink(root.offer.trust-kind);
-        }
         if root.wide: Text {
-            width: 120px;
+            width: TableColumns.tags;
             text: root.offer.tags;
             font-size: 11px;
             color: Look.muted;
@@ -1652,55 +1840,93 @@ component OfferTableRow inherits Rectangle {
             vertical-alignment: center;
         }
         Text {
-            width: 80px;
+            width: TableColumns.updated;
             text: root.offer.date;
             font-size: 11px;
             overflow: elide;
             vertical-alignment: center;
         }
         Text {
-            width: 64px;
+            width: TableColumns.popularity;
             text: root.offer.popularity;
             font-size: 11px;
             horizontal-alignment: right;
             overflow: elide;
             vertical-alignment: center;
         }
+        VerticalLayout {
+            width: TableColumns.install;
+            alignment: center;
+            if root.offer.action == 2: Installing {
+                small: true;
+                text: root.offer.install-text;
+            }
+            // Installed, and the Installed tab's row isn't known: no Uninstall to offer.
+            if root.offer.action == 3 && root.offer.installed-id == "": Text {
+                text: "Installed";
+                font-size: 11px;
+                color: Look.green;
+            }
+            if root.offer.action != 2 && root.offer.install-text != "" && !(root.offer.action == 3 && root.offer.installed-id == ""): RowButton {
+                text: root.offer.install-text;
+                primary: root.offer.install-primary;
+                enabled: !root.busy;
+                clicked => {
+                    if (root.offer.action == 0) {
+                        root.install();
+                    } else if (root.offer.action == 3) {
+                        root.uninstall();
+                    } else if (root.offer.action == 4) {
+                        root.update();
+                    } else {
+                        // Install… and Update…: the pane says why it asks, with its button.
+                        root.select();
+                    }
+                }
+            }
+        }
     }
 }
 
-// When the game isn't on this PC, or the Satchel can't find it: the way to it.
-component NoGame inherits VerticalBox {
+// When the game isn't on this PC, or the Satchel can't find it: the way to it, in a column of the
+// other tabs' width, centred.
+component NoGame inherits Rectangle {
     callback find();
     callback choose();
     callback get-game();
-    alignment: center;
-    Text {
-        text: "Azeroth Survivors isn't here";
-        font-size: 20px;
-        font-weight: 700;
-        horizontal-alignment: center;
-    }
-    Text {
-        text: "The Satchel can't find the game on this PC. If it's installed, let the Satchel look for it, or choose its folder. If it isn't, it comes from the game's website.";
-        wrap: word-wrap;
-        horizontal-alignment: center;
-        color: Look.muted;
-    }
-    HorizontalBox {
+    VerticalBox {
+        width: min(680px, parent.width);
+        height: parent.height;
+        x: (parent.width - self.width) / 2;
+        y: 0;
         alignment: center;
-        Button {
-            text: "Find it";
-            primary: true;
-            clicked => { root.find(); }
+        Text {
+            text: "Azeroth Survivors isn't here";
+            font-size: 20px;
+            font-weight: 700;
+            horizontal-alignment: center;
         }
-        Button {
-            text: "Choose its folder";
-            clicked => { root.choose(); }
+        Text {
+            text: "The Satchel can't find the game on this PC. If it's installed, let the Satchel look for it, or choose its folder. If it isn't, it comes from the game's website.";
+            wrap: word-wrap;
+            horizontal-alignment: center;
+            color: Look.muted;
         }
-        Button {
-            text: "Get the game";
-            clicked => { root.get-game(); }
+        HorizontalBox {
+            alignment: center;
+            Button {
+                text: "Find it";
+                primary: true;
+                clicked => { root.find(); }
+            }
+            Button {
+                text: "Choose its folder";
+                clicked => { root.choose(); }
+            }
+            Button {
+                text: "Get the game";
+                clicked => { root.get-game(); }
+            }
         }
     }
 }
@@ -1785,6 +2011,28 @@ component RemovedItem inherits Rectangle {
     }
 }
 
+// A version's blocks, one under the other: What's new's and the game's patch notes'.
+component BlockLines inherits VerticalLayout {
+    in property <[ChangelogBlock]> blocks;
+    spacing: 4px;
+    for block in root.blocks: HorizontalLayout {
+        padding-left: block.kind == 3 ? 30px : block.kind == 2 ? 12px : 0px;
+        padding-top: block.kind == 1 ? 6px : 0px;
+        spacing: 6px;
+        if block.kind == 2 || block.kind == 3: Text {
+            text: block.kind == 3 ? "–" : "•";
+            color: Look.muted;
+        }
+        Text {
+            text: block.text;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            font-weight: block.kind == 1 ? 600 : 400;
+            color: block.kind == 4 ? Look.muted : Palette.foreground;
+        }
+    }
+}
+
 // One version in What's new; a click opens what changed in it.
 component ChangelogItem inherits Rectangle {
     in property <ChangelogEntry> entry;
@@ -1823,23 +2071,48 @@ component ChangelogItem inherits Rectangle {
                 vertical-alignment: center;
             }
         }
-        if root.open: VerticalLayout {
-            spacing: 4px;
-            for block in root.entry.blocks: HorizontalLayout {
-                padding-left: block.kind == 3 ? 30px : block.kind == 2 ? 12px : 0px;
-                padding-top: block.kind == 1 ? 6px : 0px;
-                spacing: 6px;
-                if block.kind >= 2: Text {
-                    text: block.kind == 3 ? "–" : "•";
-                    color: Look.muted;
-                }
-                Text {
-                    text: block.text;
-                    wrap: word-wrap;
-                    horizontal-stretch: 1;
-                    font-weight: block.kind == 1 ? 600 : 400;
+        if root.open: BlockLines {
+            blocks: root.entry.blocks;
+        }
+    }
+}
+
+// One version of the game's patch notes, open as it is: the version and its date (when one is
+// known), the newest build marked, then its paragraph and lines.
+component GameNoteItem inherits Rectangle {
+    in property <ChangelogEntry> entry;
+    in property <bool> current;
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 6px;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.entry.version;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            if root.current: VerticalLayout {
+                alignment: center;
+                Badge {
+                    text: "Newest build";
+                    kind: 0;
                 }
             }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: root.entry.date;
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+            }
+        }
+        if root.entry.blocks.length > 0: BlockLines {
+            blocks: root.entry.blocks;
         }
     }
 }
@@ -1859,25 +2132,30 @@ component Field inherits VerticalLayout {
     }
 }
 
-// The table's selected addon: its name and badges, the tabs About · Pictures · Versions · Safety ·
-// Files (Safety: the scan and what it found; Files: its folders), its button at the foot. Beside
-// the table from about 1,000 px (✕ closes it); narrower, in the table's place (Back).
+// The table's selected addon, beside the table: its name and badges, the tabs About and Versions,
+// its button at the foot; ✕ closes it. About: its pictures row, what it does (its longer text
+// behind "more"), one Safety line (SurvivorsForge's scan of the version shown, with what it found
+// when asked; for an addon on our list it doesn't scan, the game's verified-addons channel), one
+// Folders line, then What's new and its downloads per version.
 component TablePane inherits Rectangle {
     in property <OfferRow> offer;
     in property <PanelRow> panel;
     // The app's content for this addon has come.
     in property <bool> ready;
-    in property <bool> two;
     in-out property <int> tab;
     in property <bool> more-open;
     in property <bool> busy;
     in property <VersionsRow> versions;
     in property <bool> versions-ready;
+    // The day the built-in list was last compared with the game's verified-addons channel.
+    in property <string> discord-checked;
     callback close();
     callback tab-picked(int);
     callback toggle-more();
     callback show-scan();
     callback picture(int);
+    // Its pictures row shows this many frames.
+    callback frames(int);
     callback page();
     callback install();
     callback install-anyway();
@@ -1903,13 +2181,6 @@ component TablePane inherits Rectangle {
         spacing: 8px;
         HorizontalLayout {
             spacing: 10px;
-            if !root.two: VerticalLayout {
-                alignment: start;
-                Button {
-                    text: "‹ Back";
-                    clicked => { root.close(); }
-                }
-            }
             VerticalLayout {
                 alignment: start;
                 Initials {
@@ -1935,7 +2206,7 @@ component TablePane inherits Rectangle {
                     color: Look.muted;
                 }
             }
-            if root.two: VerticalLayout {
+            VerticalLayout {
                 alignment: start;
                 Button {
                     text: "✕";
@@ -1962,28 +2233,13 @@ component TablePane inherits Rectangle {
                 clicked => { root.pick(0); }
             }
             Chip {
-                text: root.ready && root.panel.pictures.length > 0 ? "Pictures · " + root.panel.pictures.length : "Pictures";
+                text: "Versions";
                 active: root.tab == 1;
                 clicked => { root.pick(1); }
             }
-            Chip {
-                text: "Versions";
-                active: root.tab == 2;
-                clicked => { root.pick(2); }
-            }
-            Chip {
-                text: "Safety";
-                active: root.tab == 3;
-                clicked => { root.pick(3); }
-            }
-            Chip {
-                text: "Files";
-                active: root.tab == 4;
-                clicked => { root.pick(4); }
-            }
             Rectangle { horizontal-stretch: 1; }
         }
-        if root.tab != 2: pane-scroll := ScrollView {
+        if root.tab == 0: pane-scroll := ScrollView {
             vertical-stretch: 1;
             content-height: pane-list.preferred-height;
             pane-list := VerticalLayout {
@@ -2001,48 +2257,68 @@ component TablePane inherits Rectangle {
                     wrap: word-wrap;
                     color: Look.amber;
                 }
-                if root.tab == 0: AboutBlock {
+                if root.ready && root.panel.pictures.length > 0: PicturesRow {
+                    pictures: root.panel.pictures;
+                    room: pane-scroll.visible-width;
+                    open(i) => { root.picture(i); }
+                    frames(n) => { root.frames(n); }
+                }
+                AboutBlock {
                     panel: root.panel;
                     ready: root.ready;
                     about: root.about;
                     more-open: root.more-open;
+                    notes: false;
+                    bars: false;
                     toggle-more => { root.toggle-more(); }
                 }
-                if root.tab == 1 && root.ready && root.panel.pictures.length > 0: PicturesStrip {
-                    pictures: root.panel.pictures;
-                    room: pane-scroll.visible-width;
-                    open(i) => { root.picture(i); }
+                if root.ready && root.panel.scan != "": VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: "Safety: " + root.panel.scan;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    if root.panel.scan-more: HorizontalLayout {
+                        LinkText {
+                            text: "Show what it found";
+                            ink: Look.blue;
+                            font-size: 12px;
+                            clicked => { root.show-scan(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    for finding in root.panel.findings: Text {
+                        text: "• " + finding;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
                 }
-                if root.tab == 1 && root.ready && root.panel.pictures.length == 0: Text {
-                    text: "No pictures of it from SurvivorsForge.";
+                if root.ready && root.panel.scan == "" && root.offer.ours: Text {
+                    text: "Safety: Discord Verified · on the game's verified-addons channel"
+                        + (root.discord-checked != "" ? ", checked on " + root.discord-checked : "");
                     font-size: 12px;
                     wrap: word-wrap;
-                    color: Look.muted;
                 }
-                if root.tab == 3 && root.ready && root.panel.scan != "": ScanBlock {
-                    panel: root.panel;
-                    show-scan => { root.show-scan(); }
-                }
-                if root.tab == 3 && root.ready && root.panel.scan == "": Text {
-                    text: "No scan of it from SurvivorsForge.";
-                    font-size: 12px;
-                    wrap: word-wrap;
-                    color: Look.muted;
-                }
-                if root.tab == 4 && root.ready: Text {
+                if root.ready: Text {
                     text: root.panel.folders != "" ? root.panel.folders : "Its folders show once it is installed.";
                     font-size: 12px;
                     wrap: word-wrap;
                 }
-                if root.tab == 4 && root.offer.warning != "" && root.action != 3: Text {
+                if root.offer.warning != "" && root.action < 3: Text {
                     text: "⚠ " + root.offer.warning;
                     font-size: 11px;
                     wrap: word-wrap;
                     color: Look.amber;
                 }
+                AboutBlock {
+                    panel: root.panel;
+                    ready: root.ready;
+                    about-part: false;
+                }
             }
         }
-        if root.tab == 2: VersionsList {
+        if root.tab == 1: VersionsList {
             vertical-stretch: 1;
             versions: root.versions;
             ready: root.versions-ready;
@@ -2078,6 +2354,40 @@ component TablePane inherits Rectangle {
                 install-anyway => { root.install-anyway(); }
                 update => { root.update(); }
                 update-anyway => { root.update-anyway(); }
+            }
+        }
+    }
+}
+
+// Previous or next (`next`) on the viewer's picture: a round button on its edge, greyed at the
+// ends. Greyed, a click on it still does nothing else: it never closes the viewer.
+component RoundButton inherits Rectangle {
+    in property <bool> next;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    background: !root.enabled ? #00000033 : touch.has-hover ? #000000c4 : #00000094;
+    accessible-role: button;
+    accessible-label: root.next ? "Next picture" : "Previous picture";
+    Path {
+        width: 20px;
+        height: 20px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        commands: root.next ? "M 7.5 4 L 13.5 10 L 7.5 16" : "M 12.5 4 L 6.5 10 L 12.5 16";
+        stroke: root.enabled ? #ffffff : #ffffff59;
+        stroke-width: 2.5px;
+        fill: transparent;
+    }
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
             }
         }
     }
@@ -2126,14 +2436,15 @@ export component MainWindow inherits Window {
     callback addons-check();
     callback addons-update-all();
     callback addons-open-folder();
-    // Browse, as cards: the ones shown are filtered on the UI thread (`browse-filter`) by the
-    // search, the list (`browse-origin`: 0 all, 1 Discord Verified, 2 SurvivorsForge) and the tags
-    // that are on (none on: all), and sorted by `browse-sort` (0 name, 1 last updated, 2 popularity).
+    // Browse: the ones shown are filtered on the UI thread (`browse-filter`) by the search, the list
+    // (`browse-origin`: 0 all, 1 Discord Verified, 2 SurvivorsForge) and the tags that are on (none
+    // on: all), and sorted by `browse-sort` (0 name, 1 last updated, 2 popularity, the one it
+    // starts with: the most downloads first).
     in property <[OfferRow]> offer-rows;
     in property <string> browse-note;
     in-out property <string> browse-search;
     in-out property <int> browse-origin: 0;
-    in-out property <int> browse-sort: 0;
+    in-out property <int> browse-sort: 2;
     // The tag chips, line by line (made for the narrowest window; Slint has no wrapping layout);
     // a click turns one on or off where it is.
     in-out property <[[TagRow]]> browse-tags;
@@ -2174,15 +2485,34 @@ export component MainWindow inherits Window {
     callback browse-close();
     callback browse-install-anyway(string);
     callback forge-show-scan(string);
-    // Browse's three views, one shown at a time (`browse-view`: list, cards, table), as kept in
-    // settings.toml; the switch tells the app.
-    in-out property <string> browse-view: "cards";
+    // Browse's three views, one shown at a time (`browse-view`: list, cards, table, the default),
+    // as kept in settings.toml; the switch tells the app.
+    in-out property <string> browse-view: "table";
     callback browse-view-changed(string);
     function pick-view(view: string) {
         root.browse-view = view;
         root.browse-view-changed(view);
+        // The table picked: its top row opens when nothing is.
+        root.table-fresh = view == "table";
         root.browse-filter();
     }
+    // An addon opened in Browse, as a click on it opens it: its panel, row or pane, and the app
+    // asked for what it shows. The app opens the table's top row with it too.
+    public function open-offer(offer: OfferRow) {
+        root.panel-about-open = false;
+        root.panel-offer = offer;
+        root.browse-panel-id = offer.id;
+        root.browse-open(offer.id);
+        if (root.browse-view == "table" && root.table-tab == 1) {
+            root.versions-id = offer.id;
+            root.versions-open(offer.id);
+        }
+    }
+    // Browse entered, or the table picked, since the last filter: the app opens the table's top
+    // row when no addon is open (`browse-filter`).
+    in-out property <bool> table-fresh;
+    // The open addon's pictures row shows this many frames: the app asks for their thumbnails.
+    callback thumbs-shown(string, int);
     // A table column's heading clicked: sorted by it, or the other way round when it already is.
     function sort-table(column: int) {
         if (root.browse-sort == column) {
@@ -2195,7 +2525,7 @@ export component MainWindow inherits Window {
     }
     // The table: its column's direction (the other way round from each sort's own when set), its
     // own filters (the trust words on, any of them; installed only) and the tags as check boxes;
-    // two panes from about 1,000 px, else the selected addon in place of the table, with Back.
+    // the selected addon beside it, at every size the window takes.
     in-out property <bool> browse-sort-reverse;
     in-out property <[TagRow]> browse-trust;
     in property <int> browse-trust-on;
@@ -2203,13 +2533,20 @@ export component MainWindow inherits Window {
     in-out property <[[TagRow]]> browse-tag-checks;
     callback browse-tag-toggled(string);
     callback browse-trust-toggled(string);
-    property <bool> table-two: root.width >= 1000px;
-    // The selected addon's tab: 0 About, 1 Pictures, 2 Versions, 3 Safety, 4 Files.
+    // The selected addon's tab: 0 About, 1 Versions.
     in-out property <int> table-tab: 0;
     // The Addons tab, or its Installed or Browse page, came into view (-1: left): their icons.
+    // Browse entered: the table's top row opens when no addon is open.
     callback addons-shown(int);
-    changed tab => { root.addons-shown(root.tab == 1 ? root.addons-page : -1); }
-    changed addons-page => { root.addons-shown(root.tab == 1 ? root.addons-page : -1); }
+    function addons-view-changed() {
+        root.addons-shown(root.tab == 1 ? root.addons-page : -1);
+        if (root.tab == 1 && root.addons-page == 1) {
+            root.table-fresh = true;
+            root.browse-filter();
+        }
+    }
+    changed tab => { root.addons-view-changed(); }
+    changed addons-page => { root.addons-view-changed(); }
     // The picture viewer, over the window: the open addon's screenshot `viewer-index`, its pixels
     // from the app (`viewer-state` 0 loading, 1 shown, 2 not available). Only the one shown is held.
     in-out property <bool> viewer-open;
@@ -2351,6 +2688,24 @@ export component MainWindow inherits Window {
         root.whats-new-open = true;
         root.whats-new-seen();
     }
+    // The game's patch notes: the Play tab's line ("Azeroth Survivors 0.141.0 · what's new",
+    // empty when no build is known here; `game-news-new`: not opened for that build yet), the
+    // panel's versions, newest first, in What's new's shape, its last line when older ones are
+    // left out, what it says with nothing cached, and About's two answer times.
+    in property <string> game-news-line;
+    in property <bool> game-news-new;
+    in property <string> game-news-version;
+    in property <[ChangelogEntry]> game-notes;
+    in property <string> game-notes-footer;
+    in property <string> game-notes-empty;
+    in property <string> game-news-latest-answer;
+    in property <string> game-news-notes-answer;
+    in-out property <bool> game-news-open;
+    callback game-news-seen();
+    function open-game-news() {
+        root.game-news-open = true;
+        root.game-news-seen();
+    }
 
     // The game isn't in its folder: Play, Addons, Saves and Playtime say so.
     in property <bool> game-found: true;
@@ -2394,10 +2749,11 @@ export component MainWindow inherits Window {
 
     title: "Survivor's Satchel";
     icon: @image-url("icons/satchel.svg");
-    preferred-width: 600px;
-    preferred-height: 660px;
-    min-width: 540px;
-    min-height: 600px;
+    // 16:9, and never smaller than 960 × 540, so Browse's table and the addon beside it fit.
+    preferred-width: 1120px;
+    preferred-height: 630px;
+    min-width: 960px;
+    min-height: 540px;
 
     TabWidget {
         x: 0;
@@ -2409,6 +2765,11 @@ export component MainWindow inherits Window {
         Tab {
             title: "Play";
             VerticalBox {
+                // The tab's own column, at its width from before the window grew, centred.
+                width: min(680px, parent.width);
+                height: parent.height;
+                x: (parent.width - self.width) / 2;
+                y: 0;
                 Rectangle {
                     border-radius: 6px;
                     background: Look.banner(root.state);
@@ -2467,6 +2828,17 @@ export component MainWindow inherits Window {
                     if root.sync-on: Button {
                         text: "Open the network folder";
                         clicked => { root.open-folder(); }
+                    }
+                }
+                // The game's newest build, once its update server has named one; a click opens
+                // the game's patch notes. Blue until they have been opened for that build.
+                if root.game-news-line != "": HorizontalLayout {
+                    alignment: start;
+                    LinkText {
+                        text: root.game-news-line;
+                        ink: root.game-news-new ? Look.blue : Look.muted;
+                        font-size: 12px;
+                        clicked => { root.open-game-news(); }
                     }
                 }
                 Text {
@@ -2586,37 +2958,84 @@ export component MainWindow inherits Window {
                         wrap: word-wrap;
                         color: Look.muted;
                     }
-                    // The viewport is as tall as the whole list, so the rows keep their height and scroll.
-                    installed-scroll := ScrollView {
+                    // The columns, in the table's style: the name takes what the others leave, and
+                    // the status line a share of it.
+                    installed-box := VerticalLayout {
                         vertical-stretch: 1;
-                        content-height: installed-list.preferred-height;
-                        installed-list := VerticalLayout {
-                            width: installed-scroll.visible-width;
-                            height: self.preferred-height;
-                            alignment: start;
-                            spacing: 6px;
-                            for row in root.addon-rows: AddonItem {
-                                addon: row;
-                                open: root.addon-open == row.id;
-                                busy: root.busy;
-                                toggle => { root.addon-open = root.addon-open == row.id ? "" : row.id; }
-                                switched(on) => { root.addon-switch(row.id, on); }
-                                update => { root.addon-update(row.id); }
-                                update-anyway => { root.addon-update-anyway(row.id); }
-                                replace => { root.browse-install(row.id); }
-                                back => { root.addon-back(row.id); }
-                                keep(on) => { root.addon-keep(row.id, on); }
-                                page => { root.addon-page(row.id); }
-                                folder => { root.addon-folder(row.id); }
-                                local-only(on) => { root.addon-local-only(row.id, on); }
-                                settings-per-pc(on) => { root.addon-settings-per-pc(row.id, on); }
-                                settings-choice(keep) => { root.addon-settings-choice(row.id, keep); }
-                                versions => { root.open-versions(row.id); }
-                                install-anyway => { root.incoming-install-anyway(row.id); }
-                                remove => {
-                                    root.remove-settings = false;
-                                    root.remove-name = row.name;
-                                    root.remove-id = row.id;
+                        spacing: 2px;
+                        property <length> fixed: InstalledColumns.safety + InstalledColumns.version + InstalledColumns.released + InstalledColumns.on
+                            + 5 * InstalledColumns.spacing + 18px;
+                        property <length> status-width: clamp((self.width - self.fixed) * 0.55, 150px, 460px);
+                        // The headings over their columns, both clear of the scroll bar, which is
+                        // drawn over the rows' right edge.
+                        HorizontalLayout {
+                            padding-left: 4px;
+                            padding-right: 14px;
+                            spacing: InstalledColumns.spacing;
+                            TableHead {
+                                horizontal-stretch: 1;
+                                min-width: 140px;
+                                text: "Name";
+                            }
+                            TableHead {
+                                width: InstalledColumns.safety;
+                                text: "Safety";
+                            }
+                            TableHead {
+                                width: InstalledColumns.version;
+                                text: "Version";
+                            }
+                            TableHead {
+                                width: InstalledColumns.released;
+                                text: "Released";
+                            }
+                            TableHead {
+                                width: installed-box.status-width;
+                                text: "Status";
+                            }
+                            TableHead {
+                                width: InstalledColumns.on;
+                                text: "On";
+                                align: TextHorizontalAlignment.right;
+                            }
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: Palette.border;
+                        }
+                        // The viewport is as tall as the whole list, so the rows keep their height and scroll.
+                        installed-scroll := ScrollView {
+                            vertical-stretch: 1;
+                            content-height: installed-list.preferred-height;
+                            installed-list := VerticalLayout {
+                                width: installed-scroll.visible-width;
+                                height: self.preferred-height;
+                                alignment: start;
+                                spacing: 1px;
+                                for row in root.addon-rows: AddonTableRow {
+                                    addon: row;
+                                    open: root.addon-open == row.id;
+                                    busy: root.busy;
+                                    status-width: installed-box.status-width;
+                                    toggle => { root.addon-open = root.addon-open == row.id ? "" : row.id; }
+                                    switched(on) => { root.addon-switch(row.id, on); }
+                                    update => { root.addon-update(row.id); }
+                                    update-anyway => { root.addon-update-anyway(row.id); }
+                                    replace => { root.browse-install(row.id); }
+                                    back => { root.addon-back(row.id); }
+                                    keep(on) => { root.addon-keep(row.id, on); }
+                                    page => { root.addon-page(row.id); }
+                                    folder => { root.addon-folder(row.id); }
+                                    local-only(on) => { root.addon-local-only(row.id, on); }
+                                    settings-per-pc(on) => { root.addon-settings-per-pc(row.id, on); }
+                                    settings-choice(keep) => { root.addon-settings-choice(row.id, keep); }
+                                    versions => { root.open-versions(row.id); }
+                                    install-anyway => { root.incoming-install-anyway(row.id); }
+                                    remove => {
+                                        root.remove-settings = false;
+                                        root.remove-name = row.name;
+                                        root.remove-id = row.id;
+                                    }
                                 }
                             }
                         }
@@ -2838,10 +3257,11 @@ export component MainWindow inherits Window {
                                     }
                                     Rectangle { horizontal-stretch: 1; }
                                 }
+                                // SurvivorsForge's levels, as the Safety column shows them.
                                 if root.browse-trust.length > 0: HorizontalLayout {
                                     spacing: 12px;
                                     Text {
-                                        text: "SurvivorsForge";
+                                        text: "Safety";
                                         width: 92px;
                                         font-size: 12px;
                                         font-weight: 600;
@@ -2903,10 +3323,7 @@ export component MainWindow inherits Window {
                                             // The panel opens at its top; the app sends its content
                                             // (browse-open), and browse-filter shows what it has.
                                             open => {
-                                                root.panel-about-open = false;
-                                                root.panel-offer = self.offer;
-                                                root.browse-panel-id = self.offer.id;
-                                                root.browse-open(self.offer.id);
+                                                root.open-offer(self.offer);
                                                 panel-scroll.content-y = 0;
                                                 browse-keys.focus();
                                                 root.browse-filter();
@@ -2936,16 +3353,14 @@ export component MainWindow inherits Window {
                                                 root.browse-panel-id = "";
                                                 root.browse-close();
                                             } else {
-                                                root.panel-about-open = false;
-                                                root.panel-offer = offer;
-                                                root.browse-panel-id = offer.id;
-                                                root.browse-open(offer.id);
+                                                root.open-offer(offer);
                                                 browse-keys.focus();
                                                 root.browse-filter();
                                             }
                                         }
                                         toggle-more => { root.panel-about-open = !root.panel-about-open; }
                                         picture(i) => { root.picture-show(offer.id, i); }
+                                        frames(n) => { root.thumbs-shown(offer.id, n); }
                                         versions => { root.open-versions(offer.id); }
                                         page => { root.addon-page(offer.id); }
                                         install => { root.browse-install(offer.id); }
@@ -2955,16 +3370,16 @@ export component MainWindow inherits Window {
                                     }
                                 }
                             }
-                            // The table, and the selected addon beside it from about 1,000 px;
-                            // narrower, the selected addon takes the table's place, with Back.
+                            // The table, and the selected addon beside it, at every size the window
+                            // takes (from 960 px).
                             if root.browse-view == "table": HorizontalLayout {
                                 vertical-stretch: 1;
                                 spacing: 10px;
-                                if root.table-two || root.browse-panel-id == "": table-box := VerticalLayout {
+                                table-box := VerticalLayout {
                                     horizontal-stretch: 1;
                                     spacing: 2px;
-                                    // The tags too, where the table has room for them.
-                                    property <bool> wide: root.table-two ? root.width >= 1240px : root.width >= 720px;
+                                    // The tags too, where the table has room for them beside the pane.
+                                    property <bool> wide: root.width >= 1240px;
                                     // The marks of the column sorted by: ▲ A to Z, oldest or fewest
                                     // first; ▼ the other way.
                                     property <string> down: root.browse-sort-reverse ? "▲" : "▼";
@@ -2974,7 +3389,7 @@ export component MainWindow inherits Window {
                                     HorizontalLayout {
                                         padding-left: 4px;
                                         padding-right: 14px;
-                                        spacing: 4px;
+                                        spacing: TableColumns.spacing;
                                         TableHead {
                                             horizontal-stretch: 1;
                                             min-width: 110px;
@@ -2984,35 +3399,35 @@ export component MainWindow inherits Window {
                                             clicked => { root.sort-table(0); }
                                         }
                                         TableHead {
-                                            width: 80px;
-                                            text: "Lists";
+                                            width: TableColumns.safety;
+                                            text: "Safety";
                                         }
                                         TableHead {
-                                            width: 54px;
+                                            width: TableColumns.version;
                                             text: "Version";
                                         }
-                                        TableHead {
-                                            width: 88px;
-                                            text: "SurvivorsForge";
-                                        }
                                         if table-box.wide: TableHead {
-                                            width: 120px;
+                                            width: TableColumns.tags;
                                             text: "Tags";
                                         }
                                         TableHead {
-                                            width: 80px;
+                                            width: TableColumns.updated;
                                             text: "Last updated";
                                             sorts: true;
                                             mark: root.browse-sort == 1 ? table-box.down : "";
                                             clicked => { root.sort-table(1); }
                                         }
                                         TableHead {
-                                            width: 64px;
+                                            width: TableColumns.popularity;
                                             text: "Popularity";
                                             align: TextHorizontalAlignment.right;
                                             sorts: true;
                                             mark: root.browse-sort == 2 ? table-box.down : "";
                                             clicked => { root.sort-table(2); }
+                                        }
+                                        TableHead {
+                                            width: TableColumns.install;
+                                            text: "Install";
                                         }
                                     }
                                     Rectangle {
@@ -3030,42 +3445,45 @@ export component MainWindow inherits Window {
                                             for offer in root.offer-rows: OfferTableRow {
                                                 offer: offer;
                                                 wide: table-box.wide;
+                                                busy: root.busy;
                                                 current: root.browse-panel-id == offer.id;
                                                 select => {
                                                     if (root.browse-panel-id != offer.id) {
-                                                        root.panel-about-open = false;
-                                                        root.panel-offer = offer;
-                                                        root.browse-panel-id = offer.id;
-                                                        root.browse-open(offer.id);
-                                                        if (root.table-tab == 2) {
-                                                            root.versions-id = offer.id;
-                                                            root.versions-open(offer.id);
-                                                        }
+                                                        root.open-offer(offer);
                                                         browse-keys.focus();
                                                         root.browse-filter();
                                                     }
+                                                }
+                                                install => { root.browse-install(offer.id); }
+                                                update => { root.addon-update(offer.id); }
+                                                // The question the Installed tab's Remove… asks,
+                                                // naming the row it removes.
+                                                uninstall => {
+                                                    root.remove-settings = false;
+                                                    root.remove-name = offer.installed-name;
+                                                    root.remove-id = offer.installed-id;
                                                 }
                                             }
                                         }
                                     }
                                 }
                                 if root.browse-panel-id != "": TablePane {
-                                    width: root.table-two ? max(400px, parent.width * 0.42) : parent.width;
+                                    width: max(400px, parent.width * 0.42);
                                     offer: root.panel-offer;
                                     panel: root.panel;
                                     ready: root.panel-ready;
-                                    two: root.table-two;
                                     tab <=> root.table-tab;
                                     more-open: root.panel-about-open;
                                     busy: root.busy;
                                     versions: root.versions;
                                     versions-ready: root.versions.id == root.browse-panel-id && root.versions-id == root.browse-panel-id;
+                                    discord-checked: root.discord-checked;
                                     close => {
                                         root.browse-panel-id = "";
                                         root.browse-close();
                                     }
                                     tab-picked(tab) => {
-                                        if (tab == 2) {
+                                        if (tab == 1) {
                                             root.versions-id = root.browse-panel-id;
                                             root.versions-open(root.browse-panel-id);
                                         }
@@ -3073,6 +3491,7 @@ export component MainWindow inherits Window {
                                     toggle-more => { root.panel-about-open = !root.panel-about-open; }
                                     show-scan => { root.forge-show-scan(root.browse-panel-id); }
                                     picture(i) => { root.picture-show(root.browse-panel-id, i); }
+                                    frames(n) => { root.thumbs-shown(root.browse-panel-id, n); }
                                     page => { root.addon-page(root.browse-panel-id); }
                                     install => { root.browse-install(root.browse-panel-id); }
                                     install-anyway => { root.browse-install-anyway(root.browse-panel-id); }
@@ -3181,6 +3600,14 @@ export component MainWindow inherits Window {
                                             wrap: word-wrap;
                                             color: Look.amber;
                                         }
+                                        // Only while the cards show it: the panel stays in place,
+                                        // hidden, in the other views.
+                                        if root.browse-view != "list" && root.browse-view != "table" && root.panel-ready && root.panel.pictures.length > 0: PicturesRow {
+                                            pictures: root.panel.pictures;
+                                            room: panel-scroll.visible-width;
+                                            open(i) => { root.picture-show(root.browse-panel-id, i); }
+                                            frames(n) => { root.thumbs-shown(root.browse-panel-id, n); }
+                                        }
                                         AboutBlock {
                                             panel: root.panel;
                                             ready: root.panel-ready;
@@ -3189,11 +3616,6 @@ export component MainWindow inherits Window {
                                             notes: false;
                                             bars: false;
                                             toggle-more => { root.panel-about-open = !root.panel-about-open; }
-                                        }
-                                        if root.panel-ready && root.panel.pictures.length > 0: PicturesStrip {
-                                            pictures: root.panel.pictures;
-                                            room: panel-scroll.visible-width;
-                                            open(i) => { root.picture-show(root.browse-panel-id, i); }
                                         }
                                         AboutBlock {
                                             panel: root.panel;
@@ -3483,6 +3905,11 @@ export component MainWindow inherits Window {
         Tab {
             title: "Saves";
             VerticalBox {
+                // The tab's own column, at its width from before the window grew, centred.
+                width: min(680px, parent.width);
+                height: parent.height;
+                x: (parent.width - self.width) / 2;
+                y: 0;
                 Text {
                     text: root.saves-note;
                     wrap: word-wrap;
@@ -3527,6 +3954,11 @@ export component MainWindow inherits Window {
         Tab {
             title: "Playtime";
             VerticalBox {
+                // The tab's own column, at its width from before the window grew, centred.
+                width: min(680px, parent.width);
+                height: parent.height;
+                x: (parent.width - self.width) / 2;
+                y: 0;
                 HorizontalBox {
                     padding: 0;
                     Card {
@@ -3597,6 +4029,11 @@ export component MainWindow inherits Window {
         Tab {
             title: "Settings";
             VerticalBox {
+                // The tab's own column, at its width from before the window grew, centred.
+                width: min(680px, parent.width);
+                height: parent.height;
+                x: (parent.width - self.width) / 2;
+                y: 0;
                 // The fields scroll; Default and Save stay at the foot.
                 settings-scroll := ScrollView {
                     vertical-stretch: 1;
@@ -3984,6 +4421,38 @@ export component MainWindow inherits Window {
                                     }
                                 }
                             }
+                            // Where the game's patch notes come from: its update server, and the
+                            // notes file in the Satchel's repository, with when each last answered.
+                            Rectangle {
+                                border-width: 1px;
+                                border-color: Palette.border;
+                                border-radius: 6px;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 6px;
+                                    Text {
+                                        text: "Where the game's patch notes come from";
+                                        font-weight: 600;
+                                    }
+                                    Text {
+                                        text: "The newest build's note comes from the game's own update server, the file Azeroth Survivors reads to update itself (" + root.game-news-latest-answer + ").";
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: "The full notes come from game/patch-notes.md in the Satchel's repository, kept by hand from the game's Discord posts; an edit there reaches every PC within half an hour, without an update of the Satchel (" + root.game-news-notes-answer + ").";
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        Button {
+                                            text: "What's new in the game";
+                                            clicked => { root.open-game-news(); }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -4022,6 +4491,11 @@ export component MainWindow inherits Window {
                 return reject;
             }
             VerticalBox {
+                // Its column, at most 760 px wide, centred.
+                width: min(760px, parent.width);
+                height: parent.height;
+                x: (parent.width - self.width) / 2;
+                y: 0;
                 HorizontalLayout {
                     spacing: 6px;
                     Text {
@@ -4071,16 +4545,26 @@ export component MainWindow inherits Window {
         }
     }
 
-    // The picture viewer, over the whole window: one of the open addon's screenshots at a time,
-    // fitted to the window, with its caption; previous and next. Esc or ✕ closes it. Its pixels
-    // come from the app, and only the one shown is held.
-    if root.viewer-open: viewer-box := Overlay {
+    // The picture viewer: a box over the window, the window darkened behind it. In the box, the
+    // title line with ✕, the open addon's screenshot `viewer-index` fitted inside at most 80 % of
+    // the window's height, previous and next as round buttons on its edges (the arrow keys too),
+    // and its caption under it. Esc, ✕, a click on the picture or on the darkened window closes it;
+    // the buttons never do. Its pixels come from the app, and only the one shown is held.
+    if root.viewer-open: viewer-box := Rectangle {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height;
         property <int> count: root.panel-ready ? root.panel.pictures.length : 0;
         property <string> caption: self.count > root.viewer-index ? root.panel.pictures[root.viewer-index].caption : "";
+        property <bool> has-previous: root.viewer-index > 0;
+        property <bool> has-next: root.viewer-index + 1 < self.count;
+        // The box's width; the picture's area as tall as its shape asks, at most 80 % of the
+        // window's height and always room for the title line and the caption.
+        property <length> box-width: min(1000px, root.width * 0.8);
+        property <float> shape: self.count > root.viewer-index && root.panel.pictures[root.viewer-index].width > 0
+            ? root.panel.pictures[root.viewer-index].height / root.panel.pictures[root.viewer-index].width : 0.5625;
+        property <length> picture-height: min(min(root.height * 0.8, root.height - 116px), (self.box-width - 24px) * self.shape);
         viewer-keys := FocusScope {
             init => { self.focus(); }
             key-pressed(event) => {
@@ -4088,79 +4572,104 @@ export component MainWindow inherits Window {
                     root.picture-close();
                     return accept;
                 }
-                if (event.text == Key.LeftArrow && root.viewer-index > 0) {
+                if (event.text == Key.LeftArrow && viewer-box.has-previous) {
                     root.picture-show(root.browse-panel-id, root.viewer-index - 1);
                     return accept;
                 }
-                if (event.text == Key.RightArrow && root.viewer-index + 1 < viewer-box.count) {
+                if (event.text == Key.RightArrow && viewer-box.has-next) {
                     root.picture-show(root.browse-panel-id, root.viewer-index + 1);
                     return accept;
                 }
                 return reject;
             }
-            VerticalBox {
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: root.panel-offer.name + " · picture " + (root.viewer-index + 1) + " of " + max(1, viewer-box.count);
-                        font-weight: 600;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
-                    Button {
-                        text: "✕";
-                        clicked => { root.picture-close(); }
-                    }
-                }
-                Rectangle {
-                    vertical-stretch: 1;
-                    border-radius: 6px;
-                    background: Look.dark ? #0b0e13 : #1d2433;
-                    clip: true;
-                    if root.viewer-state == 1: Image {
-                        source: root.viewer-image;
-                        width: parent.width;
-                        height: parent.height;
-                        image-fit: contain;
-                        accessible-role: image;
-                        accessible-label: viewer-box.caption != "" ? viewer-box.caption : "Picture " + (root.viewer-index + 1);
-                    }
-                    if root.viewer-state == 0: VerticalLayout {
-                        alignment: center;
-                        HorizontalLayout {
-                            alignment: center;
-                            Spinner {
-                                indeterminate: true;
-                                width: 28px;
-                                height: 28px;
-                            }
+            // The window darkened behind the box: a click on it closes the viewer.
+            Rectangle {
+                background: #000000a6;
+            }
+            TouchArea {
+                clicked => { root.picture-close(); }
+            }
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: viewer-box.box-width;
+                height: box-layout.preferred-height;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Palette.border;
+                background: Palette.background;
+                // A click on the box, off the picture and the buttons, does nothing.
+                TouchArea { }
+                box-layout := VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: root.panel-offer.name + " · picture " + (root.viewer-index + 1) + " of " + max(1, viewer-box.count);
+                            font-weight: 600;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        Button {
+                            text: "✕";
+                            clicked => { root.picture-close(); }
                         }
                     }
-                    if root.viewer-state == 2: Text {
-                        text: "This picture isn't available.";
-                        color: #c7ccd4;
+                    Rectangle {
+                        height: viewer-box.picture-height;
+                        border-radius: 6px;
+                        background: Look.dark ? #0b0e13 : #1d2433;
+                        if root.viewer-state == 1: Image {
+                            source: root.viewer-image;
+                            width: parent.width;
+                            height: parent.height;
+                            image-fit: contain;
+                            accessible-role: image;
+                            accessible-label: viewer-box.caption != "" ? viewer-box.caption : "Picture " + (root.viewer-index + 1);
+                        }
+                        if root.viewer-state == 0: VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                alignment: center;
+                                Spinner {
+                                    indeterminate: true;
+                                    width: 28px;
+                                    height: 28px;
+                                }
+                            }
+                        }
+                        if root.viewer-state == 2: Text {
+                            text: "This picture isn't available.";
+                            color: #c7ccd4;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        // A click on the picture closes the viewer.
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.picture-close(); }
+                        }
+                        RoundButton {
+                            x: 10px;
+                            y: (parent.height - self.height) / 2;
+                            next: false;
+                            enabled: viewer-box.has-previous;
+                            clicked => { root.picture-show(root.browse-panel-id, root.viewer-index - 1); }
+                        }
+                        RoundButton {
+                            x: parent.width - self.width - 10px;
+                            y: (parent.height - self.height) / 2;
+                            next: true;
+                            enabled: viewer-box.has-next;
+                            clicked => { root.picture-show(root.browse-panel-id, root.viewer-index + 1); }
+                        }
+                    }
+                    if viewer-box.caption != "": Text {
+                        text: viewer-box.caption;
+                        wrap: word-wrap;
                         horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-                if viewer-box.caption != "": Text {
-                    text: viewer-box.caption;
-                    wrap: word-wrap;
-                    horizontal-alignment: center;
-                }
-                HorizontalLayout {
-                    spacing: 6px;
-                    Button {
-                        text: "‹ Previous";
-                        enabled: root.viewer-index > 0;
-                        clicked => { root.picture-show(root.browse-panel-id, root.viewer-index - 1); }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    Button {
-                        text: "Next ›";
-                        enabled: root.viewer-index + 1 < viewer-box.count;
-                        clicked => { root.picture-show(root.browse-panel-id, root.viewer-index + 1); }
                     }
                 }
             }
@@ -4173,6 +4682,11 @@ export component MainWindow inherits Window {
         width: root.width;
         height: root.height;
         VerticalBox {
+            // Its column, at most 760 px wide, centred.
+            width: min(760px, parent.width);
+            height: parent.height;
+            x: (parent.width - self.width) / 2;
+            y: 0;
             HorizontalLayout {
                 spacing: 6px;
                 Text {
@@ -4212,12 +4726,88 @@ export component MainWindow inherits Window {
         }
     }
 
+    // The game's patch notes over the window, newest first, every version open: the newest
+    // build's note from the game's update server, the full notes from the Satchel's repository.
+    // Esc or Close closes it.
+    if root.game-news-open: Overlay {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        news-keys := FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.game-news-open = false;
+                    return accept;
+                }
+                return reject;
+            }
+            VerticalBox {
+                // Its column, at most 760 px wide, centred.
+                width: min(760px, parent.width);
+                height: parent.height;
+                x: (parent.width - self.width) / 2;
+                y: 0;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "What's new in the game";
+                        font-size: 20px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Button {
+                        text: "Close";
+                        clicked => { root.game-news-open = false; }
+                    }
+                }
+                Text {
+                    text: "Azeroth Survivors' patch notes, newest first: the newest build's note from the game's own update server, and the full notes kept with the Satchel. The text is the game developer's.";
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    color: Look.muted;
+                }
+                if root.game-notes-empty != "": Text {
+                    text: root.game-notes-empty;
+                    wrap: word-wrap;
+                }
+                news-scroll := ScrollView {
+                    vertical-stretch: 1;
+                    content-height: news-list.preferred-height;
+                    news-list := VerticalLayout {
+                        width: news-scroll.visible-width - 14px;
+                        height: self.preferred-height;
+                        alignment: start;
+                        spacing: 6px;
+                        for entry in root.game-notes: GameNoteItem {
+                            entry: entry;
+                            current: entry.version == root.game-news-version;
+                        }
+                        if root.game-notes-footer != "": Text {
+                            text: root.game-notes-footer;
+                            font-size: 12px;
+                            color: Look.muted;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if root.remove-id != "": Overlay {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height;
         VerticalBox {
+            // Its column, at most 760 px wide, centred.
+            width: min(760px, parent.width);
+            height: parent.height;
+            x: (parent.width - self.width) / 2;
+            y: 0;
             alignment: start;
             Text {
                 text: "Remove " + root.remove-name + "?";
@@ -4264,6 +4854,11 @@ export component MainWindow inherits Window {
         width: root.width;
         height: root.height;
         VerticalBox {
+            // Its column, at most 760 px wide, centred.
+            width: min(760px, parent.width);
+            height: parent.height;
+            x: (parent.width - self.width) / 2;
+            y: 0;
             alignment: start;
             Text {
                 text: "Needs you";
@@ -4322,6 +4917,11 @@ export component MainWindow inherits Window {
         width: root.width;
         height: root.height;
         VerticalBox {
+            // Its column, at the other tabs' width, centred.
+            width: min(680px, parent.width);
+            height: parent.height;
+            x: (parent.width - self.width) / 2;
+            y: 0;
             alignment: start;
             Text {
                 text: "Welcome to Survivor's Satchel";

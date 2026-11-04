@@ -78,6 +78,11 @@ impl Local {
     pub fn forge_dir(&self) -> PathBuf {
         self.local_dir.join("forge")
     }
+    /// The game's patch notes as last fetched, kept on this PC: the game's update index, the
+    /// notes file from the repository, and what this PC remembers of them (`game_news::Cache`).
+    pub fn game_news_dir(&self) -> PathBuf {
+        self.local_dir.join("game-news")
+    }
     /// A newer Satchel downloaded from its GitHub release, waiting for Update now.
     pub fn satchel_download(&self) -> PathBuf {
         self.local_dir.join("update")
@@ -297,6 +302,13 @@ mod tests {
         let local = player();
         assert_eq!(local.forge_dir(), local.local_dir.join("forge"));
         assert_eq!(local.forge_dir().parent(), local.addon_cache().parent());
+    }
+
+    #[test]
+    fn the_games_notes_belong_to_this_pc_beside_survivorsforges_cache() {
+        let local = player();
+        assert_eq!(local.game_news_dir(), local.local_dir.join("game-news"));
+        assert_eq!(local.game_news_dir().parent(), local.forge_dir().parent());
     }
 
     #[test]

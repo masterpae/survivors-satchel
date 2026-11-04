@@ -2,9 +2,9 @@
 //! what's new on GitHub for the installed addons, downloads into the addon cache, the one-off
 //! lookup behind "Add from a link", the Satchel's own newest release once its repository is
 //! public, SurvivorsForge's registry and an addon's details, versions and findings there, and the
-//! icons and screenshots it names, decoded here into pixels the window only has to show. Jobs come
-//! from the worker and the answers go back to it as `Command::Net`, one job at a time. Nothing
-//! here touches AddOns.
+//! icons and screenshots it names, decoded here into pixels the window only has to show, and the
+//! game's patch notes from their two fixed addresses. Jobs come from the worker and the answers go
+//! back to it as `Command::Net`, one job at a time. Nothing here touches AddOns.
 //!
 //! What's new is read from two plain GitHub pages that don't count against the 60 API calls an
 //! hour (the `/releases/latest` redirect and a release's assets page, with its checksums). Only
@@ -16,10 +16,11 @@ use crate::win;
 use crate::worker::Command;
 use chrono::{DateTime, Utc};
 use satchel_core::addons::catalog::Release;
-use satchel_core::addons::forge;
+use satchel_core::addons::forge::{self, PictureKind};
 use satchel_core::addons::github::{self, Pick, RestRelease, RestRepo, RestTag};
 use satchel_core::addons::overview::{Watch, plain};
 use satchel_core::addons::package;
+use satchel_core::game_news::Feed;
 use satchel_core::{fsx, gate, log, signing};
 use serde::de::DeserializeOwned;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
@@ -51,6 +52,13 @@ const PICTURE_HOPS: usize = 3;
 /// What a picture's decoder may allocate: a picture as large as `forge::PICTURE_SIDE` a side, and
 /// room for its decoding.
 const PICTURE_ALLOC: u64 = 96 << 20;
+/// The game's patch notes come from exactly these two addresses, read-only, never built from
+/// data: the game's own update index (the newest build's version and its note), and the full
+/// notes kept by hand in this repository, which reach every PC within half an hour of an edit.
+const GAME_LATEST_URL: &str = "https://wow.aethus.pl/exe/latest.json";
+const GAME_NOTES_URL: &str = "https://raw.githubusercontent.com/masterpae/survivors-satchel/main/game/patch-notes.md";
+/// How long either may take: both are small, and a stalled one mustn't hold up the jobs behind it.
+const NEWS_TIME: Duration = Duration::from_secs(15);
 
 pub enum Job {
     /// What's new for these installed addons.
@@ -70,9 +78,12 @@ pub enum Job {
     ForgeVersions(String),
     /// What SurvivorsForge's scan found in one version of an addon.
     ForgeFindings { slug: String, tag: String },
-    /// An icon (`icon`) or a screenshot from SurvivorsForge's host or GitHub's: from the pictures
-    /// kept on this PC, else downloaded and kept; decoded either way.
-    Picture { url: String, icon: bool },
+    /// An icon, a screenshot's thumbnail or a screenshot for the viewer (`kind`), from
+    /// SurvivorsForge's host or GitHub's: from the pictures kept on this PC, else downloaded and
+    /// kept; decoded either way, at its kind's size.
+    Picture { url: String, kind: PictureKind },
+    /// One of the game's two patch-note sources, with the ETag of the copy kept (`If-None-Match`).
+    GameNews { feed: Feed, etag: Option<String> },
 }
 
 pub enum Answer {
@@ -87,9 +98,26 @@ pub enum Answer {
     ForgeDetails { slug: String, answer: ForgeAnswer },
     ForgeVersions { slug: String, answer: ForgeAnswer },
     ForgeFindings { slug: String, tag: String, answer: ForgeAnswer },
-    /// A picture decoded into RGBA pixels, scaled down to its use (an icon to `forge::ICON_SIDE`,
-    /// a screenshot to `forge::SHOT_SIDE`), or why not, for the log.
-    Picture { url: String, icon: bool, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String> },
+    /// A picture decoded into RGBA pixels, scaled down to its use (`PictureKind::side`: an icon to
+    /// `forge::ICON_SIDE`, a thumbnail to `forge::THUMB_SIDE`, a screenshot to `forge::SHOT_SIDE`),
+    /// or why not, for the log.
+    Picture { url: String, kind: PictureKind, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String> },
+    GameNews { feed: Feed, answer: NewsAnswer },
+}
+
+/// How one of the game's patch-note sources answered, in `ForgeAnswer`'s shape with the
+/// `Last-Modified` beside the ETag: the update index carries no other date. A body goes to the
+/// cache as it came (`game_news::Cache`), which reads it; nothing here is parsed.
+pub enum NewsAnswer {
+    /// 200: the body, its ETag and its Last-Modified, as sent.
+    Body { text: String, etag: Option<String>, modified: Option<String> },
+    /// 304: the copy kept is still the one.
+    NotModified,
+    /// 429: asked too often.
+    Limited,
+    /// Nothing to read: a 5xx or another status, the network, a body cut short or over the cap.
+    /// Why, for the log.
+    Down(String),
 }
 
 /// How SurvivorsForge answered one request. A body goes to the cache as it came
@@ -159,7 +187,8 @@ fn run(jobs: Receiver<Job>, cache: &Path, pictures: &forge::Pictures, commands: 
             Job::ForgeDetails(slug) => Answer::ForgeDetails { answer: net.forge(forge_addon_url(&slug, ""), None), slug },
             Job::ForgeVersions(slug) => Answer::ForgeVersions { answer: net.forge(forge_addon_url(&slug, "/versions"), None), slug },
             Job::ForgeFindings { slug, tag } => Answer::ForgeFindings { answer: net.forge(forge_findings_url(&slug, &tag), None), slug, tag },
-            Job::Picture { url, icon } => Answer::Picture { pixels: guarded(|| net.picture(&url, icon, pictures)), url, icon },
+            Job::Picture { url, kind } => Answer::Picture { pixels: guarded(|| net.picture(&url, kind, pictures)), url, kind },
+            Job::GameNews { feed, etag } => Answer::GameNews { feed, answer: net.game_news(feed, etag.as_deref()) },
         };
         if commands.send(Command::Net(answer)).is_err() {
             break;
@@ -350,10 +379,57 @@ impl Net {
         }
     }
 
-    /// An icon or a screenshot as pixels: only from an address `forge::picture_url_ok` allows; from
-    /// the pictures kept on this PC when it is there (it is static, so it shows offline too), else
-    /// downloaded and kept. Every failure is the answer's error, which the worker logs once.
-    fn picture(&self, url: &str, icon: bool, pictures: &forge::Pictures) -> Result<SharedPixelBuffer<Rgba8Pixel>, String> {
+    /// One of the game's patch-note sources, in a job of its own: one that panics answers as no
+    /// answer.
+    fn game_news(&self, feed: Feed, etag: Option<&str>) -> NewsAnswer {
+        guarded(|| Ok(self.game_news_text(feed, etag))).unwrap_or_else(NewsAnswer::Down)
+    }
+
+    /// One request to one of the two fixed addresses (`GAME_LATEST_URL`, `GAME_NOTES_URL`; nothing
+    /// else is ever asked): text, within the source's cap (`Feed::cap`) and `NEWS_TIME`, with the
+    /// ETag of the copy kept. A redirect isn't followed, so only those two addresses are read.
+    fn game_news_text(&self, feed: Feed, etag: Option<&str>) -> NewsAnswer {
+        let (url, accept) = match feed {
+            Feed::Latest => (GAME_LATEST_URL, "application/json"),
+            Feed::Notes => (GAME_NOTES_URL, "text/plain, text/markdown"),
+        };
+        let mut request = self.agent.get(url).header("Accept", accept);
+        if let Some(etag) = etag {
+            request = request.header("If-None-Match", etag);
+        }
+        let mut response = match request.config().max_redirects(0).timeout_global(Some(NEWS_TIME)).build().call() {
+            Ok(response) => response,
+            Err(e) => {
+                log!("{url}: {e}");
+                return NewsAnswer::Down(e.to_string());
+            }
+        };
+        let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+        match response.status().as_u16() {
+            200 => {
+                let (etag, modified) = (header("etag"), header("last-modified"));
+                match response.body_mut().with_config().limit(feed.cap()).read_to_string() {
+                    Ok(text) => NewsAnswer::Body { text, etag, modified },
+                    Err(e) => {
+                        log!("{url}: {e}");
+                        NewsAnswer::Down(e.to_string())
+                    }
+                }
+            }
+            304 => NewsAnswer::NotModified,
+            429 => NewsAnswer::Limited,
+            status => {
+                log!("{url}: {} answered {status}", feed.name());
+                NewsAnswer::Down(format!("{} answered {status}", feed.name()))
+            }
+        }
+    }
+
+    /// An icon, a thumbnail or a screenshot as pixels: only from an address `forge::picture_url_ok`
+    /// allows; from the pictures kept on this PC when it is there (it is static, so it shows offline
+    /// too, and a thumbnail and its screenshot share one file), else downloaded and kept. Every
+    /// failure is the answer's error, which the worker logs once.
+    fn picture(&self, url: &str, kind: PictureKind, pictures: &forge::Pictures) -> Result<SharedPixelBuffer<Rgba8Pixel>, String> {
         if !forge::picture_url_ok(url) {
             return Err("not on SurvivorsForge's host or GitHub's, so it wasn't fetched".into());
         }
@@ -367,7 +443,7 @@ impl Net {
                 bytes
             }
         };
-        decode(&bytes, if icon { forge::ICON_SIDE } else { forge::SHOT_SIDE }, icon)
+        decode(&bytes, kind.side(), kind == PictureKind::Icon)
     }
 
     /// A picture's bytes, at most `forge::PICTURE_MAX`, over https; a redirect is followed only to

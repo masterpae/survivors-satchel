@@ -3,6 +3,33 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.8.0 (2026-11-04)
+
+The game's patch notes in the app, and a wider window built around Browse's table.
+
+### Added
+- A line on the Play tab says which game build is current and opens the game's patch notes: the
+  newest build's note from the game's own update server, and the full notes kept in this
+  repository, which players get within half an hour of an edit, without an update of the Satchel.
+- About says where the game's notes come from.
+- Browse's table has an Install column: Install, Update or Uninstall right in the row; an
+  installed addon carries a check mark after its name.
+- An addon's pictures show as a row of thumbnails above its description, in every view; a click
+  on a thumbnail opens it, and a click on the picture closes it.
+
+### Changed
+- The window opens at 16:9 (1,120 × 630) and never smaller than 960 × 540, so the table and the
+  addon beside it fit; the other tabs keep their width, centred, until the design pass.
+- The table is Browse's default view, also on a PC updated from 0.7.2 (a list you picked stays),
+  sorted by popularity with the top addon open. The Lists column is gone; the "SurvivorsForge"
+  column is "Safety", and says "Discord Verified" for an addon that is on the game's
+  verified-addons channel only.
+- The addon pane has two tabs, About and Versions; the scan and the folders are one line each in
+  About.
+- The picture viewer is a box over the darkened window, with previous and next on the picture's
+  edges.
+- The Installed tab shows its addons in columns, like the table.
+
 ## 0.7.2 (2026-11-04)
 
 Three ways to browse, icons and pictures, and any version you like.

@@ -3,6 +3,7 @@
 
 mod addons;
 mod forge;
+mod game_news;
 mod share;
 
 use crate::net::{self, Answer};
@@ -99,6 +100,8 @@ pub enum Command {
     PictureShow(String, usize),
     /// The viewer closed.
     PictureClose,
+    /// The open addon's pictures row shows this many frames (its id, the count): their thumbnails.
+    ThumbsShown(String, usize),
     /// Versions… opened for an addon (Browse's, or an installed one).
     VersionsOpen(String),
     VersionsClose,
@@ -130,6 +133,8 @@ pub enum Command {
     CheckUpdates,
     /// What's new was opened: "Updated to …" goes.
     WhatsNewSeen,
+    /// The game's patch notes were opened: the Play line stops being new for the build it names.
+    GameNewsSeen,
     /// The no-game panel's Find it: the game's folder is looked for and kept when found.
     /// The no-game panel's Find it, with the Settings form as it stands (unsaved edits stay).
     FindGame(Form),
@@ -227,6 +232,7 @@ pub struct Worker {
     addons: addons::AddonsState,
     share: share::ShareState,
     forge: forge::ForgeState,
+    news: game_news::NewsState,
 }
 
 /// How a Satchel that a newer one keeps out gets the new one while none is on offer: from GitHub,
@@ -341,10 +347,12 @@ impl Worker {
         }
         let net = net::start(engine.local.addon_cache(), engine.local.forge_dir(), commands);
         let forge = forge::ForgeState::new(engine.local.forge_dir());
+        let news = game_news::NewsState::new(engine.local.game_news_dir());
         Worker {
             addons: addons::AddonsState::new(store, net),
             share: share::ShareState::new(memory),
             forge,
+            news,
             engine,
             ui,
             tracker: Tracker::default(),
@@ -445,14 +453,17 @@ impl Worker {
         if let Err(e) = self.engine.flush_playtime() {
             log!("waiting playtime not sent: {e}");
         }
-        // SurvivorsForge's answers kept on this PC, before the first lists are made from them.
+        // SurvivorsForge's answers kept on this PC, before the first lists are made from them;
+        // the game's patch notes as last fetched.
         self.forge_load();
+        self.news_load();
         self.refresh();
         self.push_form();
         self.addons_scan();
         self.addons_prune_cache();
         self.addons_look();
         self.forge_look();
+        self.news_look();
         self.share_look();
         self.satchel_look();
     }
@@ -577,6 +588,7 @@ impl Worker {
             Command::BrowseView(view) => self.browse_view(&view),
             Command::PictureShow(id, index) => self.forge_picture_show(&id, index),
             Command::PictureClose => self.forge_picture_close(),
+            Command::ThumbsShown(id, frames) => self.forge_thumbs_wanted(&id, frames),
             Command::VersionsOpen(id) => self.versions_open(&id),
             Command::VersionsClose => self.addons.versions_open = None,
             Command::VersionInstall(id, tag, anyway) => self.version_install_as(&id, &tag, anyway, true),
@@ -594,6 +606,7 @@ impl Worker {
             Command::UpdateNow => self.update_now(),
             Command::CheckUpdates => self.check_updates(),
             Command::WhatsNewSeen => self.whats_new_seen(),
+            Command::GameNewsSeen => self.news_seen(),
             Command::FindGame(form) => self.find_game(form),
             Command::OpenGameSite => win::open_url(win::GAME_SITE),
             Command::Net(answer) => self.addons_answer(answer),
@@ -651,6 +664,8 @@ impl Worker {
         // 30 minutes, usually a 304. What goes in after a session is then judged on a fresh answer,
         // and "isn't answering" never just means nobody asked.
         self.forge_look();
+        // The game's patch notes keep theirs the same way: two small requests per 30 minutes.
+        self.news_look();
     }
 
     fn on_event(&mut self, event: Event) {
@@ -1360,7 +1375,7 @@ impl Worker {
         settings.addons.update_by_themselves = form.addons_auto;
         settings.addons.shared = form.addons_shared;
         settings.addons.forge = form.addons_forge;
-        settings.addons.browse_view = satchel_core::settings::browse_view_or_cards(&form.browse_view);
+        settings.addons.browse_view = satchel_core::settings::browse_view_or_default(&form.browse_view);
         settings.pause_when_away = form.pause_when_away;
         settings.theme = match form.theme {
             1 => Theme::Light,
@@ -1418,14 +1433,16 @@ impl Worker {
     }
 
     /// Browse's switch: the view is kept in settings.toml as soon as it is picked, on its own, so
-    /// fields being edited in Settings stay as they are (the form isn't pushed again).
+    /// fields being edited in Settings stay as they are (the form isn't pushed again). It is the
+    /// player's pick from then on (`AddonSettings::pick_view`): the cards too stay, where a cards
+    /// nobody picked loads as the table.
     fn browse_view(&mut self, view: &str) {
-        let view = satchel_core::settings::browse_view_or_cards(view);
-        if self.engine.settings.addons.browse_view == view {
+        let addons = &self.engine.settings.addons;
+        if addons.browse_view_picked && addons.browse_view == satchel_core::settings::browse_view_or_default(view) {
             return;
         }
         let mut settings = self.engine.settings.clone();
-        settings.addons.browse_view = view;
+        settings.addons.pick_view(view);
         match settings.save(&self.engine.local.settings()) {
             Ok(()) => self.engine.settings = settings,
             Err(e) => log!("Browse's view not saved: {e}"),
@@ -1959,6 +1976,7 @@ impl Worker {
             checking: self.check_pending,
             checks: self.checks,
             card_update: if self.card_gate { self.offer().map(|o| o.version.clone()).unwrap_or_default() } else { String::new() },
+            game_news: self.news_view(),
         };
         (view, shown)
     }

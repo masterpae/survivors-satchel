@@ -75,8 +75,9 @@ Later, maybe: syncing through a cloud service, beside the network folder.
   network folder.
 
 The Satchel connects to GitHub, to read releases and download addons; to SurvivorsForge, for its
-addon list and details (you can turn that off in Settings); and to the network folder you chose.
-It sends nothing about you anywhere.
+addon list and details (you can turn that off in Settings); to the game's update server, for the
+newest build's note; to this repository's `game/patch-notes.md`, for the full notes; and to the
+network folder you chose. It sends nothing about you anywhere.
 
 ## Getting started
 

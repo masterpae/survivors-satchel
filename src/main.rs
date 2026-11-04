@@ -164,6 +164,8 @@ fn main() {
     card.set_dark(dark);
     let (tx, rx) = mpsc::channel::<Command>();
     view::set_about(&window);
+    // Browse's sort at start, in every view: the most downloads first.
+    window.set_browse_sort(satchel_core::addons::overview::Sort::DEFAULT.index());
 
     window.on_play(sender(&tx, || Command::Play));
     window.on_sync_now(sender(&tx, || Command::SyncNow));
@@ -229,6 +231,7 @@ fn main() {
     window.on_link_clear(sender(&tx, || Command::LinkClear));
     window.on_install_again(with_id(&tx, Command::InstallAgain));
     window.on_whats_new_seen(sender(&tx, || Command::WhatsNewSeen));
+    window.on_game_news_seen(sender(&tx, || Command::GameNewsSeen));
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
         window.on_find_game(move || {
@@ -300,9 +303,23 @@ fn main() {
     window.on_addon_folder(with_id(&tx, Command::AddonFolder));
     window.on_browse_install(install_with_id(&window, &tx, Command::BrowseInstall));
     window.on_browse_install_anyway(install_with_id(&window, &tx, Command::BrowseInstallAnyway));
-    // Browse's panel: the window shows it at once; the worker sends SurvivorsForge's part.
+    // Browse's panel: the window shows it at once; the worker sends SurvivorsForge's part. Closed,
+    // the thumbnails the window held of it go.
     window.on_browse_open(with_id(&tx, Command::BrowseOpen));
-    window.on_browse_close(sender(&tx, || Command::BrowseClose));
+    {
+        let tx = tx.clone();
+        window.on_browse_close(move || {
+            view::drop_thumbs("");
+            let _ = tx.send(Command::BrowseClose);
+        });
+    }
+    // The open addon's pictures row: how many frames it shows, whose thumbnails the worker asks for.
+    {
+        let tx = tx.clone();
+        window.on_thumbs_shown(move |id, frames| {
+            let _ = tx.send(Command::ThumbsShown(id.into(), frames.max(0) as usize));
+        });
+    }
     window.on_forge_show_scan(with_id(&tx, Command::ForgeShowScan));
     // SurvivorsForge's links in Settings and About: the worker opens only those it knows.
     {

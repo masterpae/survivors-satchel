@@ -7,6 +7,7 @@ pub mod changelog;
 pub mod decide;
 pub mod engine;
 pub mod fsx;
+pub mod game_news;
 pub mod game_settings;
 pub mod gate;
 pub mod index;

@@ -1371,6 +1371,9 @@ pub const ICON_SIDE: u32 = 128;
 /// A screenshot is held at most this many pixels a side for the viewer, which fits it to the
 /// window: a large screen's worth, and about 16 MB at most while it is shown.
 pub const SHOT_SIDE: u32 = 2048;
+/// A screenshot's thumbnail, in the pictures row of the addon opened, is held at most this many
+/// pixels a side: its 88 × 55 frame twice over, for a screen at 200 %.
+pub const THUMB_SIDE: u32 = 192;
 /// The pictures folder holds at most this many bytes.
 pub const PICTURES_CAP: u64 = 50 << 20;
 const PICTURES_DIR: &str = "pictures";
@@ -1579,6 +1582,48 @@ impl IconQueue {
     pub fn waiting(&self) -> usize {
         self.waiting.len()
     }
+}
+
+/// What a picture is for, which sets the size it is decoded at: the viewer's screenshot
+/// (`SHOT_SIDE`), a thumbnail of the open addon's pictures row (`THUMB_SIDE`), an icon
+/// (`ICON_SIDE`, its corners rounded).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PictureKind {
+    Shot,
+    Thumb,
+    Icon,
+}
+
+impl PictureKind {
+    /// The most pixels a side it is kept at.
+    pub fn side(self) -> u32 {
+        match self {
+            PictureKind::Shot => SHOT_SIDE,
+            PictureKind::Thumb => THUMB_SIDE,
+            PictureKind::Icon => ICON_SIDE,
+        }
+    }
+}
+
+/// The next picture for the network thread, one at a time: the viewer's (`shot`, when it waits)
+/// first, then the open addon's thumbnails, then icons. Thumbnails go out only while they may
+/// (`thumbs_allowed`: the addon's pane open and the Addons tab showing Browse), icons only while
+/// they may (`icons_allowed`); where they may not, what waits is dropped, to be asked for again
+/// when it is shown again.
+pub fn next_picture(shot: Option<String>, thumbs: &mut IconQueue, thumbs_allowed: bool, icons: &mut IconQueue, icons_allowed: bool) -> Option<(String, PictureKind)> {
+    if !thumbs_allowed {
+        thumbs.drop_waiting();
+    }
+    if !icons_allowed {
+        icons.drop_waiting();
+    }
+    if let Some(url) = shot {
+        return Some((url, PictureKind::Shot));
+    }
+    if let Some(url) = thumbs.next(thumbs_allowed) {
+        return Some((url, PictureKind::Thumb));
+    }
+    icons.next(icons_allowed).map(|url| (url, PictureKind::Icon))
 }
 
 #[cfg(test)]
@@ -2390,6 +2435,47 @@ mod tests {
         icons.done(b, false);
         icons.want(b);
         assert!(!icons.shown(b) && icons.next(true).is_none());
+    }
+
+    #[test]
+    fn the_viewer_goes_first_then_the_open_addons_thumbnails_then_icons() {
+        let pic = |n: u32| format!("https://forge.rezondes.net/img/shot-{n}.webp");
+        let icon = |n: u32| format!("https://forge.rezondes.net/img/icon-{n}.webp");
+        let (mut thumbs, mut icons) = (IconQueue::default(), IconQueue::default());
+        icons.want(&icon(1));
+        // Only the frames the row shows are asked for: four of six here.
+        for n in 1..=4 {
+            thumbs.want(&pic(n));
+        }
+        let next = |shot: Option<String>, thumbs: &mut IconQueue, icons: &mut IconQueue, open: bool| next_picture(shot, thumbs, open, icons, true);
+        // The viewer's picture before anything else.
+        assert_eq!(next(Some(pic(6)), &mut thumbs, &mut icons, true), Some((pic(6), PictureKind::Shot)));
+        // Then the thumbnails, in the frames' order, before the icons.
+        assert_eq!(next(None, &mut thumbs, &mut icons, true), Some((pic(1), PictureKind::Thumb)));
+        assert_eq!(next(None, &mut thumbs, &mut icons, true), Some((pic(2), PictureKind::Thumb)));
+        // The pane closed, or the tab left Browse: the waiting thumbnails are dropped, icons go on.
+        assert_eq!(next(None, &mut thumbs, &mut icons, false), Some((icon(1), PictureKind::Icon)));
+        assert_eq!(thumbs.waiting(), 0);
+        assert_eq!(next(None, &mut thumbs, &mut icons, true), None);
+        // Back on Browse with the pane open: the dropped ones are asked for again, the kept ones not.
+        thumbs.done(&pic(1), true);
+        thumbs.done(&pic(2), true);
+        for n in 1..=4 {
+            thumbs.want(&pic(n));
+        }
+        assert_eq!(thumbs.waiting(), 2);
+        assert_eq!(next(None, &mut thumbs, &mut icons, true), Some((pic(3), PictureKind::Thumb)));
+        // Icons not allowed either (SurvivorsForge off): nothing goes out, and nothing waits.
+        icons.want(&icon(2));
+        assert_eq!(next_picture(None, &mut thumbs, false, &mut icons, false), None);
+        assert_eq!((thumbs.waiting(), icons.waiting()), (0, 0));
+        // The viewer's picture still goes, even then: it was asked for by a click.
+        assert_eq!(next_picture(Some(pic(5)), &mut thumbs, false, &mut icons, false), Some((pic(5), PictureKind::Shot)));
+        // Each kind's size: a thumbnail between an icon and the viewer's picture.
+        assert_eq!((PictureKind::Icon.side(), PictureKind::Thumb.side(), PictureKind::Shot.side()), (ICON_SIDE, THUMB_SIDE, SHOT_SIDE));
+        assert_eq!(THUMB_SIDE, 192);
+        assert_eq!(fit_within(1920, 1080, THUMB_SIDE), (192, 108));
+        assert_eq!(fit_within(160, 90, THUMB_SIDE), (160, 90), "never scaled up");
     }
 
     #[test]
