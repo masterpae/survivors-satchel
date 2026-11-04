@@ -89,6 +89,26 @@ pub enum Command {
     BrowseClose,
     /// The panel's "Show what it found": the findings of the version it shows.
     ForgeShowScan(String),
+    /// The Addons tab, or one of its pages, came into view (0 Installed, 1 Browse): the icons of
+    /// the addons it lists.
+    AddonsShown(i32),
+    /// Browse's switch: `list`, `cards` or `table`, kept in settings.toml.
+    BrowseView(String),
+    /// The picture viewer opened on, or moved to, one of an addon's screenshots (its id, the
+    /// picture's place in its details).
+    PictureShow(String, usize),
+    /// The viewer closed.
+    PictureClose,
+    /// Versions… opened for an addon (Browse's, or an installed one).
+    VersionsOpen(String),
+    VersionsClose,
+    /// Versions…' Install this version (`false`), or Install anyway (`true`): an addon's id and
+    /// the version's tag.
+    VersionInstall(String, String, bool),
+    /// Versions…' Go back to this: an addon's id and the backup of the version kept.
+    VersionBack(String, String),
+    /// An incoming addon's Install anyway: the player's OK for the file another PC has.
+    IncomingInstallAnyway(String),
     /// A link in Settings or About: SurvivorsForge's repository or website, or a GitHub
     /// repository's page; nothing else is opened.
     OpenLink(String),
@@ -98,6 +118,8 @@ pub enum Command {
     ImportZip(PathBuf),
     /// The Removed list's Install again.
     InstallAgain(String),
+    /// Its Install anyway: the player's OK where SurvivorsForge asks first about that version.
+    InstallAgainAnyway(String),
     /// After the game's settings changed here and on another PC: `true` keeps this PC's.
     GameSettingsChoice(bool),
     /// "Use them instead": this PC's own game settings from before it joined.
@@ -317,7 +339,7 @@ impl Worker {
             memory.splits.extend(question.map(|q| (id.to_string(), q)));
             memory.game_own_kept = own;
         }
-        let net = net::start(engine.local.addon_cache(), commands);
+        let net = net::start(engine.local.addon_cache(), engine.local.forge_dir(), commands);
         let forge = forge::ForgeState::new(engine.local.forge_dir());
         Worker {
             addons: addons::AddonsState::new(store, net),
@@ -445,6 +467,9 @@ impl Worker {
                 | Command::AddonUpdate(_)
                 | Command::AddonUpdateAnyway(_)
                 | Command::LinkInstall
+                | Command::VersionInstall(..)
+                | Command::InstallAgainAnyway(_)
+                | Command::IncomingInstallAnyway(_)
         ) {
             self.last_view = None;
         }
@@ -463,6 +488,10 @@ impl Worker {
                 | Command::LinkInstall
                 | Command::ImportZip(_)
                 | Command::InstallAgain(_)
+                | Command::InstallAgainAnyway(_)
+                | Command::VersionInstall(..)
+                | Command::VersionBack(..)
+                | Command::IncomingInstallAnyway(_)
                 | Command::SaveSettings(_)
         );
         match command {
@@ -544,12 +573,22 @@ impl Worker {
             Command::BrowseOpen(id) => self.browse_open(&id),
             Command::BrowseClose => self.browse_close(),
             Command::ForgeShowScan(id) => self.forge_show_scan(&id),
+            Command::AddonsShown(page) => self.forge_icons_wanted(page),
+            Command::BrowseView(view) => self.browse_view(&view),
+            Command::PictureShow(id, index) => self.forge_picture_show(&id, index),
+            Command::PictureClose => self.forge_picture_close(),
+            Command::VersionsOpen(id) => self.versions_open(&id),
+            Command::VersionsClose => self.addons.versions_open = None,
+            Command::VersionInstall(id, tag, anyway) => self.version_install_as(&id, &tag, anyway, true),
+            Command::VersionBack(id, backup) => self.version_back(&id, Some(&backup)),
+            Command::IncomingInstallAnyway(id) => self.incoming_install_anyway(&id),
             Command::OpenLink(url) => self.open_link(&url),
             Command::LinkLookup(text) => self.link_lookup(text),
             Command::LinkInstall => self.link_install(),
             Command::LinkClear => self.link_clear(),
             Command::ImportZip(path) => self.import_zip(path),
-            Command::InstallAgain(id) => self.install_again(&id),
+            Command::InstallAgain(id) => self.install_again_as(&id, false, true),
+            Command::InstallAgainAnyway(id) => self.install_again_as(&id, true, true),
             Command::GameSettingsChoice(keep_here) => self.game_settings_choice(keep_here),
             Command::GameSettingsOwn => self.game_use_own(),
             Command::UpdateNow => self.update_now(),
@@ -1321,6 +1360,7 @@ impl Worker {
         settings.addons.update_by_themselves = form.addons_auto;
         settings.addons.shared = form.addons_shared;
         settings.addons.forge = form.addons_forge;
+        settings.addons.browse_view = satchel_core::settings::browse_view_or_cards(&form.browse_view);
         settings.pause_when_away = form.pause_when_away;
         settings.theme = match form.theme {
             1 => Theme::Light,
@@ -1377,6 +1417,21 @@ impl Worker {
         true
     }
 
+    /// Browse's switch: the view is kept in settings.toml as soon as it is picked, on its own, so
+    /// fields being edited in Settings stay as they are (the form isn't pushed again).
+    fn browse_view(&mut self, view: &str) {
+        let view = satchel_core::settings::browse_view_or_cards(view);
+        if self.engine.settings.addons.browse_view == view {
+            return;
+        }
+        let mut settings = self.engine.settings.clone();
+        settings.addons.browse_view = view;
+        match settings.save(&self.engine.local.settings()) {
+            Ok(()) => self.engine.settings = settings,
+            Err(e) => log!("Browse's view not saved: {e}"),
+        }
+    }
+
     /// How another PC syncing here spells `name` (in any case), as the versions' index and the
     /// shared addon list name the PCs; `None` when none does, and for this PC's own names, now
     /// and before.
@@ -1420,6 +1475,7 @@ impl Worker {
             pause_when_away: settings.pause_when_away,
             theme: theme_index(settings.theme),
             game_shared: settings.game.shared,
+            browse_view: settings.addons.browse_view.clone(),
         };
         FormView {
             saved: form.clone(),

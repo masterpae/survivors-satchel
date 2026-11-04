@@ -3,7 +3,7 @@ members = ["crates/satchel-core", "tools/catalog", "tools/ui-preview"]
 
 [package]
 name = "survivors-satchel"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 rust-version = "1.99"
 description = "A Windows launcher for Azeroth Survivors: the same progress on every PC, playtime, addons."
@@ -29,6 +29,10 @@ slint = { version = "1.18.1", default-features = false, features = [
     "system-tray",
     "raw-window-handle-06",
 ] }
+# SurvivorsForge's icons and its addons' screenshots, decoded on the network thread into RGBA
+# pixels for `slint::Image::from_rgba8`: PNG, JPEG and WebP only, never on the UI thread. The 0.25
+# line Slint already brings (Cargo.lock), without its default formats.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"

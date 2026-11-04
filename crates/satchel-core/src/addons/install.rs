@@ -33,6 +33,8 @@ pub enum AddonError {
     NotInstalled(String),
     /// No earlier version is kept for it.
     NothingEarlier(String),
+    /// The earlier version asked for isn't kept any more.
+    NotKept(String),
     /// The zip's addon folders aren't the ones its listing names.
     Folders { listed: Vec<String>, found: Vec<String> },
     Io(io::Error),
@@ -58,6 +60,7 @@ impl fmt::Display for AddonError {
             AddonError::Clash { folder, owner } => write!(f, "{owner} already uses the folder {folder}; two addons can't share one"),
             AddonError::NotInstalled(id) => write!(f, "{id} isn't installed"),
             AddonError::NothingEarlier(name) => write!(f, "no earlier version of {name} is kept"),
+            AddonError::NotKept(name) => write!(f, "that earlier version of {name} isn't kept any more"),
             AddonError::Folders { listed, found } => {
                 write!(f, "its zip holds {}, not the folders it's listed with ({}), so it wasn't installed", found.join(", "), listed.join(", "))
             }
@@ -91,6 +94,9 @@ pub struct Incoming {
     /// The addon folders the zip must hold, exactly (names without case): SurvivorsForge lists
     /// every folder an addon installs, and a zip that holds others isn't its file. `None`: any.
     pub expected_folders: Option<Vec<String>>,
+    /// Kept at this version once in ("Keep this version"): a version picked in Versions…, kept the
+    /// way Go back keeps one, so nothing updates it by itself until the player lets it.
+    pub pinned: bool,
 }
 
 /// What an install did.
@@ -199,7 +205,7 @@ impl Addons<'_> {
             folders: prints,
             installed: now,
             released: incoming.released,
-            pinned: false,
+            pinned: incoming.pinned,
             // A first install asks first, unless it is from our list or SurvivorsForge's own (whose
             // verdict decides); later the record keeps what it had.
             ask: previous.as_ref().map_or(incoming.badge != Badge::Verified && incoming.forge.is_none(), |p| p.ask),
@@ -278,12 +284,18 @@ impl Addons<'_> {
         }
     }
 
-    /// Goes back to the newest earlier version kept, and keeps it ("Keep this version") until the
-    /// player lifts that. The version it replaces becomes the newest kept one. Settings stay as
-    /// they are. The game must be closed.
-    pub fn go_back(&mut self, id: &str, now: DateTime<Utc>) -> Result<Record, AddonError> {
+    /// Goes back to an earlier version kept, `target` (its backup's name, as `Kept::backup` has it;
+    /// `None`: the newest kept), and keeps it ("Keep this version") until the player lifts that.
+    /// The version it replaces becomes the newest kept one; the others stay as they were. Settings
+    /// stay as they are. The game must be closed.
+    pub fn go_back(&mut self, id: &str, target: Option<&str>, now: DateTime<Utc>) -> Result<Record, AddonError> {
         let current = self.store.get(id).cloned().ok_or_else(|| AddonError::NotInstalled(id.into()))?;
-        let Some(target) = current.earlier.first().cloned() else { return Err(AddonError::NothingEarlier(current.name)) };
+        let at = match target {
+            None if current.earlier.is_empty() => return Err(AddonError::NothingEarlier(current.name)),
+            None => 0,
+            Some(backup) => current.earlier.iter().position(|k| k.backup == backup).ok_or_else(|| AddonError::NotKept(current.name.clone()))?,
+        };
+        let target = current.earlier[at].clone();
         let stage = self.local.addon_backups().join(&target.backup);
         let mut going: Vec<String> = current.folders.keys().cloned().collect();
         let coming: Vec<String> = fs::read_dir(&stage)?
@@ -302,7 +314,7 @@ impl Addons<'_> {
         // taken back then goes with the rest of that backup.
         let _ = fsx::remove_dir_if_present(&stage);
 
-        let mut earlier: Vec<Kept> = current.earlier.iter().skip(1).cloned().collect();
+        let mut earlier: Vec<Kept> = current.earlier.iter().enumerate().filter(|(i, _)| *i != at).map(|(_, kept)| kept.clone()).collect();
         earlier.insert(
             0,
             Kept {
@@ -457,6 +469,7 @@ mod tests {
             url: None,
             forge: None,
             expected_folders: None,
+            pinned: false,
         }
     }
 
@@ -480,6 +493,7 @@ mod tests {
             url: Some(format!("https://github.com/sam/Totems/releases/download/v{version}/Totems.zip")),
             forge: Some("totems".into()),
             expected_folders: Some(vec!["totems".into()]),
+            pinned: false,
         }
     }
 
@@ -550,6 +564,7 @@ mod tests {
             url: Some("https://codeload.github.com/sam/KMA/zip/refs/tags/1".into()),
             forge: Some("kma".into()),
             expected_folders: Some(vec!["KMA".into()]),
+            pinned: false,
         };
         let done = pc.addons().install(incoming, t(0)).unwrap();
         assert_eq!(done.record.folders.keys().collect::<Vec<_>>(), ["KMA"]);
@@ -582,7 +597,7 @@ mod tests {
         pc.addons().install(dated("0.6.0", 20), t(0)).unwrap();
         let done = pc.addons().install(dated("0.7.0", 27), t(10)).unwrap();
         assert_eq!((done.record.released, done.record.earlier[0].released), (Some(day(27)), Some(day(20))));
-        let back = pc.addons().go_back("lucky-odds", t(20)).unwrap();
+        let back = pc.addons().go_back("lucky-odds", None, t(20)).unwrap();
         assert_eq!((back.released, back.earlier[0].released), (Some(day(20)), Some(day(27))));
     }
 
@@ -630,7 +645,7 @@ mod tests {
         let mut pc = pc();
         pc.addons().install(lucky("0.6.0"), t(0)).unwrap();
         pc.addons().install(lucky("0.7.0"), t(10)).unwrap();
-        let back = pc.addons().go_back("lucky-odds", t(20)).unwrap();
+        let back = pc.addons().go_back("lucky-odds", None, t(20)).unwrap();
         assert_eq!(core_lua(&pc), "0.6.0");
         assert_eq!(back.version.as_deref(), Some("0.6.0"));
         assert!(back.pinned, "going back keeps that version");
@@ -638,9 +653,51 @@ mod tests {
         assert_eq!(back.folders["LuckyOdds"], super::super::tree::fingerprint_dir(&pc.game.addons.join("LuckyOdds")).unwrap());
         pc.addons().pin("lucky-odds", false).unwrap();
         assert!(!pc.store.get("lucky-odds").unwrap().pinned);
-        let forward = pc.addons().go_back("lucky-odds", t(30)).unwrap();
+        let forward = pc.addons().go_back("lucky-odds", None, t(30)).unwrap();
         assert_eq!(core_lua(&pc), "0.7.0");
         assert_eq!(forward.version.as_deref(), Some("0.7.0"));
+    }
+
+    #[test]
+    fn going_back_to_a_chosen_kept_version() {
+        let mut pc = pc();
+        for (i, v) in ["0.5.0", "0.6.0", "0.7.0"].iter().enumerate() {
+            pc.addons().install(lucky(v), t(i as i64 * 10)).unwrap();
+        }
+        let record = pc.store.get("lucky-odds").unwrap().clone();
+        let kept: Vec<_> = record.earlier.iter().map(|k| k.version.clone().unwrap()).collect();
+        assert_eq!(kept, ["0.6.0", "0.5.0"]);
+        // Versions…' Go back to this, on the older one: that one comes back, kept at it.
+        let oldest = record.earlier[1].backup.clone();
+        let back = pc.addons().go_back("lucky-odds", Some(&oldest), t(30)).unwrap();
+        assert_eq!(core_lua(&pc), "0.5.0");
+        assert!(back.pinned, "kept at that version, as Go back keeps one");
+        let kept: Vec<_> = back.earlier.iter().map(|k| k.version.clone().unwrap()).collect();
+        assert_eq!(kept, ["0.7.0", "0.6.0"], "the version it replaced first, the other as it was");
+        assert!(!pc.local.addon_backups().join(&oldest).exists(), "its backup is what went back in");
+        assert_eq!(Store::load(&pc.local.addon_store()).unwrap(), pc.store, "the record is on disk");
+        // A version no longer kept: refused, and nothing changes.
+        let err = pc.addons().go_back("lucky-odds", Some(&oldest), t(40)).unwrap_err();
+        assert!(matches!(err, AddonError::NotKept(_)), "{err}");
+        assert_eq!(core_lua(&pc), "0.5.0");
+        // Without a target: the newest kept, as before.
+        let forward = pc.addons().go_back("lucky-odds", None, t(50)).unwrap();
+        assert_eq!((forward.version.as_deref(), core_lua(&pc).as_str()), (Some("0.7.0"), "0.7.0"));
+    }
+
+    #[test]
+    fn a_version_picked_in_versions_is_kept_until_it_may_update() {
+        let mut pc = pc();
+        pc.addons().install(lucky("0.7.0"), t(0)).unwrap();
+        // An older release installed from Versions…: pinned, the way Go back pins.
+        let picked = pc.addons().install(Incoming { pinned: true, ..lucky("0.6.0") }, t(10)).unwrap();
+        assert_eq!((core_lua(&pc), picked.record.pinned), ("0.6.0".to_string(), true));
+        assert_eq!(picked.record.earlier[0].version.as_deref(), Some("0.7.0"), "the version it replaced is kept");
+        assert!(Store::load(&pc.local.addon_store()).unwrap().get("lucky-odds").unwrap().pinned, "on disk");
+        // Letting it update again unpins it, and an ordinary install isn't pinned.
+        pc.addons().pin("lucky-odds", false).unwrap();
+        assert!(!pc.store.get("lucky-odds").unwrap().pinned);
+        assert!(!pc.addons().install(lucky("0.7.0"), t(20)).unwrap().record.pinned);
     }
 
     #[test]

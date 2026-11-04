@@ -2251,6 +2251,7 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
@@ -4448,9 +4449,10 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "survivors-satchel"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "chrono",
+ "image",
  "raw-window-handle",
  "satchel-core",
  "serde",

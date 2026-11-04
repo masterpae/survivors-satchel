@@ -3,6 +3,30 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.7.2 (2026-11-04)
+
+Three ways to browse, icons and pictures, and any version you like.
+
+### Added
+- Browse has three views: list, cards and table, with a switch in its top row; the choice is
+  kept. The table view sorts from its column headings, filters with check boxes, and shows the
+  selected addon beside it, or in its place in a narrower window.
+- Addon icons from SurvivorsForge show as soon as Browse opens, and screenshots open in a
+  viewer. Pictures come only from SurvivorsForge's own site and GitHub, and are kept on this PC
+  once fetched.
+- Versions…: every version of an addon in one list, with SurvivorsForge's word on each; go back
+  to a kept one or install an older release. It stays at that version until you let it update.
+- SurvivorsForge-only addons now show the date of their version and sort by last update and
+  popularity, from its registry.
+
+### Changed
+- An addon's details and versions from SurvivorsForge stay cached when only its download count
+  changed.
+- An addon arriving from another PC that waits for your OK has its own button; Install again
+  asks first when SurvivorsForge flags that version or hasn't scanned it.
+- A version SurvivorsForge held back stays held back for the file it judged: a file replaced
+  under the same version is judged again.
+
 ## 0.7.1 (2026-10-31)
 
 SurvivorsForge in the Addons tab, and Browse as cards.
