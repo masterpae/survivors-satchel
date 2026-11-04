@@ -3,6 +3,16 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.8.0 (2026-11-04)
+
+The game's patch notes, in the app.
+
+### Added
+- A line on the Play tab says which game build is current and opens the game's patch notes: the
+  newest build's note from the game's own update server, and the full notes kept in this
+  repository, which players get within half an hour of an edit, without an update of the Satchel.
+- About says where the game's notes come from.
+
 ## 0.7.2 (2026-11-04)
 
 Three ways to browse, icons and pictures, and any version you like.
