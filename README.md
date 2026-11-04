@@ -36,8 +36,8 @@ manager with playtime and backups.
 | ✅ | 0.6 | First public release |
 | ✅ | 0.7.0 | Updates signed by the maintainer |
 | ✅ | 0.7.1 | SurvivorsForge's addons and trust levels, Browse as cards |
-| 🔜 | 0.7.2 | Two more ways to browse (a list and a two-pane catalog), addon icons and screenshots, going back to any older version |
-| | 0.8 | The game's patch notes inside the app |
+| ✅ | 0.7.2 | Two more ways to browse (a list and a two-pane catalog), addon icons and screenshots, going back to any older version |
+| 🔜 | 0.8 | The game's patch notes inside the app |
 | | 0.9 | A design pass over every screen, a first-start guide, and a clearer page here |
 | | 1.0 | A code-signed exe Windows can recognize, an option to archive old save versions, and a month of real use without surprises |
 

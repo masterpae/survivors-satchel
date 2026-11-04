@@ -2,6 +2,11 @@
 # Satchel, each with its reason. Re-read at every dependency change; Dependabot proposes the
 # versions that close them.
 [advisories]
-# None today: zip 9.0 closed the three this list held for zip 8.6.0 (RUSTSEC-2026-0367, -0368,
-# -0369, all in its `extract`, which the Satchel never called).
-ignore = []
+# zip 9.0 closed the three this list held for zip 8.6.0 (RUSTSEC-2026-0367, -0368, -0369, all in
+# its `extract`, which the Satchel never called).
+# RUSTSEC-2026-0433 (noted 2026-11-04): pulldown-cmark 0.13.5, a dependency of Slint's own crates
+# (i-slint-common). Quadratic parsing of nested image wikilinks with ENABLE_WIKILINKS: the Satchel
+# never parses Markdown with pulldown-cmark (its own flatteners read the changelog and
+# SurvivorsForge's texts), so no input reaches it. Closed by pulldown-cmark 0.13.6 (released
+# 2026-10-30) once it is two weeks old; Dependabot proposes it. Remove this line then.
+ignore = ["RUSTSEC-2026-0433"]
