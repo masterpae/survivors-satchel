@@ -354,7 +354,7 @@ impl Worker {
         // The ETag only while the registry it names is still on disk.
         f.reread();
         let etag = f.state.etag.clone();
-        f.asking = self.addons.net.send(Job::ForgeRegistry { etag }).is_ok();
+        f.asking = self.net.send(Job::ForgeRegistry { etag }).is_ok();
     }
 
     /// The registry's answer, kept with its bookkeeping: a 304 keeps what is there, and anything
@@ -497,7 +497,7 @@ impl Worker {
             return false;
         }
         if !self.forge.versions_out.contains(slug) {
-            if self.addons.net.send(Job::ForgeVersions(slug.to_string())).is_err() {
+            if self.net.send(Job::ForgeVersions(slug.to_string())).is_err() {
                 return false;
             }
             self.forge.versions_out.insert(slug.to_string());
@@ -549,7 +549,7 @@ impl Worker {
         if self.forge.follow_asked.contains(&key) || self.forge.versions_out.contains(slug) {
             return;
         }
-        if self.addons.net.send(Job::ForgeVersions(slug.to_string())).is_ok() {
+        if self.net.send(Job::ForgeVersions(slug.to_string())).is_ok() {
             self.forge.versions_out.insert(slug.to_string());
             self.forge.follow_asked.insert(key);
         }
@@ -612,7 +612,7 @@ impl Worker {
         if !listed || failed || self.forge.versions.contains_key(slug) || self.forge.versions_out.contains(slug) {
             return;
         }
-        if self.addons.net.send(Job::ForgeVersions(slug.to_string())).is_ok() {
+        if self.net.send(Job::ForgeVersions(slug.to_string())).is_ok() {
             self.forge.versions_out.insert(slug.to_string());
         }
     }
@@ -709,7 +709,7 @@ impl Worker {
         let f = &mut self.forge;
         let Some((url, kind)) = forge::next_picture(shot, &mut f.thumbs, thumbs_allowed, &mut f.icons, icons_allowed) else { return };
         let addon = (kind == PictureKind::Thumb).then(|| f.open.clone()).flatten();
-        if self.addons.net.send(Job::Picture { url: url.clone(), kind }).is_ok() {
+        if self.net.send(Job::Picture { url: url.clone(), kind }).is_ok() {
             self.forge.picture_out = Some((url, kind, addon));
         }
     }
@@ -836,10 +836,10 @@ impl Worker {
         }
         let want_details = (dropped || !self.forge.details.contains_key(&slug)) && !self.forge.details_out.contains(&slug);
         let want_versions = listed && !self.forge.versions.contains_key(&slug) && !self.forge.versions_out.contains(&slug);
-        if want_details && self.addons.net.send(Job::ForgeDetails(slug.clone())).is_ok() {
+        if want_details && self.net.send(Job::ForgeDetails(slug.clone())).is_ok() {
             self.forge.details_out.insert(slug.clone());
         }
-        if want_versions && self.addons.net.send(Job::ForgeVersions(slug.clone())).is_ok() {
+        if want_versions && self.net.send(Job::ForgeVersions(slug.clone())).is_ok() {
             self.forge.versions_out.insert(slug);
         }
         self.forge.reread();
@@ -862,7 +862,7 @@ impl Worker {
         }
         if let Some(scan) = self.forge.cache.scan(&slug, &tag) {
             self.forge.scans.insert(key, scan);
-        } else if self.addons.net.send(Job::ForgeFindings { slug: slug.clone(), tag }).is_ok() {
+        } else if self.net.send(Job::ForgeFindings { slug: slug.clone(), tag }).is_ok() {
             self.forge.failed.remove(&slug);
             self.forge.findings_out.insert(key);
         }

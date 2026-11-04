@@ -100,7 +100,7 @@ impl Worker {
             // The ETag only while the copy it names is still on disk.
             self.news.reread();
             let etag = self.news.state.source(feed).etag.clone();
-            let sent = self.addons.net.send(Job::GameNews { feed, etag }).is_ok();
+            let sent = self.net.send(Job::GameNews { feed, etag }).is_ok();
             *self.news.out(feed) = sent;
         }
     }

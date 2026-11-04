@@ -6,7 +6,7 @@ mod forge;
 mod game_news;
 mod share;
 
-use crate::net::{self, Answer};
+use crate::net::{self, Answer, Job};
 use crate::about;
 use crate::update;
 use crate::view::{Answered, Form, FormView, PcLine, Pill, PlaytimeView, RailView, Recent, SaveLine, Setup, Tray, Ui, UpdateLine, View};
@@ -256,6 +256,8 @@ pub struct Worker {
     last_refresh: Option<Instant>,
     last_retry: Option<Instant>,
     last_view: Option<View>,
+    /// The one channel to the network thread; it answers on the worker's own (`Command::Net`).
+    net: Sender<Job>,
     addons: addons::AddonsState,
     share: share::ShareState,
     forge: forge::ForgeState,
@@ -376,7 +378,8 @@ impl Worker {
         let forge = forge::ForgeState::new(engine.local.forge_dir());
         let news = game_news::NewsState::new(engine.local.game_news_dir());
         Worker {
-            addons: addons::AddonsState::new(store, net),
+            net,
+            addons: addons::AddonsState::new(store),
             share: share::ShareState::new(memory),
             forge,
             news,
@@ -634,11 +637,27 @@ impl Worker {
             Command::GameNewsSeen => self.news_seen(),
             Command::FindGame => self.find_game(),
             Command::OpenGameSite => win::open_url(win::GAME_SITE),
-            Command::Net(answer) => self.addons_answer(answer),
+            Command::Net(answer) => self.on_net(answer),
             Command::Quit => {}
         }
         if changes_addons {
             self.share_look();
+        }
+    }
+
+    /// An answer from the network thread, to the concern that asked.
+    fn on_net(&mut self, answer: Answer) {
+        match answer {
+            Answer::Looked(results) => self.addons_looked(results),
+            Answer::Fetched { id, tag, sha256 } => self.addons_fetched(id, tag, sha256),
+            Answer::Picture { url, kind, pixels } => self.forge_picture_answer(&url, kind, pixels),
+            Answer::Satchel(result) => self.satchel_answer(result),
+            Answer::ForgeRegistry(answer) => self.forge_registry_answer(answer),
+            Answer::ForgeDetails { slug, answer } => self.forge_details_answer(&slug, answer),
+            Answer::ForgeVersions { slug, answer } => self.forge_versions_answer(&slug, answer),
+            Answer::ForgeFindings { slug, tag, answer } => self.forge_findings_answer(&slug, &tag, answer),
+            Answer::GameNews { feed, answer } => self.news_answer(feed, answer),
+            Answer::LookedUp(result) => self.addons_looked_up(result),
         }
     }
 
@@ -2369,7 +2388,29 @@ impl Worker {
         self.github_offer.as_ref()
     }
 
-    pub(crate) fn satchel_answer(&mut self, result: Result<Option<update::Offer>, String>) {
+    /// In a build that knows its repository: the Satchel's newest GitHub release, on start and
+    /// every few hours (sooner after a failed look). A newer one is downloaded, checked and its
+    /// signature verified, then offered (Update now). When a newer Satchel keeps this one out and nothing
+    /// offers it yet, that very release is looked for, every few minutes. True when a look was
+    /// handed to the network thread just now.
+    fn satchel_look(&mut self) -> bool {
+        if about::REPOSITORY.is_empty() {
+            return false;
+        }
+        let want = self.gated.clone().filter(|newer| self.offer().is_none_or(|o| gate::is_newer(newer, &o.version)));
+        let every = match (&want, self.satchel_failed) {
+            (Some(_), _) => SATCHEL_GATED_EVERY,
+            (None, true) => SATCHEL_RETRY_EVERY,
+            (None, false) => SATCHEL_LOOK_EVERY,
+        };
+        if !due(self.satchel_looked, every) {
+            return false;
+        }
+        self.satchel_looked = Some(Instant::now());
+        self.net.send(Job::Satchel { repo: about::REPOSITORY.into(), dir: self.engine.local.satchel_download(), want }).is_ok()
+    }
+
+    fn satchel_answer(&mut self, result: Result<Option<update::Offer>, String>) {
         self.satchel_failed = result.is_err();
         let failed = match result {
             Ok(offer) => {

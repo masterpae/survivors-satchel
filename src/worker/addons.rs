@@ -3,7 +3,7 @@
 
 use super::forge::{Held, forge_badge, forge_level, row_reason};
 use super::{Worker, ago, when};
-use crate::net::{Answer, Job, Lookup};
+use crate::net::{Job, Lookup};
 use crate::view::{AddonLine, AddonsView, LinkView, OfferLine, RemovedLine, VersionLine, VersionsView};
 use crate::win;
 use chrono::{DateTime, Local, TimeDelta, Utc};
@@ -16,12 +16,11 @@ use satchel_core::addons::install::{Addons, Incoming};
 use satchel_core::addons::overview::{self, Inputs, Line, Offer, Standing, VersionAction, initials};
 use satchel_core::addons::store::{Badge, Gone, Record, Store};
 use satchel_core::addons::{Found, GameAddons, package, scan, toc, tree};
-use satchel_core::{fsx, gate, log, names};
+use satchel_core::{fsx, log, names};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant, SystemTime};
 
 /// At Play, a look for new releases when the last one is older than this.
@@ -137,11 +136,10 @@ pub(super) struct AddonsState {
     message: Option<(String, Instant)>,
     /// The addon whose Versions… is open (its id), until it closes.
     pub(super) versions_open: Option<String>,
-    pub(super) net: Sender<Job>,
 }
 
 impl AddonsState {
-    pub(super) fn new(store: Store, net: Sender<Job>) -> AddonsState {
+    pub(super) fn new(store: Store) -> AddonsState {
         AddonsState {
             catalog: Catalog::builtin(),
             store,
@@ -166,7 +164,6 @@ impl AddonsState {
             adopted_note: None,
             message: None,
             versions_open: None,
-            net,
         }
     }
 }
@@ -434,7 +431,7 @@ impl Worker {
             return;
         }
         self.addons.looking = true;
-        let _ = self.addons.net.send(Job::Look(watches));
+        let _ = self.net.send(Job::Look(watches));
     }
 
     /// Downloads for every update shown (a turned-off addon's waits until it's on, and one
@@ -466,118 +463,89 @@ impl Worker {
             }
             a.fetching.insert(key);
             let sha256 = (!release.sha256.is_empty()).then(|| release.sha256.clone());
-            let _ = a.net.send(Job::Fetch { id, tag: release.tag.clone(), url: release.url.clone(), sha256 });
+            let _ = self.net.send(Job::Fetch { id, tag: release.tag.clone(), url: release.url.clone(), sha256 });
         }
     }
 
-    /// In a build that knows its repository: the Satchel's newest GitHub release, on start and
-    /// every few hours (sooner after a failed look). A newer one is downloaded, checked and its
-    /// signature verified, then offered (Update now). When a newer Satchel keeps this one out and nothing
-    /// offers it yet, that very release is looked for, every few minutes. True when a look was
-    /// handed to the network thread just now.
-    pub(super) fn satchel_look(&mut self) -> bool {
-        if crate::about::REPOSITORY.is_empty() {
-            return false;
+    /// GitHub's answer about the installed addons' releases: what's new, by addon id.
+    pub(super) fn addons_looked(&mut self, results: Vec<(String, Result<Option<Release>, String>)>) {
+        let a = &mut self.addons;
+        for (id, result) in results {
+            match result {
+                Ok(Some(release)) => {
+                    log!("{id}: {} is out on GitHub", release.tag);
+                    a.unreachable.remove(&id);
+                    a.newer.insert(id, release);
+                }
+                Ok(None) => {
+                    a.unreachable.remove(&id);
+                    a.newer.remove(&id);
+                }
+                Err(e) => {
+                    log!("{id}: not looked up: {e}");
+                    a.unreachable.insert(id, e);
+                }
+            }
         }
-        let want = self.gated.clone().filter(|newer| self.offer().is_none_or(|o| gate::is_newer(newer, &o.version)));
-        let every = match (&want, self.satchel_failed) {
-            (Some(_), _) => super::SATCHEL_GATED_EVERY,
-            (None, true) => super::SATCHEL_RETRY_EVERY,
-            (None, false) => super::SATCHEL_LOOK_EVERY,
+        a.looked = Some(Utc::now());
+        a.looking = false;
+        a.refused.clear();
+        // A release downloaded before (an earlier run) is named from its zip now.
+        let cache = self.engine.local.addon_cache();
+        let named: Vec<(String, String, String)> = self
+            .addons
+            .newer
+            .iter()
+            .filter(|(_, r)| r.interface == 0)
+            .filter_map(|(id, r)| zip_ready(&cache, &self.addons.ready, id, r).map(|(_, sha)| (id.clone(), r.tag.clone(), sha)))
+            .collect();
+        for (id, tag, sha) in named {
+            self.name_from_zip(&id, &tag, &sha);
+        }
+        self.addons_lines();
+    }
+
+    /// A download finished (or failed): the installs waiting for it go in, the game closed.
+    pub(super) fn addons_fetched(&mut self, id: String, tag: String, sha256: Result<String, String>) {
+        let key = (id.clone(), tag.clone());
+        self.addons.fetching.remove(&key);
+        match sha256 {
+            Ok(sha) => {
+                self.name_from_zip(&id, &tag, &sha);
+                self.addons.ready.insert(key, sha);
+            }
+            Err(e) => {
+                log!("{id} {tag} not downloaded: {e}");
+                self.addons.refused.insert(key, e.clone());
+                let gone: Vec<Want> = self.addons.waiting.iter().filter(|w| w.id == id && w.release.tag == tag).cloned().collect();
+                self.addons.waiting.retain(|w| !(w.id == id && w.release.tag == tag));
+                for want in gone {
+                    self.addons_say(format!("{} wasn't downloaded: {e}", want.name));
+                }
+            }
+        }
+        // During a session they wait for its end (the game may be restarting itself).
+        if !self.tracker.in_session() && !self.addons.waiting.is_empty() {
+            self.install_waiting();
+        }
+        // An incoming addon the player OK'd comes in once its download is here.
+        if !self.tracker.in_session() {
+            self.share_follow_now(true);
+        }
+    }
+
+    /// "Add from a link": what GitHub says about the repository typed.
+    pub(super) fn addons_looked_up(&mut self, result: Result<Lookup, String>) {
+        let catalog = &self.addons.catalog;
+        self.addons.link = match result {
+            Ok(lookup) => {
+                let verified = catalog.addons.iter().find(|e| e.repo.eq_ignore_ascii_case(&lookup.repo)).map(|e| e.id.clone());
+                let name = lookup.title.clone().unwrap_or_else(|| lookup.repo.split('/').nth(1).unwrap_or_default().to_string());
+                let warning = if verified.is_some() { None } else { overview::look_alike(catalog, &lookup.repo, &name, &lookup.folders) };
+                Link::Found { lookup, warning, verified }
+            }
+            Err(e) => Link::Failed(e),
         };
-        if !super::due(self.satchel_looked, every) {
-            return false;
-        }
-        self.satchel_looked = Some(Instant::now());
-        self.addons.net.send(Job::Satchel { repo: crate::about::REPOSITORY.into(), dir: self.engine.local.satchel_download(), want }).is_ok()
-    }
-
-    /// An answer from the network thread.
-    pub(super) fn addons_answer(&mut self, answer: Answer) {
-        match answer {
-            Answer::Looked(results) => {
-                let a = &mut self.addons;
-                for (id, result) in results {
-                    match result {
-                        Ok(Some(release)) => {
-                            log!("{id}: {} is out on GitHub", release.tag);
-                            a.unreachable.remove(&id);
-                            a.newer.insert(id, release);
-                        }
-                        Ok(None) => {
-                            a.unreachable.remove(&id);
-                            a.newer.remove(&id);
-                        }
-                        Err(e) => {
-                            log!("{id}: not looked up: {e}");
-                            a.unreachable.insert(id, e);
-                        }
-                    }
-                }
-                a.looked = Some(Utc::now());
-                a.looking = false;
-                a.refused.clear();
-                // A release downloaded before (an earlier run) is named from its zip now.
-                let cache = self.engine.local.addon_cache();
-                let named: Vec<(String, String, String)> = self
-                    .addons
-                    .newer
-                    .iter()
-                    .filter(|(_, r)| r.interface == 0)
-                    .filter_map(|(id, r)| zip_ready(&cache, &self.addons.ready, id, r).map(|(_, sha)| (id.clone(), r.tag.clone(), sha)))
-                    .collect();
-                for (id, tag, sha) in named {
-                    self.name_from_zip(&id, &tag, &sha);
-                }
-                self.addons_lines();
-            }
-            Answer::Fetched { id, tag, sha256 } => {
-                let key = (id.clone(), tag.clone());
-                self.addons.fetching.remove(&key);
-                match sha256 {
-                    Ok(sha) => {
-                        self.name_from_zip(&id, &tag, &sha);
-                        self.addons.ready.insert(key, sha);
-                    }
-                    Err(e) => {
-                        log!("{id} {tag} not downloaded: {e}");
-                        self.addons.refused.insert(key, e.clone());
-                        let gone: Vec<Want> = self.addons.waiting.iter().filter(|w| w.id == id && w.release.tag == tag).cloned().collect();
-                        self.addons.waiting.retain(|w| !(w.id == id && w.release.tag == tag));
-                        for want in gone {
-                            self.addons_say(format!("{} wasn't downloaded: {e}", want.name));
-                        }
-                    }
-                }
-                // During a session they wait for its end (the game may be restarting itself).
-                if !self.tracker.in_session() && !self.addons.waiting.is_empty() {
-                    self.install_waiting();
-                }
-                // An incoming addon the player OK'd comes in once its download is here.
-                if !self.tracker.in_session() {
-                    self.share_follow_now(true);
-                }
-            }
-            Answer::Picture { url, kind, pixels } => self.forge_picture_answer(&url, kind, pixels),
-            Answer::Satchel(result) => self.satchel_answer(result),
-            Answer::ForgeRegistry(answer) => self.forge_registry_answer(answer),
-            Answer::ForgeDetails { slug, answer } => self.forge_details_answer(&slug, answer),
-            Answer::ForgeVersions { slug, answer } => self.forge_versions_answer(&slug, answer),
-            Answer::ForgeFindings { slug, tag, answer } => self.forge_findings_answer(&slug, &tag, answer),
-            Answer::GameNews { feed, answer } => self.news_answer(feed, answer),
-            Answer::LookedUp(result) => {
-                let catalog = &self.addons.catalog;
-                self.addons.link = match result {
-                    Ok(lookup) => {
-                        let verified = catalog.addons.iter().find(|e| e.repo.eq_ignore_ascii_case(&lookup.repo)).map(|e| e.id.clone());
-                        let name = lookup.title.clone().unwrap_or_else(|| lookup.repo.split('/').nth(1).unwrap_or_default().to_string());
-                        let warning = if verified.is_some() { None } else { overview::look_alike(catalog, &lookup.repo, &name, &lookup.folders) };
-                        Link::Found { lookup, warning, verified }
-                    }
-                    Err(e) => Link::Failed(e),
-                };
-            }
-        }
     }
 
     /// A release seen only on GitHub's page has no version name there (DragonUI's tags are
@@ -1322,7 +1290,7 @@ impl Worker {
             return;
         }
         self.addons.link = Link::Looking;
-        let _ = self.addons.net.send(Job::Lookup(text));
+        let _ = self.net.send(Job::Lookup(text));
     }
 
     pub(super) fn link_clear(&mut self) {
