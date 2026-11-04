@@ -9,20 +9,20 @@ mod share;
 use crate::net::{self, Answer};
 use crate::about;
 use crate::update;
-use crate::view::{Form, FormView, Recent, Setup, Tray, Ui, UpdateLine, View};
+use crate::view::{Form, FormView, PcLine, Pill, PlaytimeView, RailView, Recent, SaveLine, Setup, Tray, Ui, UpdateLine, View};
 use crate::win;
 use chrono::{DateTime, Datelike, Local, Utc};
 use satchel_core::activity::{self, Kind};
 use satchel_core::decide::Decision;
 use satchel_core::engine::{BroughtIn, Engine, Outlook, Shown, SyncError};
-use satchel_core::fsx::fingerprint;
 use satchel_core::gate;
 use satchel_core::log;
 use satchel_core::markers::{HEARTBEAT_SECS, InUse, Other};
 use satchel_core::paths;
-use satchel_core::playtime::{self, Session, format_minutes};
+use satchel_core::playtime::{self, Session, format_long, format_minutes};
 use satchel_core::session::{Event, Tracker};
 use satchel_core::settings::Theme;
+use satchel_core::shell::{self, Dot, NeedsYouFacts, WaitingOk};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -40,8 +40,8 @@ const SATCHEL_GATED_EVERY: Duration = Duration::from_secs(10 * 60);
 const SETTLE: Duration = Duration::from_secs(3);
 /// How long a one-off message stays in the banner.
 const NOTICE_FOR: Duration = Duration::from_secs(60);
-/// The window's tabs, in order: Play, Addons, Saves, Playtime, Settings.
-const TAB_SETTINGS: i32 = 4;
+/// The window's tabs, in order: Home, Addons, Settings.
+const TAB_SETTINGS: i32 = 2;
 
 pub enum Command {
     Play,
@@ -49,16 +49,25 @@ pub enum Command {
     CancelPlay,
     SyncNow,
     BringBack(usize),
-    ShowInFolder(usize),
+    /// Progress versions' Open the folder: the network folder's sync folder, or this PC's copies.
+    OpenSavesFolder,
     OpenFolder,
+    /// The gear's Open the game's folder.
+    OpenGameFolder,
     KeepHere,
     UseOther,
     DecideLater,
+    /// A setting changed: the form as the window has it, saved through today's path.
     SaveSettings(Form),
-    /// Settings' switches back to how a new install starts (in the form; Save makes it stick).
-    DefaultSettings,
+    /// Restore defaults: every switch and the theme as a new install has them, saved at once; the
+    /// game folder, the network folder and the PC name stay.
+    RestoreDefaults,
     DetectGame(Form),
-    FinishSetup(Form, i32),
+    /// The first start's folder picker chose this folder (with the form as it stands).
+    GameFolderPicked(Form, PathBuf),
+    FinishSetup(Form),
+    /// The window closed to the tray, maximised or not: remembered for the next start.
+    WindowClosed(bool),
     // Addons: ids are a record's, a catalog entry's, SurvivorsForge's own (`forge:<slug>`), or
     // `folder:<name>`.
     AddonsCheck,
@@ -112,6 +121,9 @@ pub enum Command {
     VersionBack(String, String),
     /// An incoming addon's Install anyway: the player's OK for the file another PC has.
     IncomingInstallAnyway(String),
+    /// Home's Install anyway for an addon that waits for an OK: its update, or its arrival from
+    /// another PC, whichever it is.
+    OkAnyway(String),
     /// A link in Settings or About: SurvivorsForge's repository or website, or a GitHub
     /// repository's page; nothing else is opened.
     OpenLink(String),
@@ -145,7 +157,7 @@ pub enum Command {
     Quit,
 }
 
-/// What a row of the Saves tab stands for.
+/// What a row of Progress versions stands for.
 #[derive(Clone)]
 enum Row {
     Version(u64),
@@ -154,15 +166,20 @@ enum Row {
 
 #[derive(Default)]
 struct Lists {
-    saves: Vec<[String; 5]>,
+    saves: Vec<SaveLine>,
+    saves_summary: String,
     rows: Vec<Row>,
-    today: String,
-    week: String,
-    all_time: String,
-    pc_times: Vec<(String, String, f32)>,
-    sessions: Vec<String>,
+    playtime: PlaytimeView,
+    /// The newest session: its day as the rail says it, its minutes, its PC.
+    last_session: Option<(String, u32, String)>,
+    /// The PCs of Home's Your PCs card, this PC first.
+    pcs: Vec<PcLine>,
+    pcs_week: String,
     recent: Vec<Recent>,
     last_copy: Option<DateTime<Utc>>,
+    /// The last successful send or bring-in: the newest version this PC sent or has.
+    last_sync: Option<DateTime<Utc>>,
+    pc_count: usize,
 }
 
 pub struct Worker {
@@ -194,8 +211,6 @@ pub struct Worker {
     needs_you_open: bool,
     /// What the "Needs you" choice shows on screen: an answer applies to exactly that.
     shown: Option<Shown>,
-    /// The same for the pick on the first-start panel.
-    setup_shown: Option<Shown>,
     // Play.
     pending_play: bool,
     play_anyway: bool,
@@ -378,7 +393,6 @@ impl Worker {
             split: None,
             needs_you_open: false,
             shown: None,
-            setup_shown: None,
             pending_play: false,
             play_anyway: false,
             leftover_done: false,
@@ -481,6 +495,7 @@ impl Worker {
                 | Command::VersionInstall(..)
                 | Command::InstallAgainAnyway(_)
                 | Command::IncomingInstallAnyway(_)
+                | Command::OkAnyway(_)
         ) {
             self.last_view = None;
         }
@@ -503,7 +518,9 @@ impl Worker {
                 | Command::VersionInstall(..)
                 | Command::VersionBack(..)
                 | Command::IncomingInstallAnyway(_)
+                | Command::OkAnyway(_)
                 | Command::SaveSettings(_)
+                | Command::RestoreDefaults
         );
         match command {
             Command::Play => self.play(),
@@ -518,12 +535,21 @@ impl Worker {
             }
             Command::SyncNow => self.sync_now(),
             Command::BringBack(row) => self.bring_back(row),
-            Command::ShowInFolder(row) => self.show_in_folder(row),
+            Command::OpenSavesFolder => match self.engine.shared() {
+                Some(shared) => win::open_folder(&shared.sync_dir()),
+                None => win::open_folder(&self.engine.local.copies_dir()),
+            },
             Command::OpenFolder => {
                 if let Some(shared) = self.engine.shared() {
                     win::open_folder(&shared.folder);
                 }
             }
+            Command::OpenGameFolder => {
+                if let Some(dir) = self.engine.settings.game_dir.clone() {
+                    win::open_folder(&dir);
+                }
+            }
+            Command::WindowClosed(maximised) => self.window_closed(maximised),
             Command::KeepHere => self.resolve(true),
             Command::UseOther => self.resolve(false),
             Command::DecideLater => {
@@ -540,20 +566,26 @@ impl Worker {
                     self.forge_look();
                 }
             }
-            Command::DefaultSettings => {
-                // The switches only: the game's folder, the shared folder and this PC's name stay.
+            Command::RestoreDefaults => {
+                // The switches and the theme only: the game's folder, the network folder and this
+                // PC's name stay. Saved at once, as every change is.
                 let defaults = satchel_core::settings::Settings::default();
-                let mut view = self.form_view();
-                view.form.start_with_windows = defaults.start_with_windows;
-                view.form.desktop_shortcut = defaults.desktop_shortcut;
-                view.form.notifications = defaults.notifications;
-                view.form.addons_auto = defaults.addons.update_by_themselves;
-                view.form.addons_shared = defaults.addons.shared;
-                view.form.addons_forge = defaults.addons.forge;
-                view.form.pause_when_away = defaults.pause_when_away;
-                view.form.theme = theme_index(defaults.theme);
-                view.form.game_shared = defaults.game.shared;
-                self.ui.push_form(view);
+                let mut form = self.form_view().form;
+                form.start_with_windows = defaults.start_with_windows;
+                form.desktop_shortcut = defaults.desktop_shortcut;
+                form.notifications = defaults.notifications;
+                form.addons_auto = defaults.addons.update_by_themselves;
+                form.addons_shared = defaults.addons.shared;
+                form.addons_forge = defaults.addons.forge;
+                form.pause_when_away = defaults.pause_when_away;
+                form.theme = theme_index(defaults.theme);
+                form.game_shared = defaults.game.shared;
+                if self.save_settings(form) {
+                    self.refresh();
+                    self.push_form();
+                    self.addons_scan();
+                    self.forge_look();
+                }
             }
             Command::DetectGame(form) => {
                 let mut view = self.form_view();
@@ -562,9 +594,29 @@ impl Worker {
                     view.form.game_dir = dir.display().to_string();
                 }
                 view.game_status = game_status(non_empty(&view.form.game_dir).map(Path::new));
+                view.game_ok = game_ok(non_empty(&view.form.game_dir).map(Path::new));
+                // Found while Settings shows (the first start keeps it in the form until Start): saved.
+                if self.setup.is_none() && view.game_ok {
+                    let form = view.form.clone();
+                    if self.save_settings(form) {
+                        self.refresh();
+                        self.push_form();
+                        self.addons_scan();
+                        self.share_look();
+                        return;
+                    }
+                }
                 self.ui.push_form(view);
             }
-            Command::FinishSetup(form, choice) => self.finish_setup(form, choice),
+            Command::GameFolderPicked(form, dir) => {
+                let mut view = self.form_view();
+                view.form = form;
+                view.form.game_dir = dir.display().to_string();
+                view.game_status = game_status(Some(&dir));
+                view.game_ok = game_ok(Some(&dir));
+                self.ui.push_form(view);
+            }
+            Command::FinishSetup(form) => self.finish_setup(form),
             Command::AddonsCheck => self.addons_check(),
             Command::AddonsUpdateAll => self.addons_update_all(),
             Command::AddonsOpenFolder => self.addons_open_folder(),
@@ -594,6 +646,13 @@ impl Worker {
             Command::VersionInstall(id, tag, anyway) => self.version_install_as(&id, &tag, anyway, true),
             Command::VersionBack(id, backup) => self.version_back(&id, Some(&backup)),
             Command::IncomingInstallAnyway(id) => self.incoming_install_anyway(&id),
+            Command::OkAnyway(id) => {
+                if self.addons.store.get(&id).is_some() {
+                    self.addon_update_anyway(&id);
+                } else {
+                    self.incoming_install_anyway(&id);
+                }
+            }
             Command::OpenLink(url) => self.open_link(&url),
             Command::LinkLookup(text) => self.link_lookup(text),
             Command::LinkInstall => self.link_install(),
@@ -1037,7 +1096,7 @@ impl Worker {
             self.outlook = Some(outlook);
             if !anyway {
                 self.card_ask(format!(
-                    "This PC's save {why}, so it isn't synced. To carry on from the network folder, cancel and bring back its newest version in the Saves tab."
+                    "This PC's save {why}, so it isn't synced. To carry on from the network folder, cancel and bring back its newest version under Settings → Progress versions."
                 ));
                 self.pending_play = true;
                 return false;
@@ -1333,16 +1392,16 @@ impl Worker {
         self.refresh();
     }
 
-    fn show_in_folder(&self, index: usize) {
-        match self.lists.rows.get(index) {
-            Some(Row::File(path)) => win::show_in_folder(path),
-            Some(Row::Version(n)) => {
-                let file = self.outlook.as_ref().and_then(|o| o.index.get(*n)).map(|v| v.file.clone());
-                if let (Some(shared), Some(file)) = (self.engine.shared(), file) {
-                    win::show_in_folder(&shared.version(&file));
-                }
-            }
-            None => {}
+    /// The window closed to the tray: whether it was maximised is remembered for the next start.
+    fn window_closed(&mut self, maximised: bool) {
+        if self.engine.settings.window.maximised == maximised {
+            return;
+        }
+        let mut settings = self.engine.settings.clone();
+        settings.window.maximised = maximised;
+        match settings.save(&self.engine.local.settings()) {
+            Ok(()) => self.engine.settings = settings,
+            Err(e) => log!("the window's state not saved: {e}"),
         }
     }
 
@@ -1475,6 +1534,9 @@ impl Worker {
             "✗ Not answering right now".into()
         } else if let Some(warning) = self.link_warning() {
             warning
+        } else if let Some(outlook) = &self.outlook {
+            let pcs = outlook.index.pcs.len().max(1);
+            format!("✓ Folder answers · {pcs} PC{} seen · {} version{}", if pcs == 1 { "" } else { "s" }, outlook.index.versions.len(), if outlook.index.versions.len() == 1 { "" } else { "s" })
         } else {
             "✓ Versions go in its sync subfolder".into()
         };
@@ -1498,6 +1560,7 @@ impl Worker {
             saved: form.clone(),
             form,
             game_status: game_status(settings.game_dir.as_deref()),
+            game_ok: game_ok(settings.game_dir.as_deref()),
             folder_status,
             name_status: String::new(),
             settings_path: self.engine.local.settings().display().to_string(),
@@ -1519,52 +1582,30 @@ impl Worker {
             .then(|| "⚠ This folder is a link to another place: if that is a cloud folder, two syncs work on one file".into())
     }
 
-    /// First start: the fields come from the defaults file and detection. With sync set up
-    /// already, it also asks which progress to start from when both sides have one.
+    /// First start: one screen. The game's folder comes from detection (or the defaults file
+    /// beside the exe); sync, when that file turned it on, is said in one line. The "which progress"
+    /// choice of before 0.9 is gone: the normal "two PCs changed it" question handles that case at
+    /// the first Play and on Home.
     fn enter_setup(&mut self) {
-        let mut setup = Setup::default();
-        self.setup_shown = None;
-        if self.engine.shared().is_some()
-            && let (Ok(Some(local)), Ok(outlook)) = (self.engine.local_save(), self.engine.outlook(Utc::now()))
-        {
-            let other = match outlook.decision {
-                Decision::Split { nas } => {
-                    self.setup_shown = Some(Shown { local: Some(local.sha256.clone()), nas });
-                    outlook.index.get(nas).map(|v| {
-                        (format!("Version {} from {} · saved {} · {}", v.n, v.pc, when(v.saved), size(v.bytes)), Some(v.saved))
-                    })
-                }
-                Decision::Send if outlook.index.versions.is_empty() => self
-                    .engine
-                    .exports()
-                    .ok()
-                    .and_then(|exports| exports.into_iter().next())
-                    .filter(|e| fs::read(&e.path).is_ok_and(|bytes| fingerprint(&bytes) != local.sha256))
-                    .map(|e| (format!("{} · saved {} · {}", e.name, when_opt(e.modified), size(e.bytes)), e.modified)),
-                _ => None,
-            };
-            if let Some((other_text, other_time)) = other {
-                let newer_here = local.modified >= other_time;
-                let here_text = format!("Last played {} · {}", when_opt(local.modified), size(local.bytes));
-                let mark = |text: String, newer: bool| if newer { format!("{text} · newer") } else { text };
-                setup.pick = Some([mark(here_text, newer_here), mark(other_text, !newer_here)]);
-                setup.choice = if newer_here { 0 } else { 1 };
-            }
-        }
-        self.setup = Some(setup);
+        let settings = &self.engine.settings;
+        let sync_line = match settings.sync_folder() {
+            Some(folder) => format!("Sync is on · {}", folder.display()),
+            None => String::new(),
+        };
+        self.setup = Some(Setup { sync_line });
         self.push_form();
         self.ui.show(None);
     }
 
-    fn finish_setup(&mut self, form: Form, choice: i32) {
-        let picked = self.setup.as_ref().is_some_and(|s| s.pick.is_some());
+    fn finish_setup(&mut self, form: Form) {
         // The first sync may replace this PC's save: only with the game closed.
         if let Some(dir) = non_empty(&form.game_dir).map(PathBuf::from)
             && self.scanner.game_running(&dir)
         {
             let mut view = self.form_view();
             view.form = form;
-            view.game_status = "✗ The game is running: close it, then press Done".into();
+            view.game_ok = true;
+            view.game_status = "✗ The game is running: close it, then press Start".into();
             self.ui.push_form(view);
             return;
         }
@@ -1578,54 +1619,23 @@ impl Worker {
         let now = Utc::now();
         if self.engine.shared().is_some() {
             match self.engine.outlook(now) {
-                // The pick applies to the two saves the panel showed; anything else is asked again.
-                Ok(outlook) => match (outlook.decision, self.setup_shown.take().filter(|_| picked)) {
-                    (Decision::Split { .. }, Some(shown)) => {
-                        let result = if choice == 1 {
-                            self.engine.use_nas(&shown, now).map(|b| b.version.n)
-                        } else {
-                            self.engine
-                                .send(now, None, Some("kept at first start".into()), Some(&shown))
-                                .map(|v| v.map_or(shown.nas, |v| v.n))
-                        };
-                        match result {
-                            Ok(n) => self.activity(Kind::Sync, &format!("Started from version {n}")),
-                            Err(SyncError::Changed) => {
-                                self.split = self.newest();
-                                self.needs_you_open = true;
-                            }
-                            Err(e) => self.problem = Some(format!("The first sync failed: {e}")),
-                        }
-                    }
-                    (Decision::Split { nas }, None) => {
+                Ok(outlook) => match outlook.decision {
+                    // Both sides have progress: the normal question, at Play and on Home.
+                    Decision::Split { nas } => {
                         self.split = Some(nas);
                         self.needs_you_open = true;
                     }
-                    (Decision::Send, _) => {
-                        let export = if choice == 1 && picked && outlook.index.versions.is_empty() {
-                            self.engine.exports().ok().and_then(|e| e.into_iter().next())
-                        } else {
-                            None
-                        };
-                        let result = match export {
-                            Some(export) => fs::read(&export.path)
-                                .map_err(SyncError::from)
-                                .and_then(|bytes| self.engine.restore(bytes, format!("{}, chosen at first start", export.name), None, now))
-                                .map(|b| Some(b.version.n)),
-                            None => self.engine.send(now, None, Some("first start".into()), None).map(|v| v.map(|v| v.n)),
-                        };
-                        match result {
-                            Ok(Some(n)) => self.activity(Kind::Sync, &format!("Started the network folder with version {n}")),
-                            Ok(None) => {}
-                            Err(e) => self.problem = Some(format!("The first sync failed: {e}")),
-                        }
-                    }
-                    (Decision::BringIn(n), _) => {
+                    Decision::Send => match self.engine.send(now, None, Some("first start".into()), None) {
+                        Ok(Some(v)) => self.activity(Kind::Sync, &format!("Started the network folder with version {}", v.n)),
+                        Ok(None) => {}
+                        Err(e) => self.problem = Some(format!("The first sync failed: {e}")),
+                    },
+                    Decision::BringIn(n) => {
                         self.open_card();
                         self.bring_in(n, now);
                         self.close_card_in(8);
                     }
-                    (Decision::InSync { adopt }, _) => {
+                    Decision::InSync { adopt } => {
                         if let Some(version) = adopt.and_then(|n| outlook.index.get(n)).cloned() {
                             let _ = self.engine.adopt(&version, now);
                         }
@@ -1729,7 +1739,7 @@ impl Worker {
                         }
                     }
                     self.problem = outlook.local.as_ref().and_then(|l| l.problem.as_ref()).map(|why| {
-                        format!("This PC's save {why}, so it isn't sent. To carry on from the network folder, bring back its newest version in the Saves tab.")
+                        format!("This PC's save {why}, so it isn't sent. To carry on from the network folder, bring back its newest version under Settings → Progress versions.")
                     });
                     self.split = match outlook.decision {
                         Decision::Split { nas } => Some(nas),
@@ -1758,59 +1768,140 @@ impl Worker {
     }
 
     fn build_lists(&mut self) {
+        let now = Utc::now();
+        let local_now = Local::now();
         let mut lists = Lists::default();
+        let pc = self.engine.pc().to_string();
+        // Progress versions: the network folder's, newest first, plus the exports at its top; with
+        // sync off, this PC's copies.
         if let Some(outlook) = &self.outlook {
-            let newest = outlook.index.newest_version().map(|v| v.n);
             let here = outlook.local.as_ref().map(|l| l.sha256.as_str());
             for version in &outlook.index.versions {
-                let mut tags = Vec::new();
-                if Some(version.n) == newest {
-                    tags.push("newest".to_string());
+                let current = here == Some(version.sha256.as_str());
+                let mut notes: Vec<String> = Vec::new();
+                if current {
+                    notes.push("the one you play".into());
                 }
-                if here == Some(version.sha256.as_str()) {
-                    tags.push("this PC".to_string());
+                if let Some(note) = &version.note {
+                    notes.push(if note.contains("two PCs moved on separately") { "kept when two PCs changed it".into() } else { note.clone() });
                 }
-                tags.extend(version.note.clone());
-                lists.saves.push([version.n.to_string(), when(version.saved), version.pc.clone(), size(version.bytes), tags.join(" · ")]);
+                lists.saves.push(SaveLine {
+                    version: format!("v{}", version.n),
+                    when: shell::when_short(version.saved, &local_now),
+                    from: version.pc.clone(),
+                    size: size(version.bytes),
+                    note: notes.join(" · "),
+                    current,
+                    can_bring: !current,
+                });
                 lists.rows.push(Row::Version(version.n));
+                if version.pc == pc && lists.last_sync.is_none_or(|t| version.saved > t) {
+                    lists.last_sync = Some(version.saved);
+                }
             }
             // The newest few: older exports pile up in the game's Saves folder.
             if let Ok(exports) = self.engine.exports() {
                 for export in exports.into_iter().take(5) {
-                    lists.saves.push(["–".into(), when_opt(export.modified), "–".into(), size(export.bytes), "your export".into()]);
+                    lists.saves.push(SaveLine {
+                        version: export.name.clone(),
+                        when: export.modified.map(|t| shell::when_short(t, &local_now)).unwrap_or_default(),
+                        from: "–".into(),
+                        size: size(export.bytes),
+                        note: "your export".into(),
+                        current: false,
+                        can_bring: true,
+                    });
                     lists.rows.push(Row::File(export.path));
                 }
             }
+            lists.pc_count = outlook.index.pcs.len().max(1);
+            // The version this PC last synced, when it was another PC's.
+            if let Some(synced) = &self.engine.state.last_synced
+                && lists.last_sync.is_none_or(|t| synced.at > t)
+            {
+                lists.last_sync = Some(synced.at);
+            }
+            let versions = outlook.index.versions.len();
+            lists.saves_summary = match (versions, outlook.index.newest_version()) {
+                (0, _) | (_, None) => "No versions yet: the first session sends version 1".into(),
+                (n, Some(v)) => format!("{n} version{} · newest {} from {}", if n == 1 { "" } else { "s" }, shell::when_short(v.saved, &local_now), v.pc),
+            };
+            // Your PCs: every PC in the index, this PC first, with its newest version and its
+            // newest session.
+            let sessions = self.engine.sessions().unwrap_or_default();
+            let mut names: Vec<String> = outlook.index.pcs.clone();
+            if !names.iter().any(|n| n == &pc) {
+                names.insert(0, pc.clone());
+            }
+            names.sort_by_key(|n| (n != &pc, n.to_lowercase()));
+            lists.pcs = names
+                .iter()
+                .map(|name| {
+                    let synced = outlook.index.versions.iter().filter(|v| &v.pc == name).map(|v| v.saved).max();
+                    let played = sessions.iter().filter(|s| &s.pc == name).map(|s| s.start).max();
+                    let mut parts = Vec::new();
+                    if let Some(at) = played {
+                        parts.push(format!("played {}", shell::day_word(at, &local_now)));
+                    }
+                    match synced {
+                        Some(at) => parts.push(format!("synced {}", shell::when_short(at, &local_now))),
+                        None => parts.push("not synced yet".into()),
+                    }
+                    PcLine { name: name.clone(), this_pc: name == &pc, line: parts.join(" · ") }
+                })
+                .collect();
         } else if self.engine.shared().is_none()
             && let Ok(copies) = self.engine.copies()
         {
             lists.last_copy = copies.first().and_then(|c| c.modified);
-            for copy in copies {
-                lists.saves.push(["–".into(), when_opt(copy.modified), self.engine.pc().into(), size(copy.bytes), "copy kept after a session".into()]);
+            let count = copies.len();
+            lists.saves_summary = match copies.first() {
+                None => "No copies yet: one is kept after each session".into(),
+                Some(c) => format!("{count} cop{} · newest {}", if count == 1 { "y" } else { "ies" }, c.modified.map(|t| shell::when_short(t, &local_now)).unwrap_or_default()),
+            };
+            for (i, copy) in copies.into_iter().enumerate() {
+                lists.saves.push(SaveLine {
+                    version: copy.name.clone(),
+                    when: copy.modified.map(|t| shell::when_short(t, &local_now)).unwrap_or_default(),
+                    from: pc.clone(),
+                    size: size(copy.bytes),
+                    note: if i == 0 { "the newest copy".into() } else { String::new() },
+                    current: false,
+                    can_bring: true,
+                });
                 lists.rows.push(Row::File(copy.path));
             }
         }
+        // Playtime: this week, the last seven days, per PC, the last sessions.
         let sessions = self.engine.sessions().unwrap_or_default();
-        let totals = playtime::totals(&sessions, &Local::now());
+        let totals = playtime::totals(&sessions, &local_now);
         let most = totals.week_per_pc.iter().map(|(_, m)| *m).max().unwrap_or(0).max(1);
-        lists.pc_times =
-            totals.week_per_pc.iter().map(|(pc, m)| (pc.clone(), format_minutes(*m), *m as f32 / most as f32)).collect();
-        lists.today = format_minutes(totals.today);
-        lists.week = format_minutes(totals.week);
-        lists.all_time = format_minutes(totals.all);
-        lists.sessions = sessions
-            .iter()
-            .take(8)
-            .map(|s| {
-                let updated = if s.updated { " · game updated, still one session" } else { "" };
-                format!("{} {} · {}{updated}", when(s.start), s.pc, format_minutes(s.minutes))
-            })
-            .collect();
-        lists.recent = activity::recent(&self.engine.local.activity(), 6)
+        let days = playtime::per_day(&sessions, &local_now);
+        let tallest = days.iter().map(|d| d.minutes).max().unwrap_or(0).max(1);
+        lists.playtime = PlaytimeView {
+            week: format_long(totals.week),
+            week_sessions: totals.week_sessions,
+            today: format_long(totals.today),
+            all: format_long(totals.all),
+            days: days
+                .iter()
+                .enumerate()
+                .map(|(i, d)| {
+                    let label = if i == days.len() - 1 { "Today".to_string() } else { d.date.format("%a").to_string() };
+                    (label, d.minutes as f32 / tallest as f32, d.minutes)
+                })
+                .collect(),
+            per_pc: totals.week_per_pc.iter().map(|(pc, m)| (pc.clone(), format_long(*m), *m as f32 / most as f32)).collect(),
+            sessions: sessions.iter().take(30).map(|s| (shell::day_long(s.start, &local_now), s.pc.clone(), format_long(s.minutes))).collect(),
+        };
+        lists.pcs_week = format!("This week: {} · {} session{}", format_long(totals.week), totals.week_sessions, if totals.week_sessions == 1 { "" } else { "s" });
+        lists.last_session = sessions.first().map(|s| (shell::day_word(s.start, &local_now), s.minutes, s.pc.clone()));
+        lists.recent = activity::recent(&self.engine.local.activity(), 5)
             .unwrap_or_default()
             .iter()
-            .map(|e| Recent { kind: e.shown_kind(), text: format!("{}  {}", when(e.at), e.text) })
+            .map(|e| Recent { kind: e.shown_kind(), text: e.text.clone(), when: shell::when_short(e.at, &local_now) })
             .collect();
+        let _ = now;
         self.lists = lists;
         self.addons_tick();
     }
@@ -1819,7 +1910,7 @@ impl Worker {
     fn build_view(&self) -> (View, Option<Shown>) {
         let sync_on = self.engine.shared().is_some();
         let (dark, system_dark) = self.theme_dark();
-        let (version_line, version_new) = self.version_line();
+        let version_new = self.version_new();
         let tray = if self.split.is_some() || self.problem.is_some() {
             Tray::NeedsYou
         } else if self.busy.is_some() {
@@ -1899,31 +1990,65 @@ impl Worker {
 
         // Read fresh each time (a few KB): the cached check may predate the last session.
         let local = self.engine.local_save().ok().flatten();
-        let base = self.engine.state.last_synced.as_ref();
-        let pc = self.engine.pc().to_string();
-        let (here, other) = if sync_on {
-            let here_main = match (&local, base) {
-                (Some(l), Some(b)) if l.sha256 == b.sha256 => format!("Version {}", b.n),
-                (Some(_), Some(b)) => format!("Changed since version {}", b.n),
-                (Some(_), None) => "Not synced yet".into(),
-                (None, _) => "No progress yet".into(),
-            };
-            let here = [format!("This PC · {pc}"), here_main, format!("last played {}", when_opt(local.as_ref().and_then(|l| l.modified)))];
-            let other = if self.offline {
-                ["Network folder · newest".to_string(), "Not answering".into(), "retried every few minutes".into()]
-            } else {
-                match newest {
-                    Some(v) => ["Network folder · newest".to_string(), format!("Version {}", v.n), format!("sent {}, from {}", when(v.saved), v.pc)],
-                    None => ["Network folder · newest".to_string(), "Nothing yet".into(), "the first session sends version 1".into()],
-                }
-            };
-            (here, other)
-        } else {
-            (
-                [format!("This PC · {pc}"), when_opt(local.as_ref().and_then(|l| l.modified)), "last played".into()],
-                ["Last copy kept".to_string(), when_opt(self.lists.last_copy), "a copy is kept after each session".into()],
-            )
+        let local_now = Local::now();
+
+        // The rail: the build, the progress, the addons, the last line.
+        let news = self.news_view();
+        let build = shell::build_line(&news.version);
+        let dot = match tray {
+            Tray::Synced => Dot::Green,
+            Tray::Busy => Dot::Blue,
+            Tray::Playing => Dot::Gold,
+            Tray::NeedsYou | Tray::Offline => Dot::Amber,
         };
+        let last = if sync_on { self.lists.last_sync } else { self.lists.last_copy };
+        let last = last.map(|t| shell::when_short(t, &local_now));
+        let progress = shell::progress_line(dot, &banner, sync_on, last.as_deref(), self.lists.pc_count);
+        let addons = self.addons_view();
+        let addons_line = shell::addons_line(addons.rail);
+        let playing = self.tracker.in_session();
+        let session_minutes = self.session_start.map(|start| ((Utc::now() - start).num_seconds().max(0) / 60) as u32);
+        let last_line = shell::last_line(
+            if playing { Some(session_minutes.unwrap_or(0)) } else { None },
+            sync_on,
+            self.lists.last_session.as_ref().map(|(day, minutes, pc)| (day.as_str(), *minutes, pc.as_str())),
+        );
+        let rail = RailView { build, progress: Some(progress), addons: Some(addons_line), last: last_line };
+        // The top bar's pill: an update downloaded, or this version's What's new unseen.
+        let update = self.update_line();
+        let pill = if !update.version.is_empty() {
+            Pill { text: format!("Satchel {} → {} ready", about::VERSION, update.version), link: "Update now".into(), kind: 1 }
+        } else if version_new {
+            Pill { text: format!("Updated to {}", about::VERSION), link: "see what's new".into(), kind: 2 }
+        } else {
+            Pill::default()
+        };
+        // Home's Needs-you card: every question the app asks outside an overlay.
+        let game_settings = self.game_settings_view();
+        let waiting_ok: Vec<WaitingOk> = addons
+            .rows
+            .iter()
+            .filter(|r| r.reason_kind == 1 && (r.can_update || r.incoming) && !r.installing)
+            .map(|r| WaitingOk {
+                id: r.id.clone(),
+                name: r.name.clone(),
+                version: if r.incoming { r.version.clone() } else { r.update.clone() },
+                reason: r.reason.strip_prefix("Waits for your OK: ").unwrap_or(&r.reason).to_string(),
+                incoming: r.incoming,
+            })
+            .collect();
+        let split_pc = self.split.and_then(|n| self.outlook.as_ref().and_then(|o| o.index.get(n)).map(|v| v.pc.clone()));
+        let facts = NeedsYouFacts {
+            progress_split: self.split.map(|_| split_pc.unwrap_or_else(|| "the other PC".into())),
+            game_ask_pc: non_empty(&game_settings.ask_pc).map(str::to_string),
+            game_own: non_empty(&game_settings.own).map(str::to_string),
+            addon_asks: addons.rows.iter().filter(|r| !r.ask_pc.is_empty()).map(|r| (r.id.clone(), r.name.clone(), r.ask_pc.clone())).collect(),
+            waiting_ok,
+            name_clash: if sync_on { self.name_taken(&self.engine.settings.pc_name) } else { None },
+            folder_down: sync_on && self.offline,
+        };
+        let questions = shell::needs_you(&facts);
+        let news_blocks = news.notes.first().map(|n| n.blocks.clone()).unwrap_or_default();
 
         let mut shown = None;
         let needs_you = match (self.needs_you_open, self.split) {
@@ -1939,9 +2064,9 @@ impl Worker {
         };
 
         let saves_note = if sync_on {
-            "Every version in the network folder, newest first, plus your own exports. Bringing one in makes it the newest; your save from before is kept as a safety copy.".into()
+            "Every version in the network folder, newest first, plus your own exports; bring an older one back if something went wrong. Your save from before is kept as a safety copy.".into()
         } else {
-            "The copies kept on this PC after each session, newest first.".into()
+            "The copies kept on this PC after each session, newest first; bring an older one back if something went wrong.".into()
         };
 
         let view = View {
@@ -1950,33 +2075,33 @@ impl Worker {
             banner,
             busy: self.busy.is_some(),
             sync_on,
-            here,
-            other,
+            playing,
+            rail,
+            pill,
+            news_blocks,
+            pcs: self.lists.pcs.clone(),
+            pcs_week: self.lists.pcs_week.clone(),
+            questions,
             recent: self.lists.recent.clone(),
+            playtime: self.lists.playtime.clone(),
             saves: self.lists.saves.clone(),
+            saves_summary: self.lists.saves_summary.clone(),
             saves_note,
-            today: self.lists.today.clone(),
-            week: self.lists.week.clone(),
-            all_time: self.lists.all_time.clone(),
-            pc_times: self.lists.pc_times.clone(),
-            sessions: self.lists.sessions.clone(),
             needs_you,
             card: self.card.clone(),
             setup: self.setup.clone(),
-            addons: self.addons_view(),
+            addons,
             dark,
             system_dark,
             app_released: released_text(),
-            version_line,
-            version_new,
             game_found: self.game_dir().is_some(),
-            game_settings: self.game_settings_view(),
-            update: self.update_line(),
+            game_settings,
+            update,
             check_result: self.check_result.clone().unwrap_or_default(),
             checking: self.check_pending,
             checks: self.checks,
             card_update: if self.card_gate { self.offer().map(|o| o.version.clone()).unwrap_or_default() } else { String::new() },
-            game_news: self.news_view(),
+            game_news: news,
         };
         (view, shown)
     }
@@ -2022,18 +2147,12 @@ impl Worker {
         (dark, system)
     }
 
-    /// The Play tab's last line: the version and how long ago it was released, or, after an
-    /// update, "Updated to …" until its What's new is opened. `true`: the update line.
-    fn version_line(&self) -> (String, bool) {
+    /// After an update, the top bar's pill says "Updated to …" until this version's What's new is
+    /// opened: a PC that ran an earlier Satchel (its first start done) and hasn't opened it; a new
+    /// install sets the version at its first start.
+    fn version_new(&self) -> bool {
         let state = &self.engine.state;
-        // A PC that ran an earlier Satchel (its first start done) and hasn't opened this one's
-        // What's new; a new install sets the version at its first start.
-        if state.setup_done && state.seen_version.as_deref() != Some(about::VERSION) {
-            return (format!("Updated to {} · see what's new", about::VERSION), true);
-        }
-        let released = released_text();
-        let released = if released.is_empty() { released } else { format!(" · {released}") };
-        (format!("Survivor's Satchel {}{released}", about::VERSION), false)
+        state.setup_done && state.seen_version.as_deref() != Some(about::VERSION)
     }
 
     fn whats_new_seen(&mut self) {
@@ -2230,6 +2349,11 @@ fn game_status(dir: Option<&Path>) -> String {
         Some(_) => format!("✗ {} isn't in this folder", win::GAME_EXE),
         None => "Not set: press Find it, or paste the folder".into(),
     }
+}
+
+/// The game is in this folder.
+fn game_ok(dir: Option<&Path>) -> bool {
+    dir.is_some_and(|dir| dir.join(win::GAME_EXE).is_file())
 }
 
 /// The theme as Settings' list shows it: System, Light, Dark.

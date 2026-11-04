@@ -1280,8 +1280,8 @@ impl Worker {
                     badge_text(Some(record.badge))
                 };
                 let when = match &g.from {
-                    Some(pc) => format!("Removed {}, as on {pc}", when(g.at)),
-                    None => format!("Removed {}", when(g.at)),
+                    Some(pc) => format!("{}, as on {pc}", when(g.at)),
+                    None => when(g.at),
                 };
                 let detail = if g.settings_kept {
                     "Its settings stayed in the game's folder".to_string()
@@ -2028,6 +2028,17 @@ impl Worker {
             }
         };
 
+        // The rail's addons line: the updates at Play, what waits for an OK (an update of an
+        // installed addon, or one another PC brings), a download under way, whether releases
+        // were checked at all.
+        let waiting_ok = rows.iter().filter(|r| r.reason_kind == 1 && (r.can_update || r.incoming) && !r.installing).count();
+        let rail = satchel_core::shell::AddonsFacts {
+            count: a.lines.len(),
+            at_play: by_itself,
+            waiting_ok,
+            downloading: !a.fetching.is_empty() || !a.waiting.is_empty(),
+            checked: a.looked.is_some(),
+        };
         AddonsView {
             count: a.lines.len(),
             rows,
@@ -2047,6 +2058,7 @@ impl Worker {
             link,
             removed: self.removed_lines(),
             versions: self.versions_view(),
+            rail,
         }
     }
 }

@@ -4,7 +4,7 @@
 
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
-use slint::{ComponentHandle, Image, Model, ModelRc, PhysicalSize, Rgb8Pixel, Rgba8Pixel, SharedPixelBuffer, SharedString, StandardListViewItem, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, PhysicalSize, Rgb8Pixel, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -124,11 +124,6 @@ fn set_rows(ui: &MainWindow, rows: Vec<AddonRow>) {
     ui.set_addon_rows(ModelRc::new(VecModel::from(rows.into_iter().map(columns).collect::<Vec<_>>())));
 }
 
-/// The same row with its line about the other PCs (0.3).
-fn shared(row: AddonRow, share: &str, kind: i32) -> AddonRow {
-    AddonRow { share: share.into(), share_kind: kind, shared: true, ..row }
-}
-
 fn badge_rows(values: &[(&str, i32)]) -> ModelRc<BadgeRow> {
     ModelRc::new(VecModel::from(values.iter().map(|(t, kind)| BadgeRow { text: (*t).into(), kind: *kind }).collect::<Vec<_>>()))
 }
@@ -181,12 +176,6 @@ fn cells(row: OfferRow, trust: (&str, i32), again: bool) -> OfferRow {
         installed_name: if row.action >= 3 { row.name.clone() } else { SharedString::new() },
         ..row
     }
-}
-
-/// An offer with another action (and its Install column's button with it).
-fn acting(offer: &Offer, action: i32, again: bool) -> Offer {
-    let row = OfferRow { action, ..offer.row.clone() };
-    Offer { row: cells(row, (offer.trust.0.as_str(), offer.trust.1), again), ..offer.clone() }
 }
 
 /// The offers in Browse's order at start: the most downloads first, unknown counts last, by name
@@ -447,10 +436,6 @@ fn thousands(n: u64) -> String {
         out.push(digit);
     }
     out
-}
-
-fn strings(values: &[&str]) -> ModelRc<SharedString> {
-    ModelRc::new(VecModel::from(values.iter().map(|v| SharedString::from(*v)).collect::<Vec<_>>()))
 }
 
 /// What's new from the real CHANGELOG, as the app reads it.

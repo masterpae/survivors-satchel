@@ -153,9 +153,9 @@ impl Worker {
         let n = &self.news;
         let version = n.latest.as_ref().map(|l| l.version.clone()).unwrap_or_default();
         let merged = game_news::merge(&n.notes, &n.state.seen);
-        let notes: Vec<GameNote> = merged
+        let (shown, more) = game_news::panel_notes(&merged);
+        let notes: Vec<GameNote> = shown
             .iter()
-            .take(game_news::PANEL_MOST)
             .map(|note| {
                 let mut blocks: Vec<(i32, String)> = Vec::new();
                 if !note.paragraph.is_empty() {
@@ -174,10 +174,9 @@ impl Worker {
             None => "no answer yet on this PC".to_string(),
         };
         GameNewsView {
-            line: if version.is_empty() { String::new() } else { format!("Azeroth Survivors {version} · what's new") },
-            new: !version.is_empty() && n.state.opened.as_deref() != Some(version.as_str()),
+            new: game_news::newest_is_new(&n.state, &version),
             version,
-            footer: if merged.len() > game_news::PANEL_MOST { OLDER.into() } else { String::new() },
+            footer: if more { OLDER.into() } else { String::new() },
             empty: if notes.is_empty() { NOTHING_YET.into() } else { String::new() },
             notes,
             latest_answer: answer(Feed::Latest),

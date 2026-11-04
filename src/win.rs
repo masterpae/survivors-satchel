@@ -6,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString, c_void};
 use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -662,10 +661,6 @@ pub fn open_folder(path: &Path) {
     let _ = Command::new("explorer.exe").arg(path).spawn();
 }
 
-pub fn show_in_folder(file: &Path) {
-    let _ = Command::new("explorer.exe").raw_arg(format!("/select,\"{}\"", file.display())).spawn();
-}
-
 pub fn computer_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "This PC".into())
 }
@@ -728,19 +723,47 @@ pub fn apps_use_dark() -> bool {
     status == ERROR_SUCCESS && light == 0
 }
 
-/// The window's title bar dark or light, as its colours are: Windows draws it, and Slint sets it
-/// only from Windows' own app mode.
-pub fn dark_title_bar(handle: &slint::WindowHandle, dark: bool) {
-    use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+/// The window's frame painted to match the theme: immersive dark mode (Windows 10 and 11), and
+/// the caption's, its text's and the border's colours (Windows 11 from build 22000; on Windows 10
+/// those three calls fail and are ignored, so dark mode alone stays). Applied right after the
+/// window is created and again at every theme change.
+pub fn paint_frame(handle: &slint::WindowHandle, dark: bool) {
+    use satchel_core::shell::colorref;
+    use windows::Win32::Graphics::Dwm::{
+        DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE, DwmSetWindowAttribute,
+    };
     let Some(hwnd) = native_handle(handle) else { return };
-    let value: i32 = dark.into();
+    let hwnd = HWND(hwnd as *mut c_void);
+    let set = |attribute: DWMWINDOWATTRIBUTE, value: u32| unsafe {
+        let _ = DwmSetWindowAttribute(hwnd, attribute, &value as *const u32 as *const c_void, std::mem::size_of::<u32>() as u32);
+    };
+    set(DWMWA_USE_IMMERSIVE_DARK_MODE, u32::from(dark));
+    // The mock's caption, text and line colours (section 6 of the 0.9 plan), as COLORREFs.
+    let (caption, text, border) = if dark { ("#1f232b", "#e8ebf0", "#2b313c") } else { ("#e9ecf1", "#1b1f27", "#d9dde4") };
+    for (attribute, hex) in [(DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text), (DWMWA_BORDER_COLOR, border)] {
+        if let Some(value) = colorref(hex) {
+            set(attribute, value);
+        }
+    }
+}
+
+/// Windows' folder picker, in front of the Satchel's window (`owner`): the first start's Change…
+/// and Find it. Blocks until the player picks or cancels, so it runs on a thread of its own.
+pub fn pick_folder(owner: Option<isize>) -> Option<PathBuf> {
+    use windows::Win32::UI::Shell::{FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH};
+    com_init();
     unsafe {
-        let _ = DwmSetWindowAttribute(
-            HWND(hwnd as *mut c_void),
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            &value as *const i32 as *const c_void,
-            std::mem::size_of::<i32>() as u32,
-        );
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None::<&IUnknown>, CLSCTX_INPROC_SERVER).ok()?;
+        let options = dialog.GetOptions().ok()?;
+        dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+        let _ = dialog.SetTitle(w!("Where is Azeroth Survivors?"));
+        let parent = owner.map(|h| HWND(h as *mut c_void));
+        dialog.Show(parent).ok()?;
+        let item = dialog.GetResult().ok()?;
+        let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = PathBuf::from(OsString::from_wide(name.as_wide()));
+        CoTaskMemFree(Some(name.0 as *const c_void));
+        Some(path)
     }
 }
 
