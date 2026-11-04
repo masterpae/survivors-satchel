@@ -629,10 +629,14 @@ component RowButton inherits Rectangle {
             color: !root.enabled ? Look.muted : root.primary ? Palette.accent-foreground : Palette.foreground;
         }
     }
+    // Greyed, a click on it still does nothing else: it never falls through to the row under it.
     touch := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
     }
 }
 
