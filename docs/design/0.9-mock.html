@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Survivor's Satchel 0.9 · design mock · 2026-11-04 · v5</title>
+<style>
+html{color-scheme:dark}
+html:has(body[data-theme=light]){color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.4 "Segoe UI",system-ui,sans-serif;
+ --page:#0b0d11;--bg:#14171d;--panel:#1b1f27;--alt:#171a21;--hover:#222733;--line:#2b313c;--text:#e8ebf0;--muted:#9aa1ab;
+ --accent:#2f7cf6;--accent2:#2766cc;--green:#3cb371;--amber:#e0a526;--red:#e5534b;--cap:#1f232b;--sel:#1c2a44;--gpaper:#183326;--apaper:#3a2f14;
+ background:var(--page);color:var(--text)}
+body[data-theme=light]{--page:#dfe3e9;--bg:#f6f7f9;--panel:#ffffff;--alt:#fafbfc;--hover:#eef0f4;--line:#d9dde4;--text:#1b1f27;--muted:#5f6672;
+ --green:#1f8a4c;--amber:#b56d00;--red:#b3312a;--cap:#e9ecf1;--sel:#e3edfd;--gpaper:#e3f3e9;--apaper:#fbf0dc}
+button{font:inherit;color:inherit;cursor:pointer}
+a,.lk{color:var(--accent);text-decoration:none;cursor:pointer}
+.mu{color:var(--muted)}.gr{color:var(--green)}.am{color:var(--amber)}
+/* page chrome */
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--bg);font-size:12.5px}
+.bar b{font-weight:600;margin-right:8px}
+.bar .grp{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.bar .grp button{border:0;background:none;padding:4px 10px}
+.bar .grp button+button{border-left:1px solid var(--line)}
+.bar .hint{margin-left:auto;color:var(--muted)}
+body[data-theme=dark] [data-set-theme=dark],body[data-theme=light] [data-set-theme=light],
+body[data-size=large] [data-set-size=large],body[data-size=small] [data-set-size=small],
+body:not([data-ctl]) [data-set-ctl=current],body[data-ctl=current] [data-set-ctl=current],body[data-ctl=row] [data-set-ctl=row],body[data-ctl=rail] [data-set-ctl=rail],
+body[data-size=max] [data-set-size=max],body[data-running=open] .bar [data-toggle=running],
+body[data-page=start] .bar [data-go=start]{background:var(--accent);color:#fff}
+.bar>button{border:1px solid var(--line);background:none;border-radius:6px;padding:4px 10px}
+.stage{display:flex;justify-content:center;padding:16px}
+/* the window */
+.win{width:1280px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg);flex:none}
+.client{height:720px;display:grid;grid-template-columns:232px minmax(0,1fr);grid-template-rows:44px minmax(0,1fr);position:relative}
+body[data-size=small] .win{width:1120px}body[data-size=small] .client{height:630px}
+body[data-size=max] .win{width:min(1920px,100%)}body[data-size=max] .client{height:1080px}
+body[data-size=max] .vpic{height:560px}
+body[data-size=max] .pane{width:clamp(400px,40%,520px)}
+.f5,body[data-size=max] .n4{display:none}body[data-size=max] .f5{display:block}
+.cap{height:36px;display:flex;align-items:center;background:var(--cap);font-size:12px;padding-left:12px;gap:9px}
+.cap i{width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,#c8913a,#7a3e1c);display:block}
+.cap .wb{margin-left:auto;display:flex}
+.cap .wb span{width:46px;height:36px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--muted)}
+/* top bar */
+.top{grid-column:1/3;display:flex;align-items:stretch;border-bottom:1px solid var(--line);padding:0 8px}
+.tab{background:none;border:0;padding:0 12px;color:var(--muted);font-size:14px;position:relative}
+.tab:hover{color:var(--text)}
+body[data-page=home] .tab[data-go=home],body[data-page=addons] .tab[data-go=addons],body[data-page=settings] .tab[data-go=settings]{color:var(--text)}
+body[data-page=home] .tab[data-go=home]::after,body[data-page=addons] .tab[data-go=addons]::after,body[data-page=settings] .tab[data-go=settings]::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent)}
+body[data-page=start] .tab{pointer-events:none;opacity:.45}
+.pill{margin:auto 8px auto auto;border:1px solid var(--line);border-radius:14px;padding:3px 12px;font-size:12px;color:var(--muted);background:none}
+.pill span{color:var(--accent)}
+/* rail */
+.rail{grid-row:2;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.art{height:120px;flex:none;background:radial-gradient(ellipse at 30% 20%,rgba(232,170,80,.35),transparent 60%),linear-gradient(160deg,#4a2414 0%,#221632 55%,#0c1726 100%);
+ display:flex;flex-direction:column;justify-content:center;padding:0 18px;color:#f0cf8a;letter-spacing:3px;line-height:1.05}
+.art b{font-size:25px;font-weight:800}.art small{font-size:15px;font-weight:700;letter-spacing:5.4px}
+.st{padding:12px 10px 0;display:grid;gap:7px;font-size:11.5px}
+.st div{display:flex;align-items:center;gap:7px;white-space:nowrap;overflow:hidden}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);flex:none;margin:0 3px 0 2px}
+.sq{width:14px;height:14px;border:1.5px solid var(--accent);border-radius:3px;flex:none}
+.playrow{margin-top:auto;padding:12px 12px 4px;display:flex;gap:2px}
+.play{flex:1;height:48px;border:0;border-radius:6px 0 0 6px;background:var(--accent);color:#fff;font-size:18px;font-weight:700}
+.gear{width:48px;height:48px;border:0;border-radius:0 6px 6px 0;background:var(--accent2);color:#fff;font-size:18px}
+body[data-page=start] .st .s2,body[data-page=start] .last .l1,.last .l2,.last .l3,.pl2,body[data-running=open] .pl1,body[data-running=open] .last .l1{display:none}
+body[data-running=open] .pl2,body[data-running=open] .last .l3{display:inline}
+body[data-running=open] .play{background:var(--hover);color:var(--muted);pointer-events:none;font-size:16px}
+body[data-page=start] .last .l2{display:inline}
+body[data-page=start] .play,body[data-page=start] .gear{background:var(--hover);color:var(--muted);pointer-events:none}
+.last{padding:0 12px 12px;font-size:11.5px;color:var(--muted)}
+/* content */
+.content{grid-row:2;grid-column:2;position:relative;min-width:0;min-height:0;container:content/inline-size}
+.pg{position:absolute;inset:0;padding:16px;overflow:auto;display:none}
+body[data-page=home] #p-home,body[data-page=settings] #p-settings{display:block}
+body[data-page=settings][data-scrollto=versions] #p-settings{display:flex;flex-direction:column-reverse}
+body[data-scrollto=versions] #p-settings>.cap680{flex:none;width:100%}
+body[data-page=addons] #p-addons,body[data-page=start] #p-start{display:flex}
+.cap680{max-width:680px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.card h3{margin:0 0 8px;font-size:13px;font-weight:600}
+h2{font-size:16px;font-weight:600;margin:0 0 12px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:4px 12px;font-size:12.5px}
+.btn:hover{background:var(--hover)}
+.btn.pr{background:var(--accent);border-color:var(--accent);color:#fff}
+/* home */
+.hg{display:grid;grid-template-columns:1.25fr 1fr;gap:12px;align-items:start}
+.hg .col{display:grid;gap:12px;align-content:start}
+/* Stretch rules (the real app's): Home keeps two columns, capped at 1100 px and centred; Settings' column 680 px, 900 px above a 1500 px content area */
+.hg{max-width:1100px;margin:0 auto}
+@container content (min-width:1500px){
+ .cap680{max-width:900px}
+}
+/* Tags (muted, the addon's group) from 1240 px of table plus pane */
+.ct{display:none;color:var(--muted)}
+@container row (min-width:1240px){
+ .tbl .th,.tbl .trow{grid-template-columns:minmax(0,1fr) 110px 76px 170px 92px 82px 88px}
+ .ct{display:block;overflow:hidden;text-overflow:ellipsis}
+}
+.notes p{margin:0 0 8px}
+.notes ul{margin:0 0 6px;padding-left:16px;color:var(--muted);font-size:12.5px}
+.notes li{margin-bottom:4px}
+.need{border-left:3px solid var(--amber);padding-left:10px}
+.need .bt{display:flex;gap:8px;margin-top:8px}
+.act div{display:grid;grid-template-columns:18px 1fr auto;gap:6px;padding:3px 0;font-size:12.5px}
+.act div span:last-child,.pcs span{color:var(--muted);font-size:11.5px;white-space:nowrap}
+.pcs div{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.foot{margin-top:6px;font-size:12px}
+/* addons */
+#p-addons{flex-direction:column;gap:10px}
+.chips{display:flex;gap:6px;flex:none}
+.chip{border:1px solid var(--line);background:none;border-radius:6px;padding:3px 11px;font-size:12.5px;color:var(--muted)}
+.chip.on{border-color:var(--accent);color:var(--text);background:var(--sel)}
+.ctl{display:flex;gap:8px;align-items:center;flex:none;font-size:12.5px}
+.search{flex:0 1 220px;min-width:120px;border:1px solid var(--line);border-radius:6px;padding:4px 10px;color:var(--muted);background:var(--bg)}
+.combo{border:1px solid var(--line);border-radius:6px;padding:4px 10px;white-space:nowrap}
+.views{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-left:auto}
+.views span{width:28px;height:26px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.views span.on{background:var(--sel);color:var(--accent)}
+.lgw{position:relative}
+.lgp{display:none;position:absolute;right:0;top:22px;z-index:5;width:430px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-size:12px}
+.lgw:hover .lgp,.lgw:focus-within .lgp{display:block}
+.lgp div{display:grid;grid-template-columns:150px 1fr;gap:8px;padding:2px 0}
+.split{flex:1;min-height:0;display:flex;gap:12px;container:row/inline-size}
+.tbl{flex:1;min-width:0;border:1px solid var(--line);border-radius:6px;display:flex;flex-direction:column;background:var(--panel);overflow:hidden}
+.tbody{overflow:auto;flex:1}
+.th,.trow{display:grid;grid-template-columns:minmax(0,1fr) 110px 76px 92px 82px 88px;align-items:center}
+body[data-size=small] .th,body[data-size=small] .trow{grid-template-columns:minmax(0,1fr) 96px 60px 64px 60px 64px}
+body[data-size=small] .trow{font-size:11.5px}body[data-size=small] .th{font-size:10.5px}
+body[data-size=small] .th>*,body[data-size=small] .trow>*{padding:0 5px}
+body[data-size=small] .th{height:34px}body[data-size=small] .th>*{white-space:normal;line-height:1.15}
+body[data-size=small] .nm{gap:6px}body[data-size=small] .nm .ico{width:22px;height:22px;font-size:9.5px}
+body[data-size=small] .sf b{font-size:11px}body[data-size=small] .ib{width:56px;font-size:11px}
+body[data-size=small] #p-addons{padding:12px;gap:8px}body[data-size=small] .split{gap:8px}
+.th{height:28px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);flex:none}
+.th>*,.trow>*{padding:0 12px;min-width:0;white-space:nowrap}
+.trow{height:48px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px}
+.trow:hover{background:var(--hover)}
+.trow.sel{background:var(--sel)}
+.r{text-align:right;font-variant-numeric:tabular-nums}
+.nm{display:flex;align-items:center;gap:8px}
+.ico{width:26px;height:26px;border-radius:5px;flex:none;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:#fff}
+.nm div{min-width:0}
+.nm small,.nm .t{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm b{display:flex;min-width:0}
+.nm b{font-weight:600}.nm small,.sf small{font-size:10px;color:var(--muted)}
+.ok{color:var(--green);margin-left:4px;flex:none}
+.sf b{display:block;font-weight:600;line-height:1.2;font-size:11.5px}
+.ib{width:64px;height:24px;font-size:11.5px;border:1px solid var(--line);border-radius:6px;background:var(--panel);padding:0}
+.ib.pr{background:var(--accent);border-color:var(--accent);color:#fff}
+.pane{width:400px;flex:none;border:1px solid var(--line);border-radius:6px;background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.pbody{overflow:auto;flex:1;padding:12px}
+.ph{display:flex;gap:10px;align-items:center}
+.ph .ico{width:40px;height:40px;font-size:14px}
+.ph b{font-size:15px;font-weight:600;display:block}
+.ph small{font-size:11.5px;color:var(--muted)}
+.badges{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap}
+.bdg{font-size:11px;padding:1px 8px;border-radius:4px;background:var(--gpaper);color:var(--green)}
+.bdg.a{background:var(--apaper);color:var(--amber)}
+.thumbs{display:flex;gap:6px;margin:10px 0}
+.th1{width:88px;height:55px;border-radius:4px;border:1px solid var(--line);cursor:pointer;position:relative;flex:none}
+.th1 span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;font-weight:600;border-radius:3px}
+.g1{background:linear-gradient(135deg,#1d3557,#457b9d 55%,#a8dadc)}.g2{background:linear-gradient(160deg,#3d1f4f,#8e3b62 60%,#e9a06a)}
+.g3{background:linear-gradient(120deg,#123524,#2d6a4f 50%,#95d5b2)}.g4{background:linear-gradient(140deg,#2b1a0e,#7f4f24 55%,#ddb892)}
+.g5{background:linear-gradient(170deg,#0d1b2a,#415a77 60%,#e0e1dd)}.g6{background:linear-gradient(110deg,#370617,#9d0208 50%,#f48c06)}.g7{background:linear-gradient(150deg,#10002b,#5a189a 55%,#c77dff)}
+.pbody p{margin:0 0 9px}
+.pbody h4{margin:12px 0 5px;font-size:12.5px;font-weight:600}
+.pbody ul{margin:0;padding-left:16px;font-size:12px}
+.bars div{display:grid;grid-template-columns:40px 1fr 44px;gap:8px;align-items:center;font-size:11.5px;margin:4px 0}
+.bars i{display:block;height:8px;border-radius:0 4px 4px 0;background:var(--accent)}
+.pfoot{border-top:1px solid var(--line);padding:9px 14px;display:flex;align-items:center;gap:10px;font-size:12px}
+.pfoot .gr{margin-left:auto;font-weight:600}
+.pfoot .ib{margin-left:auto}
+#p-addons.other .lo{display:none}
+/* addons controls: Current (two rows), One row, In the rail */
+.onerow,.railtop,.rnav{display:none}
+body[data-ctl=row] .cur,body[data-ctl=rail] .cur{display:none}
+.onerow{gap:8px;align-items:center;flex:none;font-size:12.5px;white-space:nowrap}
+body[data-ctl=row] .onerow{display:flex}
+.onerow>*{flex:none}.onerow .sx{flex:1 1 auto;min-width:70px}.onerow .views{margin-left:0}.onerow .add{margin-left:auto}
+.railtop{justify-content:flex-end;gap:8px;align-items:center;flex:none;font-size:12.5px}
+body[data-ctl=rail] .railtop{display:flex}.railtop .views{margin-left:0}.railtop .sub{margin-right:auto}
+.sub{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.sub button{border:0;background:none;padding:4px 11px;font-size:12.5px;color:var(--muted)}
+.sub button+button{border-left:1px solid var(--line)}.sub button.on{background:var(--sel);color:var(--text)}
+.sx{display:flex;align-items:center;gap:8px;overflow:hidden}
+.mag{width:10px;height:10px;border:1.5px solid var(--muted);border-radius:50%;position:relative;flex:none;margin-bottom:2px}
+.mag::after{content:"";position:absolute;width:5px;height:1.5px;background:var(--muted);transform:rotate(45deg);right:-5px;bottom:-2px}
+.fw{position:relative}
+.fbtn{display:flex;align-items:center;gap:5px}
+.adot{display:none;width:7px;height:7px;border-radius:50%;background:var(--accent)}.fbtn.on .adot{display:block}
+.fpop{display:none;position:absolute;right:0;top:32px;z-index:6;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 14px;font-size:12px;white-space:nowrap}
+body[data-fpop=open] .fpop{display:block}
+.fcols{display:flex;gap:26px}.fcols h5{margin:0 0 4px;font-size:11.5px;color:var(--muted);font-weight:600}
+.cb{display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer}.cb input{margin:0;accent-color:var(--accent)}
+.ffoot{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);margin-top:8px;padding-top:6px}
+body[data-ctl=rail][data-page=addons] .rnav{display:flex}
+.rnav{flex-direction:column;gap:6px;margin:12px 10px 0;padding-top:12px;border-top:1px solid var(--line);min-height:0;overflow:auto;font-size:12.5px}
+.rnav .search{flex:none;padding:4px 8px}
+.fg{border-top:1px solid var(--line)}
+.fh{display:flex;align-items:center;gap:6px;padding:6px 2px;cursor:pointer;font-weight:600;font-size:12px}
+.fh::after{content:"▸";margin-left:auto;color:var(--muted)}.fg.open .fh::after{content:"▾"}
+.fc{color:var(--accent);font-weight:400}
+.fb{display:none;padding:0 2px 6px 4px;font-size:12px}.fg.open .fb{display:block}
+.rinst{border-top:1px solid var(--line);padding-top:4px;font-size:12px}
+/* viewer */
+.viewer{display:none;position:absolute;inset:0;background:rgba(5,7,10,.72);z-index:20;align-items:center;justify-content:center}
+body[data-viewer] .viewer{display:flex}
+.vbox{width:min(1000px,80%);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.vt{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px}
+.vpic{position:relative;height:440px;border-radius:4px;cursor:zoom-out}
+body[data-size=small] .vpic{height:370px}
+.vn{position:absolute;top:50%;margin-top:-18px;width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.4);background:rgba(10,12,16,.7);color:#fff;font-size:20px;line-height:1}
+.vn:disabled{opacity:.35;cursor:default}
+.vn.p{left:10px}.vn.n{right:10px}
+.vc{font-size:12px;color:var(--muted);margin-top:8px}
+/* tables, the playtime card, the progress versions */
+.row2{display:flex;gap:8px;margin-bottom:12px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+td,th{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font-weight:400;color:var(--muted);font-size:11.5px}
+.pt{cursor:pointer}.pt:hover{border-color:var(--muted)}
+.pt h3{display:flex}.pt h3::after{content:"▾";margin-left:auto;color:var(--muted)}body[data-pt=open] .pt h3::after{content:"▴"}
+.mini{display:flex;gap:2px;align-items:flex-end;height:28px;border-bottom:1px solid var(--line)}
+.mini div{flex:1;display:flex;justify-content:center;align-items:flex-end;height:100%}
+.mini i{display:block;width:60%;max-width:28px;background:var(--accent);border-radius:3px 3px 0 0}
+.days{display:flex;gap:2px;padding-top:3px}.days span{flex:1;text-align:center;font-size:10.5px;color:var(--muted)}
+.ptmore,.vmore,.vsum .hide{display:none}body[data-pt=open] .ptmore,body[data-versions=open] .vmore{display:block}
+body[data-versions=open] .vsum .hide{display:inline}body[data-versions=open] .vsum .show{display:none}
+.ptmore table{margin-top:8px}.ptmore td{padding:5px 8px}
+/* settings */
+.sec{border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin-bottom:10px;background:var(--panel)}
+.sec:nth-child(even){background:var(--alt)}
+.sec h3{margin:0 0 6px;font-size:13px;font-weight:600}
+.sr{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:12.5px}
+.sr>div:first-child{flex:1;min-width:0}
+.sr small{display:block;color:var(--muted);font-size:11.5px}
+.tg{width:36px;height:20px;border-radius:10px;border:1px solid var(--line);background:var(--hover);position:relative;padding:0;flex:none}
+.tg::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:left .12s}
+.tg[aria-pressed=true]{background:var(--accent);border-color:var(--accent)}
+.tg[aria-pressed=true]::after{left:18px;background:#fff}
+.saved{color:var(--green);font-size:11.5px;width:54px;opacity:0;transition:opacity .4s}
+.saved.on{opacity:1;transition:none}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:none;padding:3px 11px;font-size:12px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent);color:#fff}
+.field{flex:1;border:1px solid var(--line);border-radius:6px;padding:4px 9px;background:var(--bg);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.links{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+/* start */
+#p-start{align-items:center;justify-content:center}
+.welcome{width:520px;max-width:100%;padding:24px 28px}
+.welcome h2{font-size:20px;margin-bottom:16px}
+.game{display:flex;gap:10px;align-items:baseline;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg);margin-bottom:18px;font-size:12.5px}
+.big{width:100%;height:44px;font-size:15px;font-weight:700}
+/* notes under the window */
+.about{max-width:1120px;margin:0 auto;padding:0 16px 24px;display:grid;grid-template-columns:1fr 1fr;gap:24px;font-size:12.5px;color:var(--muted)}
+.about h4{margin:0 0 6px;color:var(--text);font-size:13px}
+.about ul{margin:0;padding-left:16px}
+.about p{margin:0 0 6px}
+</style>
+</head>
+<body data-page="home" data-theme="dark" data-size="large" data-ctl="rail">
+<div class="bar">
+ <b>Survivor's Satchel 0.9 · design mock · 2026-11-04 · v5</b>
+ <span class="grp"><button data-set-theme="dark">Dark</button><button data-set-theme="light">Light</button></span>
+ <span class="grp"><button data-set-size="large">1280 × 720</button><button data-set-size="small">1120 × 630</button><button data-set-size="max">Maximised</button></span>
+ <button data-go="start">First start</button>
+ <button data-toggle="running">Game running</button>
+ <span class="mu">Addons controls:</span><span class="grp"><button data-set-ctl="current">Current</button><button data-set-ctl="row">One row</button><button data-set-ctl="rail">In the rail</button></span>
+ <span class="hint">Click the tabs, the toggles, a row, a thumbnail.</span>
+</div>
+
+<div class="stage"><div class="win">
+ <div class="cap"><i></i>Survivor's Satchel<span class="wb"><span>&#x2014;</span><span>&#x2610;</span><span>&#x2715;</span></span></div>
+ <div class="client">
+  <div class="top">
+   <button class="tab" data-go="home">Home</button><button class="tab" data-go="addons">Addons</button><button class="tab" data-go="settings">Settings</button>
+   <button class="pill">Satchel 0.8.0 → 0.9.0 ready · <span>Update now</span></button>
+  </div>
+
+  <aside class="rail">
+   <div class="art"><b>AZEROTH</b><small>SURVIVORS</small></div>
+   <div class="st">
+    <div><span class="sq"></span>Build 0.141.0 · <a data-go="home">What's new</a></div>
+    <div class="s2"><span class="dot"></span>Progress synced 2 min ago · 3 PCs</div>
+    <div class="s2"><span class="dot"></span>5 addons on · all up to date</div>
+   </div>
+   <div class="rnav">
+    <span class="search sx"><i class="mag"></i>Search addons</span>
+    <div class="fg"><div class="fh">Lists<span class="fc" data-fc="list"></span></div><div class="fb"><label class="cb"><input type="checkbox" data-fk="list" data-fv="discord">Discord Verified</label><label class="cb"><input type="checkbox" data-fk="list" data-fv="forge">SurvivorsForge</label></div></div>
+    <div class="fg open"><div class="fh">Safety<span class="fc" data-fc="safe"></span></div><div class="fb"><label class="cb"><input type="checkbox" data-fk="safe" data-fv="verified">verified</label><label class="cb"><input type="checkbox" data-fk="safe" data-fv="scanned">scanned</label><label class="cb"><input type="checkbox" data-fk="safe" data-fv="flagged">flagged</label><label class="cb"><input type="checkbox" data-fk="safe" data-fv="unscanned">unscanned</label></div></div>
+    <div class="fg"><div class="fh">Groups<span class="fc" data-fc="g"></span></div><div class="fb"><label class="cb"><input type="checkbox" data-fk="g" data-fv="Full interfaces">Full interfaces</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Meters and HUDs">Meters and HUDs</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Planners and journals">Planners and journals</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Cursors">Cursors</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Tools">Tools</label></div></div>
+    <div class="rinst"><label class="cb"><input type="checkbox" data-fk="inst" data-fv="1">Installed only</label></div>
+   </div>
+   <div class="playrow"><button class="play"><span class="pl1">Play</span><span class="pl2">Playing…</span></button><button class="gear" title="Game options">&#x2699;</button></div>
+   <div class="last"><span class="l1">Last played today, 34 min · Laptop</span><span class="l2">Not played from the Satchel yet</span><span class="l3">Session 12 min · your progress is sent when the game closes</span></div>
+  </aside>
+
+  <main class="content">
+   <!-- HOME -->
+   <section class="pg" id="p-home"><div class="hg">
+    <div class="col">
+     <div class="card notes c-new"><h3>What's new in the game · 0.141.0</h3>
+      <p>Scholomance's bosses now drop more often, one piece at a time, and give you what you are missing first. Kill Command and Heart of the Packlord's damage now shows under each pet on the meter, and Tranquility counts all of your healing again.</p>
+      <ul><li>Darkmaster Gandling is unchanged: a 25% chance per kill for your class's weapons, and a class with two gets both together.</li>
+      <li>Soulfire: extra target upgrades now work past three targets, and its tooltip shows the real number.</li>
+      <li>Damage meter: the list now scrolls, so no line is cut off at the bottom of the window, including after a Reset.</li></ul>
+      <span class="mu lk">Older notes ▾</span></div>
+     <div class="card c-pcs"><h3>Your PCs</h3><div class="mu" style="font-size:11.5px;margin:-4px 0 4px">Shown only when sync is on.</div>
+      <div class="pcs">
+       <div><b style="font-weight:600">Laptop <span>(this PC)</span></b><span>played today · synced 2 min ago</span></div>
+       <div>Desktop<span>played yesterday · synced yesterday 21:40</span></div>
+       <div>Study PC<span>played Sun · synced Sun 19:05</span></div>
+      </div><div class="foot mu">This week: 4 h 12 min · 6 sessions</div></div>
+    </div>
+    <div class="col">
+     <div class="card c-need"><h3>Needs you · 1</h3>
+      <div class="need">BordoUI 2.8.18 waits for your OK: SurvivorsForge's scan found 1 warning in this version
+       <div class="bt"><button class="btn">Install anyway</button><button class="btn">Show what it found</button></div></div></div>
+     <div class="card act c-act"><h3>Recent activity</h3>
+      <div><span class="gr">↑</span><span>Progress sent · v27 · 8.1 KB</span><span>2 min ago</span></div>
+      <div><span class="mu">▶</span><span>Played 34 min on Laptop</span><span>today 13:20</span></div>
+      <div><span class="mu">↻</span><span>The Satchel checked for updates</span><span>today 12:45</span></div>
+      <div><span class="gr">↓</span><span>Desktop brought in v26</span><span>yesterday 21:40</span></div>
+      <div><span class="gr">✓</span><span>LuckyOdds updated to 0.9.0</span><span>yesterday 18:05</span></div>
+     </div>
+     <div class="card pt c-pt" data-toggle="pt"><h3>Playtime · this week 4 h 12 min · 6 sessions</h3>
+      <div class="mini">
+       <div title="Thu 29 Oct: not played"></div>
+       <div title="Fri 30 Oct: 48 min"><i style="height:19px"></i></div>
+       <div title="Sat 31 Oct: 72 min, 2 sessions"><i style="height:28px"></i></div>
+       <div title="Sun 1 Nov: 55 min"><i style="height:21px"></i></div>
+       <div title="Mon 2 Nov: not played"></div>
+       <div title="Tue 3 Nov: 43 min"><i style="height:17px"></i></div>
+       <div title="Today: 34 min"><i style="height:13px"></i></div>
+      </div>
+      <div class="days"><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span><span>Today</span></div>
+      <div class="ptmore"><table>
+       <tr><td>Today</td><td>Laptop</td><td>34 min</td></tr>
+       <tr><td>Tue 3 Nov</td><td>Desktop</td><td>43 min</td></tr>
+       <tr><td>Sun 1 Nov</td><td>Study PC</td><td>55 min</td></tr>
+       <tr><td>Sat 31 Oct</td><td>Laptop</td><td>40 min</td></tr></table>
+       <div style="margin-top:6px"><span class="lk mu allsess" style="color:var(--muted)">All sessions ▾</span></div></div>
+     </div>
+    </div>
+   </div></section>
+
+   <!-- ADDONS -->
+   <section class="pg" id="p-addons">
+    <div class="chips cur"><button class="chip">Installed · 5</button><button class="chip on">Browse</button><button class="chip">Add</button><button class="chip">Removed · 3</button></div>
+    <div class="ctl cur">
+     <span class="search">Search addons</span><span class="combo">Filters ▾</span><span class="combo">Sort: Popularity ▾</span>
+     <span class="views" title="Cards · List · Table"><span>▦</span><span>☰</span><span class="on">▤</span></span>
+     <span class="lgw" tabindex="0"><span class="lk">Legend</span><div class="lgp">
+      <div><span class="gr">Discord Verified</span><span>In the game's verified-addons channel, checked on 2026-11-04</span></div>
+      <div><span class="gr">SurvivorsForge · verified</span><span>An admin approved this exact file</span></div>
+      <div><span>SurvivorsForge · scanned</span><span>Its scan found nothing; no admin has looked yet</span></div>
+      <div><span class="am">SurvivorsForge · flagged</span><span>Its scan found something: it waits for your OK</span></div>
+      <div><span class="am">SurvivorsForge · unscanned</span><span>Not scanned yet: it waits for your OK</span></div>
+      <div><span class="gr">✓</span><span>Installed on this PC</span></div></div></span>
+    </div>
+    <div class="onerow">
+     <span class="sub"><button>Installed · 5</button><button class="on">Browse</button><button>Removed · 3</button></span>
+     <span class="search sx"><i class="mag"></i>Search addons</span>
+     <span class="fw"><button class="btn fbtn">Filters<span class="fn"></span><i class="adot"></i></button>
+      <div class="fpop"><div class="fcols"><div><h5>Lists</h5><label class="cb"><input type="checkbox" data-fk="list" data-fv="discord">Discord Verified</label><label class="cb"><input type="checkbox" data-fk="list" data-fv="forge">SurvivorsForge</label></div><div><h5>Safety</h5><label class="cb"><input type="checkbox" data-fk="safe" data-fv="verified">verified</label><label class="cb"><input type="checkbox" data-fk="safe" data-fv="scanned">scanned</label><label class="cb"><input type="checkbox" data-fk="safe" data-fv="flagged">flagged</label><label class="cb"><input type="checkbox" data-fk="safe" data-fv="unscanned">unscanned</label></div><div><h5>Groups</h5><label class="cb"><input type="checkbox" data-fk="g" data-fv="Full interfaces">Full interfaces</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Meters and HUDs">Meters and HUDs</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Planners and journals">Planners and journals</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Cursors">Cursors</label><label class="cb"><input type="checkbox" data-fk="g" data-fv="Tools">Tools</label></div></div><div class="ffoot"><label class="cb"><input type="checkbox" data-fk="inst" data-fv="1">Installed only</label><span class="lk fclear">Clear</span></div></div></span>
+     <span class="combo">Sort: Popularity ▾</span>
+     <span class="views" title="Cards · List · Table"><span>▦</span><span>☰</span><span class="on">▤</span></span>
+     <span class="lgw" tabindex="0"><span class="lk">Legend</span><div class="lgp">
+      <div><span class="gr">Discord Verified</span><span>In the game's verified-addons channel, checked on 2026-11-04</span></div>
+      <div><span class="gr">SurvivorsForge · verified</span><span>An admin approved this exact file</span></div>
+      <div><span>SurvivorsForge · scanned</span><span>Its scan found nothing; no admin has looked yet</span></div>
+      <div><span class="am">SurvivorsForge · flagged</span><span>Its scan found something: it waits for your OK</span></div>
+      <div><span class="am">SurvivorsForge · unscanned</span><span>Not scanned yet: it waits for your OK</span></div>
+      <div><span class="gr">✓</span><span>Installed on this PC</span></div></div></span>
+     <button class="btn add" title="Add by its GitHub link or from a zip file">+ Add</button>
+    </div>
+    <div class="railtop"><span class="sub"><button>Installed · 5</button><button class="on">Browse</button><button>Removed · 3</button></span><button class="btn add" title="Add by its GitHub link or from a zip file">+ Add</button><span class="combo">Sort: Popularity ▾</span><span class="views" title="Cards · List · Table"><span>▦</span><span>☰</span><span class="on">▤</span></span><span class="lgw" tabindex="0"><span class="lk">Legend</span><div class="lgp">
+      <div><span class="gr">Discord Verified</span><span>In the game's verified-addons channel, checked on 2026-11-04</span></div>
+      <div><span class="gr">SurvivorsForge · verified</span><span>An admin approved this exact file</span></div>
+      <div><span>SurvivorsForge · scanned</span><span>Its scan found nothing; no admin has looked yet</span></div>
+      <div><span class="am">SurvivorsForge · flagged</span><span>Its scan found something: it waits for your OK</span></div>
+      <div><span class="am">SurvivorsForge · unscanned</span><span>Not scanned yet: it waits for your OK</span></div>
+      <div><span class="gr">✓</span><span>Installed on this PC</span></div></div></span></div>
+    <div class="split">
+     <div class="tbl">
+      <div class="th"><span>Name</span><span>Safety</span><span class="cv">Version</span><span class="ct">Tags</span><span class="cu">Last updated</span><span class="r">Popularity</span><span>Install</span></div>
+      <div class="tbody">
+<div class="trow sel" data-n="LuckyOdds" data-g="Meters and HUDs" data-a="cadoky" data-va="1" data-d="15,489" data-v="0.9.0" data-w="2 days ago" data-safe="verified" data-f="LuckyOdds" data-i="1" data-c="#2f6fb8" data-s="Rarity odds from your luck; caches and guardian lairs on the minimap"><div class="nm"><span class="ico" style="background:#2f6fb8">LO</span><div><b><span class="t">LuckyOdds</span><span class="ok" aria-label="installed">✓</span></b><small>cadoky</small></div></div><div class="sf"><b class="gr">verified</b><small>SurvivorsForge</small></div><span class="cv">0.9.0</span><span class="ct">Meters and HUDs</span><span class="cu">2 days ago</span><span class="r">15,489</span><span><button class="ib">Uninstall</button></span></div>
+<div class="trow" data-n="KeijinUI" data-g="Full interfaces" data-a="KeijinDE" data-d="8,856" data-v="5.0.1" data-w="yesterday" data-safe="scanned" data-f="KeijinUI" data-c="#6b4f9c" data-s="A modern interface inspired by Dragonflight"><div class="nm"><span class="ico" style="background:#6b4f9c">KU</span><div><b><span class="t">KeijinUI</span></b><small>KeijinDE</small></div></div><div class="sf"><b>scanned</b><small>SurvivorsForge</small></div><span class="cv">5.0.1</span><span class="ct">Full interfaces</span><span class="cu">yesterday</span><span class="r">8,856</span><span><button class="ib pr">Install</button></span></div>
+<div class="trow" data-n="Azerloot" data-g="Planners and journals" data-a="Kindagrey" data-d="5,956" data-v="2.5.6" data-w="3 days ago" data-safe="discord" data-f="Azerloot" data-i="1" data-c="#8a5a2b" data-s="Loot and run journal: every boss drop, a build planner, a wishlist"><div class="nm"><span class="ico" style="background:#8a5a2b">AL</span><div><b><span class="t">Azerloot</span><span class="ok" aria-label="installed">✓</span></b><small>Kindagrey</small></div></div><div class="sf"><b class="gr">Discord Verified</b></div><span class="cv">2.5.6</span><span class="ct">Planners and journals</span><span class="cu">3 days ago</span><span class="r">5,956</span><span><button class="ib">Uninstall</button></span></div>
+<div class="trow" data-n="SurvivorUI Classic" data-g="Full interfaces" data-a="morderous" data-d="5,234" data-v="0.2.11" data-w="yesterday" data-safe="verified" data-f="SurvivorUIClassic" data-c="#2f7a6b" data-s="Survivor UI in the game's own look: everything movable, a run tracker, boss bars, a damage meter"><div class="nm"><span class="ico" style="background:#2f7a6b">SC</span><div><b><span class="t">SurvivorUI Classic</span></b><small>morderous</small></div></div><div class="sf"><b class="gr">verified</b><small>SurvivorsForge</small></div><span class="cv">0.2.11</span><span class="ct">Full interfaces</span><span class="cu">yesterday</span><span class="r">5,234</span><span><button class="ib pr">Install</button></span></div>
+<div class="trow" data-n="BlackwellUI" data-g="Full interfaces" data-a="Blackwellcode" data-d="3,473" data-v="2.8.1-azs" data-w="2 days ago" data-safe="discord" data-f="BlackwellUI" data-c="#4a4f5c" data-s="A full HUD and analytics overhaul"><div class="nm"><span class="ico" style="background:#4a4f5c">BW</span><div><b><span class="t">BlackwellUI</span></b><small>Blackwellcode</small></div></div><div class="sf"><b class="gr">Discord Verified</b></div><span class="cv">2.8.1-azs</span><span class="ct">Full interfaces</span><span class="cu">2 days ago</span><span class="r">3,473</span><span><button class="ib pr">Install</button></span></div>
+<div class="trow" data-n="Azeroth Stats" data-g="Planners and journals" data-a="Maidenquinn" data-d="2,834" data-v="2.0.0" data-w="yesterday" data-safe="scanned" data-f="AzerothStats" data-i="1" data-c="#7a3b4f" data-s="Run history and build statistics, kept across sessions"><div class="nm"><span class="ico" style="background:#7a3b4f">AS</span><div><b><span class="t">Azeroth Stats</span><span class="ok" aria-label="installed">✓</span></b><small>Maidenquinn</small></div></div><div class="sf"><b>scanned</b><small>SurvivorsForge</small></div><span class="cv">2.0.0</span><span class="ct">Planners and journals</span><span class="cu">yesterday</span><span class="r">2,834</span><span><button class="ib">Uninstall</button></span></div>
+<div class="trow" data-n="Azeroth FieldKit" data-g="Meters and HUDs" data-a="Maidenquinn" data-d="1,757" data-v="0.4.0" data-w="yesterday" data-safe="unscanned" data-f="AzerothFieldKit" data-c="#3b5b92" data-s="A helper kit: elite nameplates, boss frames, health warnings, a damage meter, chests on the minimap"><div class="nm"><span class="ico" style="background:#3b5b92">FK</span><div><b><span class="t">Azeroth FieldKit</span></b><small>Maidenquinn</small></div></div><div class="sf"><b class="am">unscanned</b><small>SurvivorsForge</small></div><span class="cv">0.4.0</span><span class="ct">Meters and HUDs</span><span class="cu">yesterday</span><span class="r">1,757</span><span><button class="ib" data-ask="1">Install…</button></span></div>
+<div class="trow" data-n="BordoUI" data-g="Full interfaces" data-a="threenox" data-d="1,450" data-v="2.8.18" data-w="4 days ago" data-safe="flagged" data-f="BordoUI" data-c="#9c4a2f" data-s="A modern interface suite with a centered combat HUD"><div class="nm"><span class="ico" style="background:#9c4a2f">BO</span><div><b><span class="t">BordoUI</span></b><small>threenox</small></div></div><div class="sf"><b class="am">flagged</b><small>SurvivorsForge</small></div><span class="cv">2.8.18</span><span class="ct">Full interfaces</span><span class="cu">4 days ago</span><span class="r">1,450</span><span><button class="ib" data-ask="1">Install…</button></span></div>
+<div class="trow" data-n="ASTinyPlates" data-g="Meters and HUDs" data-a="Valorless" data-d="1,239" data-v="1.5.6" data-w="today" data-safe="verified" data-f="ASTinyPlates" data-i="1" data-c="#5b6b2f" data-s="Smaller nameplates for regular enemies; bosses and guardians stay easy to read"><div class="nm"><span class="ico" style="background:#5b6b2f">TP</span><div><b><span class="t">ASTinyPlates</span><span class="ok" aria-label="installed">✓</span></b><small>Valorless</small></div></div><div class="sf"><b class="gr">verified</b><small>SurvivorsForge</small></div><span class="cv">1.5.6</span><span class="ct">Meters and HUDs</span><span class="cu">today</span><span class="r">1,239</span><span><button class="ib">Uninstall</button></span></div>
+<div class="trow" data-n="AetherHUD" data-g="Full interfaces" data-a="NORehabRocket" data-d="1,164" data-v="2.3.0" data-w="8 days ago" data-safe="discord" data-f="AetherHUD" data-i="1" data-c="#2b6c8f" data-s="A full interface: run HUD, enemy plates, combat numbers, bags, chat, minimap"><div class="nm"><span class="ico" style="background:#2b6c8f">AH</span><div><b><span class="t">AetherHUD</span><span class="ok" aria-label="installed">✓</span></b><small>NORehabRocket</small></div></div><div class="sf"><b class="gr">Discord Verified</b></div><span class="cv">2.3.0</span><span class="ct">Full interfaces</span><span class="cu">8 days ago</span><span class="r">1,164</span><span><button class="ib">Uninstall</button></span></div>
+      </div>
+     </div>
+     <div class="pane">
+      <div class="pbody">
+       <div class="ph"><span class="ico" id="pn-ico" style="background:#2f6fb8">LO</span><div><b id="pn-name">LuckyOdds</b><small id="pn-by">cadoky · verified author · 15,489 downloads</small></div></div>
+       <div class="badges" id="pn-badges"><span class="bdg">Discord Verified</span><span class="bdg">SurvivorsForge · verified</span></div>
+       <div class="chips"><button class="chip on">About</button><button class="chip">Versions</button></div>
+       <div class="thumbs lo"><div class="th1 g1" data-shot="1"></div><div class="th1 g2" data-shot="2"></div><div class="th1 g3" data-shot="3"></div><div class="th1 g4" data-shot="4"><span class="n4">+3</span></div><div class="th1 g5 f5" data-shot="5"><span>+2</span></div></div>
+       <p id="pn-about">Rarity odds from your luck; caches and guardian lairs on the minimap. <span class="lk">more</span></p>
+       <p id="pn-safe">Safety: verified · an admin approved this exact file · <span class="lk">Show what it found</span></p>
+       <p id="pn-fold">Folders: LuckyOdds</p>
+       <div class="lo"><h4>What's new in 0.9.0</h4>
+        <ul><li>The old panel design is back. Lots of you liked the table with a row per card type, so it's now an option next to the new one.</li>
+        <li>Open the cog and hit "Design" to flip between New and Old. It remembers your pick.</li></ul>
+        <h4>Downloads per version</h4>
+        <div class="bars"><div><span>0.9.0</span><i style="width:46%" title="0.9.0: 2,758 downloads"></i><span class="r">2,758</span></div>
+         <div><span>0.8.0</span><i style="width:100%" title="0.8.0: 5,971 downloads"></i><span class="r">5,971</span></div>
+         <div><span>0.7.0</span><i style="width:48%" title="0.7.0: 2,881 downloads"></i><span class="r">2,881</span></div></div></div>
+      </div>
+      <div class="pfoot"><span id="pn-ver">0.9.0 · 2 days ago</span><span class="lk">View on GitHub</span><span id="pn-act" class="gr">Installed</span></div>
+     </div>
+    </div>
+   </section>
+
+   <!-- SETTINGS -->
+   <section class="pg" id="p-settings"><div class="cap680">
+    <div class="sec"><h3>General</h3>
+     <div class="sr"><div>Start with Windows, in the tray</div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="false"></button></div>
+     <div class="sr"><div>Desktop shortcut "Play Azeroth Survivors"</div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="true"></button></div>
+     <div class="sr"><div>Windows notifications</div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="true"></button></div>
+     <div class="sr"><div>Theme</div><span class="saved">✓ Saved</span><span class="seg"><button data-th="dark">System</button><button data-th="light">Light</button><button data-th="dark" class="on">Dark</button></span></div>
+    </div>
+    <div class="sec"><h3>Sync</h3>
+     <div class="sr"><div>Sync my progress across PCs<small>Off by default; our family file turns it on.</small></div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="true"></button></div>
+     <div class="sr"><span class="mu" style="width:96px">Network folder</span><span class="field">\\server\share\Azeroth Survivors Saves</span></div>
+     <div class="sr"><span style="width:96px"></span><span class="gr">✓ Folder answers · 3 PCs seen · 27 versions</span></div>
+     <div class="sr"><span class="mu" style="width:96px">This PC's name</span><span class="field" style="flex:0 0 200px">Laptop</span></div>
+    </div>
+    <div class="sec"><h3>Addons</h3>
+     <div class="sr"><div>Updates go in by themselves before Play<small>For Discord Verified and SurvivorsForge addons; one you added by link always asks first.</small></div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="true"></button></div>
+     <div class="sr"><div>The same addons and their settings on every PC</div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="true"></button></div>
+     <div class="sr"><div>More addons, descriptions and trust levels from SurvivorsForge<small>Rezondes' addon registry: it scans every version of the addons it lists.</small></div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="true"></button></div>
+    </div>
+    <div class="sec"><h3>Game</h3>
+     <div class="sr"><span class="mu" style="width:96px">Game folder</span><span class="field">C:\games\AzerothSurvivors</span><span class="gr">✓ found</span><button class="btn">Find it</button></div>
+     <div class="sr"><div>Pause the game when I switch away (experimental)<small>Alt-Tab, the Windows key or a click elsewhere: the Satchel presses Esc in the game.</small></div><span class="saved">✓ Saved</span><button class="tg" aria-pressed="false"></button></div>
+    </div>
+    <div class="sec"><h3>About</h3>
+     <div class="links"><span>Survivor's Satchel 0.8.0</span><button class="btn">Check for updates</button><span class="lk">Where addons come from</span><span class="lk">Report a problem</span></div>
+    </div>
+    <div class="sec" id="sec-versions"><h3>Progress versions</h3>
+     <small class="mu" style="font-size:11.5px">Every copy of your progress the Satchel kept; bring an older one back if something went wrong.</small>
+     <div class="sr vsum"><span>27 versions · newest 2 min ago from Laptop · <span class="lk" data-toggle="versions"><span class="show">Show ▾</span><span class="hide">Hide ▴</span></span></span></div>
+     <div class="vmore">
+      <table><tr><th>Version</th><th>When</th><th>From</th><th>Size</th><th>Note</th><th></th></tr>
+       <tr><td><b>v27</b></td><td>2 min ago</td><td>Laptop</td><td>8.1 KB</td><td class="mu">the one you play</td><td></td></tr>
+       <tr><td>v26</td><td>yesterday 21:40</td><td>Desktop</td><td>8.0 KB</td><td class="mu"></td><td><button class="btn">Bring this one in</button></td></tr>
+       <tr><td>v25</td><td>yesterday 18:10</td><td>Laptop</td><td>7.9 KB</td><td class="mu"></td><td><button class="btn">Bring this one in</button></td></tr>
+       <tr><td>v24</td><td>Sun 19:05</td><td>Study PC</td><td>7.9 KB</td><td class="mu">kept when two PCs changed it</td><td><button class="btn">Bring this one in</button></td></tr>
+       <tr><td>v23</td><td>Sat 16:30</td><td>Laptop</td><td>7.7 KB</td><td class="mu"></td><td><button class="btn">Bring this one in</button></td></tr>
+       <tr><td>v22</td><td>Fri 20:15</td><td>Desktop</td><td>7.6 KB</td><td class="mu"></td><td><button class="btn">Bring this one in</button></td></tr>
+      </table>
+      <div class="row2" style="margin:10px 0 2px"><button class="btn">Export a copy…</button><button class="btn">Open the network folder</button></div>
+     </div>
+    </div>
+    <div style="text-align:right"><button class="btn">Restore defaults</button></div>
+   </div></section>
+
+   <!-- FIRST START -->
+   <section class="pg" id="p-start">
+    <div class="card welcome"><h2>Welcome to Survivor's Satchel</h2>
+     <div class="game"><span class="mu">Your game</span><b style="font-weight:600">C:\games\AzerothSurvivors</b><span class="gr">✓ found</span><span class="mu lk" style="margin-left:auto;color:var(--muted)">Change…</span></div>
+     <button class="btn pr big" data-go="home">Start</button>
+     <p class="mu" style="margin:12px 0 0;font-size:12.5px;text-align:center">Play on more than one PC? Turn on sync in Settings whenever you like.</p>
+    </div>
+   </section>
+  </main>
+
+  <div class="viewer" id="viewer">
+   <div class="vbox">
+    <div class="vt"><span id="vw-title">LuckyOdds · picture 2 of 7</span><span class="lk" data-close="1">✕</span></div>
+    <div class="vpic g2" id="vw-pic"><button class="vn p" data-step="-1">‹</button><button class="vn n" data-step="1">›</button></div>
+    <div class="vc" id="vw-cap">Picture 2: placeholder art; the real picture and its caption come from the addon's page.</div>
+   </div>
+  </div>
+ </div>
+</div></div>
+
+<div class="about">
+ <div><h4>What this shows</h4><ul>
+  <li>The 0.9 shape: three words on top, the game and Play in a rail on the left, the page beside it. Playtime is a Home card that opens on click; the progress versions are the last section of Settings.</li>
+  <li>Browse's table with the addon pane beside it (400 px; up to 520 px maximised), as plan 0.8 part 2 describes them, inside that shape.</li>
+  <li>Settings that save as you click: each switch says "✓ Saved", and there is no Save button.</li>
+  <li>A first start of one screen: the game found, one Start button.</li>
+  <li>Both themes and three window sizes (1280 × 720, the 1120 × 630 minimum, maximised), flat surfaces without shadows, as the real renderer draws them; "Game running" greys out Play.</li></ul>
+  <p style="margin-top:8px">Not shown: the cards and list views, the Removed page, the tray, the Play card, real art.</p>
+  <p>Addons controls: Current is v2's two rows; One row folds them into one slim row with a Filters popover; In the rail is the hybrid: search and the filters in the rail, the sub-pages as a segmented control above the table. The filters really filter the table.</p>
+  <p>Maximised: the rail stays, the cards stay in two columns, centred, the table and pane grow with the window.</p>
+  <p>The Browse table and the pane carry the catalog's real versions, dates and downloads. The safety levels, playtimes, progress versions and PCs are sample values.</p></div>
+ <div><h4>Principles</h4>
+  <p>One primary action per screen: Play.</p>
+  <p>Every screen readable in three seconds.</p>
+  <p>No setting a player has to discover: defaults work, and the first start is one screen.</p>
+  <p>Details on click, never up front.</p>
+  <p>The same words everywhere.</p>
+  <p>Nothing destructive without a question.</p></div>
+</div>
+
+<script>
+(function () {
+  var B = document.body;
+  function $(s) { return document.querySelector(s); }
+  function $$(s) { return Array.prototype.slice.call(document.querySelectorAll(s)); }
+  var SAFE = {
+    verified: 'verified · an admin approved this exact file',
+    scanned: 'scanned · its scan found nothing; no admin has looked yet',
+    flagged: 'flagged · its scan found something: it waits for your OK',
+    unscanned: 'unscanned · not scanned yet: it waits for your OK'
+  };
+  var SHOTS = 7, shot = 2;
+
+  function setTheme(t) {
+    B.setAttribute('data-theme', t);
+    $$('.seg button').forEach(function (b) { b.classList.toggle('on', b.textContent === (t === 'light' ? 'Light' : 'Dark')); });
+  }
+
+  function select(row) {
+    $$('.trow.sel').forEach(function (r) { r.classList.remove('sel'); });
+    row.classList.add('sel');
+    var d = row.dataset, ini = row.querySelector('.ico');
+    $('#pn-ico').textContent = ini.textContent;
+    $('#pn-ico').style.background = d.c;
+    $('#pn-name').textContent = d.n;
+    $('#pn-by').textContent = d.a + (d.va ? ' · verified author' : '') + ' · ' + d.d + ' downloads';
+    var b = '<span class="bdg">Discord Verified</span>';
+    if (d.safe !== 'discord') {
+      var warn = d.safe === 'flagged' || d.safe === 'unscanned';
+      b += '<span class="bdg' + (warn ? ' a' : '') + '">SurvivorsForge · ' + d.safe + '</span>';
+    }
+    $('#pn-badges').innerHTML = b;
+    $('#pn-about').innerHTML = d.s + '. <span class="lk">more</span>';
+    $('#pn-safe').innerHTML = d.safe === 'discord'
+      ? 'Safety: Discord Verified · on the game\'s verified-addons channel, checked on 2026-11-04'
+      : 'Safety: ' + SAFE[d.safe] + (d.safe === 'flagged' || d.n === 'LuckyOdds' ? ' · <span class="lk">Show what it found</span>' : '');
+    $('#pn-fold').textContent = d.i ? 'Folders: ' + d.f : 'Its folders show once it is installed.';
+    $('#pn-ver').textContent = d.v + ' · ' + d.w;
+    var act = $('#pn-act');
+    if (d.i) { act.className = 'gr'; act.textContent = 'Installed'; act.style.width = ''; }
+    else {
+      var ask = d.safe === 'flagged' || d.safe === 'unscanned';
+      act.className = 'ib' + (ask ? '' : ' pr');
+      act.textContent = ask ? 'Install anyway' : 'Install';
+      act.style.width = ask ? '96px' : '';
+    }
+    // The mock carries LuckyOdds' pictures, notes and downloads only.
+    $('#p-addons').classList.toggle('other', d.n !== 'LuckyOdds');
+  }
+
+  function viewer(n) {
+    if (!n) { B.removeAttribute('data-viewer'); return; }
+    shot = Math.max(1, Math.min(SHOTS, n));
+    B.setAttribute('data-viewer', String(shot));
+    $('#vw-title').textContent = 'LuckyOdds · picture ' + shot + ' of ' + SHOTS;
+    $('#vw-pic').className = 'vpic g' + shot;
+    $('#vw-cap').textContent = 'Picture ' + shot + ': placeholder art; the real picture and its caption come from the addon\'s page.';
+    $('.vn.p').disabled = shot === 1;
+    $('.vn.n').disabled = shot === SHOTS;
+  }
+
+  // Previous and Next stop at the ends; they never close the viewer.
+  function step(d) { viewer(Math.max(1, Math.min(SHOTS, shot + d))); }
+
+  function saved(el) {
+    var s = el.parentNode.querySelector('.saved');
+    if (s) { s.classList.add('on'); clearTimeout(s._t); s._t = setTimeout(function () { s.classList.remove('on'); }, 1000); }
+  }
+
+  // The filters: within a group any ticked box matches, across groups all must. The popover and the rail share them.
+  function filter() {
+    var on = {}, first = null;
+    $$('.fpop [data-fk]').forEach(function (i) { if (i.checked) (on[i.dataset.fk] = on[i.dataset.fk] || {})[i.dataset.fv] = 1; });
+    var n = $$('.fpop [data-fk]').filter(function (i) { return i.checked; }).length;
+    $$('.trow').forEach(function (r) {
+      var d = r.dataset, L = on.list;
+      var ok = (!on.safe || on.safe[d.safe]) && (!on.g || on.g[d.g]) && (!on.inst || d.i) && (!L || L.discord || d.safe !== 'discord');
+      r.style.display = ok ? '' : 'none';
+      if (ok && !first) first = r;
+    });
+    $$('.fbtn').forEach(function (b) { b.classList.toggle('on', n > 0); b.querySelector('.fn').textContent = n ? ' · ' + n : ''; });
+    $$('[data-fc]').forEach(function (c) { var m = on[c.dataset.fc] ? Object.keys(on[c.dataset.fc]).length : 0; c.textContent = m ? '· ' + m : ''; });
+    var sel = $('.trow.sel');
+    if (first && (!sel || sel.style.display === 'none')) select(first);
+  }
+
+  document.addEventListener('change', function (e) {
+    var i = e.target;
+    if (!i.dataset || !i.dataset.fk) return;
+    $$('[data-fk="' + i.dataset.fk + '"]').forEach(function (x) { if (x.dataset.fv === i.dataset.fv) x.checked = i.checked; });
+    filter();
+  });
+
+  document.addEventListener('click', function (e) {
+    var t = e.target, c;
+    if (B.hasAttribute('data-fpop') && !t.closest('.fpop') && !t.closest('.fbtn')) B.removeAttribute('data-fpop');
+    if ((c = t.closest('.vn'))) { step(Number(c.dataset.step)); return; }
+    if (B.hasAttribute('data-viewer') && (t.closest('.vpic') || t.closest('[data-close]') || !t.closest('.vbox'))) { viewer(0); return; }
+    if ((c = t.closest('[data-set-theme]'))) { setTheme(c.dataset.setTheme); return; }
+    if ((c = t.closest('[data-set-ctl]'))) { B.setAttribute('data-ctl', c.dataset.setCtl); B.setAttribute('data-page', 'addons'); return; }
+    if ((c = t.closest('.fbtn'))) { if (B.hasAttribute('data-fpop')) B.removeAttribute('data-fpop'); else B.setAttribute('data-fpop', 'open'); return; }
+    if (t.closest('.fclear')) { $$('[data-fk]').forEach(function (i) { i.checked = false; }); filter(); return; }
+    if ((c = t.closest('.fh'))) {
+      // One filter group open at a time.
+      var g = c.parentNode, was = g.classList.contains('open');
+      $$('.fg').forEach(function (x) { x.classList.remove('open'); });
+      if (!was) g.classList.add('open');
+      return;
+    }
+    if ((c = t.closest('[data-set-size]'))) { B.setAttribute('data-size', c.dataset.setSize); return; }
+    if ((c = t.closest('[data-go]'))) {
+      B.setAttribute('data-page', c.dataset.go);
+      if (c.dataset.go === 'start') B.removeAttribute('data-running');
+      return;
+    }
+    if ((c = t.closest('[data-shot]'))) { viewer(Number(c.dataset.shot)); return; }
+    if ((c = t.closest('.ib'))) {
+      // Install… selects its row so the pane shows why it asks; the other buttons leave the selection alone.
+      if (c.dataset.ask) select(c.closest('.trow'));
+      return;
+    }
+    if ((c = t.closest('.trow'))) { select(c); return; }
+    if (t.closest('.allsess')) return;
+    if ((c = t.closest('[data-toggle]'))) {
+      // Playtime on Home and Progress versions in Settings open and close in place.
+      var k = 'data-' + c.dataset.toggle;
+      if (B.getAttribute(k) === 'open') B.removeAttribute(k); else B.setAttribute(k, 'open');
+      // The game can't be running before the first start is done.
+      if (k === 'data-running' && B.getAttribute('data-page') === 'start') B.setAttribute('data-page', 'home');
+      return;
+    }
+    if ((c = t.closest('.tg'))) { c.setAttribute('aria-pressed', c.getAttribute('aria-pressed') === 'true' ? 'false' : 'true'); saved(c); return; }
+    if ((c = t.closest('.seg button'))) {
+      setTheme(c.dataset.th);
+      $$('.seg button').forEach(function (b) { b.classList.toggle('on', b === c); });
+      saved(c.parentNode);
+      return;
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!B.hasAttribute('data-viewer')) return;
+    if (e.key === 'Escape') viewer(0); else if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'ArrowRight') step(1);
+  });
+
+  if (B.hasAttribute('data-viewer')) viewer(Number(B.getAttribute('data-viewer')));
+})();
+</script>
+</body>
+</html>
