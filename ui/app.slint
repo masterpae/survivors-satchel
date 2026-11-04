@@ -328,9 +328,10 @@ global Look {
     // Who vouches for an addon: Discord Verified (green), added by link (blue), from a file
     // (gold), by hand (muted); then SurvivorsForge's word: it lets it in (green, as the mock has
     // it), it waits for the player's OK (amber), never (red). Every ink reads at 4.5:1 or more on
-    // its paper, in both themes (checked in the 0.9 pull request).
+    // its paper, in both themes (checked in the 0.9 pull request): the light theme's green and gold
+    // inks are darker than the text colours of the same name for that.
     public pure function badge-ink(kind: int) -> color {
-        kind == 0 || kind == 4 ? green : kind == 1 ? (dark ? #78a9f5 : #2361c4) : kind == 2 ? gold
+        kind == 0 || kind == 4 ? (dark ? green : #18703d) : kind == 1 ? (dark ? #78a9f5 : #2361c4) : kind == 2 ? (dark ? gold : #86600a)
             : kind == 5 ? (dark ? amber : #9a5c00) : kind == 6 ? (dark ? #f1867e : red) : muted
     }
     public pure function badge-paper(kind: int) -> color {
