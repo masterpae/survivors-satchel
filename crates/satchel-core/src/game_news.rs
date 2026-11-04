@@ -231,6 +231,19 @@ pub fn newest_is_new(s: &State, version: &str) -> bool {
     !version.is_empty() && s.opened.as_deref() != Some(version)
 }
 
+/// Home's What's new card shows a note's paragraph and its first three lines; the panel has the
+/// rest.
+pub const CARD_LINES: usize = 3;
+
+/// What Home's card shows of a note (`blocks` as the panel has them, its paragraph first when it
+/// has one): the paragraph and the first `CARD_LINES` lines after it, and whether lines were left
+/// out (the card's link then reads "More" instead of "Older notes").
+pub fn card<T>(blocks: &[T], is_paragraph: impl Fn(&T) -> bool) -> (&[T], bool) {
+    let lead = usize::from(blocks.first().is_some_and(is_paragraph));
+    let shown = (lead + CARD_LINES).min(blocks.len());
+    (&blocks[..shown], blocks.len() > shown)
+}
+
 /// The versions the panel shows, `PANEL_MOST` at most, and whether older ones were left out (the
 /// panel's last line then says they are on the game's Discord).
 pub fn panel_notes(merged: &[Note]) -> (&[Note], bool) {
@@ -593,8 +606,12 @@ mod tests {
         assert!(cache.store_notes(&"#".repeat(Feed::Notes.cap() as usize), None, at(13)).is_ok());
     }
 
-    /// The caps 0.8 shipped: 64 KB for the update index, 512 KB for the notes file; a body right at
-    /// the cap is kept, one byte over is dropped and counts as a try.
+    /// The caps 0.8 shipped: 64 KB for the update index, 512 KB for the notes file. The cache keeps
+    /// a body of up to the cap and drops a longer one, as a try. The boundary on the wire is one
+    /// byte lower: the network thread reads with ureq's `limit(cap)`, whose reader fails on the read
+    /// after `cap` bytes, so a body of exactly the cap never reaches the cache and the largest body
+    /// kept from the network is `cap - 1` bytes (that read is the game-news fetching, left as 0.8
+    /// shipped it).
     #[test]
     fn the_body_caps_are_64_and_512_kb() {
         assert_eq!(Feed::Latest.cap(), 64 * 1024);
@@ -607,6 +624,10 @@ mod tests {
         assert_eq!(at_cap.len() as u64, Feed::Latest.cap());
         assert_eq!(cache.store_latest(&at_cap, None, None, at(10)).unwrap().version, "0.1.0");
         assert_eq!(cache.state().latest.answered, Some(at(10)));
+        // The largest body the network delivers: one byte under the cap.
+        let under = format!("{head}{}\"}}", "x".repeat(Feed::Latest.cap() as usize - head.len() - 3));
+        assert_eq!(under.len() as u64, Feed::Latest.cap() - 1);
+        assert!(cache.store_latest(&under, None, None, at(10)).is_ok());
         let over = format!("{head}{}\"}}", "x".repeat(Feed::Latest.cap() as usize - head.len() - 1));
         assert_eq!(over.len() as u64, Feed::Latest.cap() + 1);
         assert!(cache.store_latest(&over, None, None, at(11)).unwrap_err().contains("over the 64 KB cap"));
@@ -640,6 +661,20 @@ mod tests {
         assert!(newest_is_new(&cache.state(), "0.141.0"));
         cache.opened("0.141.0");
         assert!(!newest_is_new(&cache.state(), "0.141.0"));
+    }
+
+    /// Home's card: the paragraph and three lines; the link says when lines were left out.
+    #[test]
+    fn the_card_shows_the_paragraph_and_three_lines() {
+        let blocks = [(0, "p"), (2, "a"), (2, "b"), (3, "c"), (2, "d")];
+        let paragraph = |b: &(i32, &str)| b.0 == 0;
+        assert_eq!(card(&blocks, paragraph), (&blocks[..4], true));
+        assert_eq!(card(&blocks[..4], paragraph), (&blocks[..4], false));
+        assert_eq!(card(&blocks[..2], paragraph), (&blocks[..2], false));
+        // A note without a paragraph: its first three lines.
+        assert_eq!(card(&blocks[1..], paragraph), (&blocks[1..4], true));
+        let empty: [(i32, &str); 0] = [];
+        assert_eq!(card(&empty, paragraph), (&empty[..], false));
     }
 
     /// The panel shows 30 versions at most, the newest, and says when older ones were left out.

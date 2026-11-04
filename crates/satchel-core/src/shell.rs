@@ -1,8 +1,11 @@
 //! The window's shell as words and numbers, pure and tested here (since 0.9.0): the size the
-//! window opens at, the frame's colours as Windows takes them, the rail's status lines and its
-//! last line, Home's Needs-you list, Browse's filter rule, and the relative times the cards show.
-//! The app (`src/`) only turns these into what is on screen; nothing here reads a file.
+//! window opens at and its smallest size, the frame's colours as Windows takes them, the rail's
+//! status lines and its last line, Home's Needs-you list, Browse's filter rule, and the relative
+//! times the cards show. The app (`src/`) only turns these into what is on screen; nothing here
+//! reads a file.
 
+use crate::addons::forge::Verdict;
+use crate::addons::overview::{Line, Standing};
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 
 // The window ------------------------------------------------------------------------------------
@@ -40,6 +43,16 @@ pub fn open_size(work_width: i32, work_height: i32, scale: f32) -> Open {
     } else {
         Open::Maximised
     }
+}
+
+/// The window's smallest size on this screen, in logical pixels: 1,120 × 630, or less where the
+/// work area (physical pixels, at the display's scale) can't hold that with Windows' frame around
+/// it, so a maximised window never reaches past the screen. A 1,920 × 1,080 screen at 175 % has a
+/// work area of about 1,097 × 590 logical pixels.
+pub fn min_size(work_width: i32, work_height: i32, scale: f32) -> (u32, u32) {
+    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let logical = |physical: i32, frame: u32| ((physical.max(0) as f32 / scale).floor() as u32).saturating_sub(frame);
+    (MIN_SIZE.0.min(logical(work_width, FRAME.0)), MIN_SIZE.1.min(logical(work_height, FRAME.1)))
 }
 
 /// A CSS colour (`#1f232b`) as Windows' COLORREF, `0x00BBGGRR`: the bytes in the reverse order
@@ -154,7 +167,9 @@ pub fn progress_line(dot: Dot, banner: &str, sync_on: bool, last: Option<&str>, 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AddonsFacts {
     /// Addons in AddOns.
-    pub count: usize,
+    pub installed: usize,
+    /// Of those, the ones the game loads: one turned off isn't counted.
+    pub on: usize,
     /// Updates that go in at Play.
     pub at_play: usize,
     /// Updates, or addons another PC brings, that wait for the player's OK.
@@ -165,17 +180,28 @@ pub struct AddonsFacts {
     pub checked: bool,
 }
 
+/// The rail's addons numbers from the Installed list's lines: the addons in AddOns, the ones the
+/// game loads, and the updates that go in by themselves at Play (not one turned off, nor one
+/// SurvivorsForge holds back); `waiting_ok`, `downloading` and `checked` come from the worker.
+pub fn addons_facts(lines: &[Line], waiting_ok: usize, downloading: bool, checked: bool) -> AddonsFacts {
+    let at_play = lines
+        .iter()
+        .filter(|l| matches!(l.standing, Standing::Update { by_itself: true, .. }) && !l.off && !matches!(l.verdict, Verdict::No(_)))
+        .count();
+    AddonsFacts { installed: lines.len(), on: lines.iter().filter(|l| l.on).count(), at_play, waiting_ok, downloading, checked }
+}
+
 /// The rail's addons line: "5 addons on · all up to date", "5 addons on · 2 updates at Play",
 /// "5 addons on · 1 waits for your OK", "Addons not checked yet"; the dot green, blue while a
-/// download runs, amber when one waits for an OK.
+/// download runs, amber when one waits for an OK. Only the addons the game loads count as on.
 pub fn addons_line(f: AddonsFacts) -> RailLine {
-    if f.count == 0 {
+    if f.installed == 0 {
         return RailLine { text: "No addons yet".into(), dot: Dot::Muted, amber: false };
     }
     if !f.checked && f.waiting_ok == 0 && f.at_play == 0 {
         return RailLine { text: "Addons not checked yet".into(), dot: Dot::Muted, amber: false };
     }
-    let on = if f.count == 1 { "1 addon on".to_string() } else { format!("{} addons on", f.count) };
+    let on = if f.on == 1 { "1 addon on".to_string() } else { format!("{} addons on", f.on) };
     let (tail, dot) = if f.waiting_ok > 0 {
         (if f.waiting_ok == 1 { "1 waits for your OK".to_string() } else { format!("{} wait for your OK", f.waiting_ok) }, Dot::Amber)
     } else if f.at_play > 0 {
@@ -205,9 +231,9 @@ pub fn last_line(playing: Option<u32>, sync_on: bool, last: Option<(&str, u32, &
 /// What a button of a Needs-you question does; the app routes each to today's callback.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// The progress choice: keep this PC's, or use the other PC's.
-    KeepHere,
-    UseOther,
+    /// The progress choice: it opens the question over the window, where both sides show with
+    /// their dates and sizes and the choice is made.
+    ChooseProgress,
     /// The game's settings choice, and this PC's own from before it joined.
     GameKeepHere,
     GameUseOther,
@@ -254,20 +280,19 @@ pub struct NeedsYouFacts {
     /// An addon's settings changed here and on another PC: its id, its name, the PC.
     pub addon_asks: Vec<(String, String, String)>,
     pub waiting_ok: Vec<WaitingOk>,
-    /// Another PC syncing here already has this PC's name.
-    pub name_clash: Option<String>,
     /// The network folder doesn't answer.
     pub folder_down: bool,
 }
 
 /// Home's Needs-you list, one block per question, in the order the player should see them: the
-/// progress first, then the game's settings, the addons' settings, the OKs, the name, the folder.
+/// progress first, then the game's settings, the addons' settings, the OKs, the folder. The
+/// progress question's one button opens it over the window, where the choice is made.
 pub fn needs_you(f: &NeedsYouFacts) -> Vec<Question> {
     let mut out = Vec::new();
     if let Some(pc) = f.progress_split.as_deref().filter(|pc| !pc.trim().is_empty()) {
         out.push(Question {
-            text: format!("Your progress changed here and on {pc} since this PC last synced: pick the one to continue with. The other is kept as a version."),
-            buttons: vec![("Keep this PC's".into(), Action::KeepHere), (format!("Use {pc}'s"), Action::UseOther)],
+            text: format!("Your progress here and on {pc} differ: pick the one to continue with. The other is kept as a version."),
+            buttons: vec![("Choose…".into(), Action::ChooseProgress)],
         });
     }
     if let Some(pc) = f.game_ask_pc.as_deref().filter(|pc| !pc.trim().is_empty()) {
@@ -293,12 +318,6 @@ pub fn needs_you(f: &NeedsYouFacts) -> Vec<Question> {
         out.push(Question {
             text,
             buttons: vec![("Install anyway".into(), Action::InstallAnyway(w.id.clone())), ("Show what it found".into(), Action::ShowScan(w.id.clone()))],
-        });
-    }
-    if let Some(name) = f.name_clash.as_deref().filter(|n| !n.trim().is_empty()) {
-        out.push(Question {
-            text: format!("Another PC syncing here is already called {name}: give this one a name of its own."),
-            buttons: vec![("Open Settings".into(), Action::OpenSettings)],
         });
     }
     if f.folder_down {
@@ -347,6 +366,25 @@ mod tests {
         // A scale that makes no sense reads as 100 %.
         assert_eq!(open_size(1920, 1032, 0.0), Open::Size(1280, 720));
         assert_eq!(open_size(1920, 1032, f32::NAN), Open::Size(1280, 720));
+    }
+
+    /// The smallest window fits the screen with its frame: 1,120 × 630 where there is room, less
+    /// on a small high-DPI screen, so a maximised window never reaches past it.
+    #[test]
+    fn the_smallest_window_fits_the_work_area() {
+        assert_eq!(min_size(1920, 1032, 1.0), (1120, 630));
+        assert_eq!(min_size(1366, 728, 1.0), (1120, 630));
+        // 1,920 × 1,080 at 175 %, a 48 px taskbar: 1,097 × 589 logical, the frame inside that.
+        assert_eq!(min_size(1920, 1032, 1.75), (1081, 550));
+        // 1,280 × 800 at 150 %: 853 × 506 logical.
+        assert_eq!(min_size(1280, 760, 1.5), (837, 467));
+        assert_eq!(min_size(1920, 1032, f32::NAN), (1120, 630));
+        assert_eq!(min_size(0, -5, 1.0), (0, 0));
+        // Never more than the window the screen opens maximised at.
+        for (w, h, scale) in [(1920, 1032, 1.75), (1280, 760, 1.5), (1024, 700, 1.0)] {
+            let (mw, mh) = min_size(w, h, scale);
+            assert!(((mw + 16) as f32 * scale) <= w as f32 && ((mh + 39) as f32 * scale) <= h as f32, "{w}×{h} at {scale}");
+        }
     }
 
     #[test]
@@ -405,16 +443,17 @@ mod tests {
         let offline = progress_line(Dot::Amber, "Network folder unreachable: your progress is safe on this PC.", true, Some("2 min ago"), 3);
         assert_eq!(offline, RailLine { text: "Network folder unreachable: your progress is safe on this PC.".into(), dot: Dot::Amber, amber: true });
 
-        let facts = AddonsFacts { count: 5, checked: true, ..Default::default() };
+        let facts = AddonsFacts { installed: 6, on: 5, checked: true, ..Default::default() };
         assert_eq!(addons_line(facts), RailLine { text: "5 addons on · all up to date".into(), dot: Dot::Green, amber: false });
         assert_eq!(addons_line(AddonsFacts { at_play: 2, ..facts }), RailLine { text: "5 addons on · 2 updates at Play".into(), dot: Dot::Green, amber: false });
         assert_eq!(addons_line(AddonsFacts { at_play: 1, downloading: true, ..facts }), RailLine { text: "5 addons on · 1 update at Play".into(), dot: Dot::Blue, amber: false });
         assert_eq!(addons_line(AddonsFacts { waiting_ok: 1, at_play: 2, ..facts }), RailLine { text: "5 addons on · 1 waits for your OK".into(), dot: Dot::Amber, amber: false });
         assert_eq!(addons_line(AddonsFacts { waiting_ok: 2, ..facts }).text, "5 addons on · 2 wait for your OK");
-        assert_eq!(addons_line(AddonsFacts { count: 1, checked: true, ..Default::default() }).text, "1 addon on · all up to date");
-        assert_eq!(addons_line(AddonsFacts { count: 5, ..Default::default() }), RailLine { text: "Addons not checked yet".into(), dot: Dot::Muted, amber: false });
+        assert_eq!(addons_line(AddonsFacts { installed: 1, on: 1, checked: true, ..Default::default() }).text, "1 addon on · all up to date");
+        assert_eq!(addons_line(AddonsFacts { installed: 2, on: 0, checked: true, ..Default::default() }).text, "0 addons on · all up to date");
+        assert_eq!(addons_line(AddonsFacts { installed: 5, on: 5, ..Default::default() }), RailLine { text: "Addons not checked yet".into(), dot: Dot::Muted, amber: false });
         // Not checked this run, but something is known from the last: it shows.
-        assert_eq!(addons_line(AddonsFacts { count: 5, waiting_ok: 1, ..Default::default() }).text, "5 addons on · 1 waits for your OK");
+        assert_eq!(addons_line(AddonsFacts { installed: 5, on: 5, waiting_ok: 1, ..Default::default() }).text, "5 addons on · 1 waits for your OK");
         assert_eq!(addons_line(AddonsFacts::default()), RailLine { text: "No addons yet".into(), dot: Dot::Muted, amber: false });
 
         assert_eq!(last_line(None, true, Some(("today", 34, "Laptop"))), "Last played today, 34 min · Laptop");
@@ -422,6 +461,67 @@ mod tests {
         assert_eq!(last_line(None, false, None), "Not played from the Satchel yet");
         assert_eq!(last_line(Some(12), true, Some(("today", 34, "Laptop"))), "Session 12 min · your progress is sent when the game closes");
         assert_eq!(last_line(Some(0), false, None), "Session 0 min · your progress is backed up when the game closes");
+    }
+
+    fn line(name: &str, on: bool, off: bool, standing: Standing, verdict: Verdict) -> Line {
+        Line {
+            id: name.into(),
+            name: name.into(),
+            badge: None,
+            author: String::new(),
+            repo: None,
+            version: "1.0".into(),
+            released: None,
+            standing,
+            on,
+            off,
+            switchable: true,
+            folders: vec![name.into()],
+            problems: Vec::new(),
+            notes: None,
+            back_to: None,
+            pinned: false,
+            replace_with: None,
+            verdict,
+            forge_slug: None,
+            icon_url: None,
+        }
+    }
+
+    /// An addon turned off is in AddOns but isn't on; its update doesn't go in at Play, nor does one
+    /// SurvivorsForge holds back.
+    #[test]
+    fn the_rail_counts_the_addons_the_game_loads() {
+        use crate::addons::catalog::Release;
+        use crate::addons::forge::Why;
+        let to = Release {
+            tag: "v2".into(),
+            version: None,
+            published: Utc.with_ymd_and_hms(2026, 11, 1, 10, 0, 0).unwrap(),
+            prerelease: false,
+            file: "a.zip".into(),
+            url: String::new(),
+            sha256: "ab".into(),
+            size: 1,
+            interface: 0,
+            folders: Default::default(),
+            notes: None,
+            downloads: None,
+        };
+        let update = |by_itself| Standing::Update { to: to.clone(), by_itself };
+        let lines = [
+            line("A", true, false, Standing::Current, Verdict::Go),
+            line("B", true, false, update(true), Verdict::Go),
+            line("C", false, true, update(true), Verdict::Go),
+            line("D", true, false, update(false), Verdict::Go),
+            line("E", true, false, update(true), Verdict::No(Why::Blocked(Some("its scan found malware".into())))),
+            line("F", false, false, Standing::Current, Verdict::Go),
+        ];
+        let facts = addons_facts(&lines, 1, false, true);
+        assert_eq!(facts, AddonsFacts { installed: 6, on: 4, at_play: 1, waiting_ok: 1, downloading: false, checked: true });
+        assert_eq!(addons_line(facts).text, "4 addons on · 1 waits for your OK");
+        assert_eq!(addons_line(addons_facts(&lines, 0, true, true)), RailLine { text: "4 addons on · 1 update at Play".into(), dot: Dot::Blue, amber: false });
+        assert_eq!(addons_line(addons_facts(&[], 0, false, true)).text, "No addons yet");
     }
 
     #[test]
@@ -436,7 +536,6 @@ mod tests {
                 WaitingOk { id: "bordo-ui".into(), name: "BordoUI".into(), version: "2.8.18".into(), reason: "SurvivorsForge's scan found 1 warning in this version".into(), incoming: false },
                 WaitingOk { id: "forge:totems".into(), name: "Totems".into(), version: String::new(), reason: String::new(), incoming: true },
             ],
-            name_clash: Some("PC 2".into()),
             folder_down: true,
         };
         let questions = needs_you(&facts);
@@ -444,23 +543,22 @@ mod tests {
         assert_eq!(
             texts,
             [
-                "Your progress changed here and on Desktop since this PC last synced: pick the one to continue with. The other is kept as a version.",
+                "Your progress here and on Desktop differ: pick the one to continue with. The other is kept as a version.",
                 "The game's settings changed here and on Laptop since they last matched: pick one. This PC's stay until you do.",
                 "This PC's own, from before it joined, are kept as version 31",
                 "AZS Spell Meter's settings changed here and on PC 2 since they last matched: pick one.",
                 "BordoUI 2.8.18 waits for your OK: SurvivorsForge's scan found 1 warning in this version",
                 "Totems, from another PC, waits for your OK",
-                "Another PC syncing here is already called PC 2: give this one a name of its own.",
                 "The network folder doesn't answer: your progress is safe on this PC and goes up when the folder is back.",
             ]
         );
-        assert_eq!(questions[0].buttons, [("Keep this PC's".to_string(), Action::KeepHere), ("Use Desktop's".to_string(), Action::UseOther)]);
+        assert_eq!(questions[0].buttons, [("Choose…".to_string(), Action::ChooseProgress)]);
         assert_eq!(questions[1].buttons, [("Keep this PC's".to_string(), Action::GameKeepHere), ("Use Laptop's".to_string(), Action::GameUseOther)]);
         assert_eq!(questions[2].buttons, [("Use them instead".to_string(), Action::GameUseOwn)]);
         assert_eq!(questions[3].buttons, [("Keep this PC's".to_string(), Action::AddonKeepHere("azs-spell-meter".into())), ("Use PC 2's".to_string(), Action::AddonUseOther("azs-spell-meter".into()))]);
         assert_eq!(questions[4].buttons, [("Install anyway".to_string(), Action::InstallAnyway("bordo-ui".into())), ("Show what it found".to_string(), Action::ShowScan("bordo-ui".into()))]);
         assert_eq!(questions[6].buttons, [("Open Settings".to_string(), Action::OpenSettings)]);
-        assert_eq!(questions[7].buttons, [("Open Settings".to_string(), Action::OpenSettings)]);
+        assert_eq!(questions.len(), 7);
         // Blank names ask nothing.
         assert!(needs_you(&NeedsYouFacts { progress_split: Some(" ".into()), game_ask_pc: Some(String::new()), ..Default::default() }).is_empty());
     }
