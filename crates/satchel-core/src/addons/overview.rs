@@ -726,12 +726,24 @@ pub enum Sort {
 }
 
 impl Sort {
+    /// Browse's sort when the Satchel starts, in every view: the most downloads first.
+    pub const DEFAULT: Sort = Sort::Popularity;
+
     /// The sort as the window numbers it (`browse-sort`): 0 name, 1 last updated, 2 popularity.
     pub fn from_index(index: i32) -> Sort {
         match index {
             1 => Sort::Updated,
             2 => Sort::Popularity,
             _ => Sort::Name,
+        }
+    }
+
+    /// Its number in the window (`from_index` reads it back).
+    pub fn index(self) -> i32 {
+        match self {
+            Sort::Name => 0,
+            Sort::Updated => 1,
+            Sort::Popularity => 2,
         }
     }
 }
@@ -774,6 +786,129 @@ fn known_first<T: Ord>(a: Option<T>, b: Option<T>, reverse: bool) -> Ordering {
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     }
+}
+
+/// Who vouches for an addon, as the Safety column of Browse's table and of the Installed tab says
+/// it: SurvivorsForge's level with "SurvivorsForge" under it (`by`), so a level never shows without
+/// who gave it; else one line, our own badge's word ("Discord Verified", "Added by you"…). `kind`
+/// colours the first line as its badge is coloured.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SafetyCell {
+    pub word: String,
+    pub kind: i32,
+    pub by: String,
+}
+
+/// The Safety cell of an addon: SurvivorsForge's `level` ("verified", "flagged"…, with its badge's
+/// kind) when it gives one, else `ours`, the badge of the list or the way it came by ("Discord
+/// Verified" for our list, "Added by you", "SurvivorsForge" for one of its own while it gives no
+/// level…); empty when neither says anything.
+pub fn safety_cell(ours: Option<(&str, i32)>, level: Option<(&str, i32)>) -> SafetyCell {
+    match (level.filter(|(word, _)| !word.trim().is_empty()), ours.filter(|(word, _)| !word.trim().is_empty())) {
+        (Some((word, kind)), _) => SafetyCell { word: word.trim().to_string(), kind, by: "SurvivorsForge".into() },
+        (None, Some((word, kind))) => SafetyCell { word: word.trim().to_string(), kind, by: String::new() },
+        (None, None) => SafetyCell::default(),
+    }
+}
+
+/// The button of Browse's table's Install column, from an addon's action (0 Install, 1 Install
+/// anyway, 2 Installing, 3 Installed, 4 Update, 5 Update anyway, as its pane numbers them): its
+/// words, and whether it is the primary kind. `again`: the addon was removed on this PC, and its
+/// Install says so. Installing shows no button, only its words beside the spinner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstallCell {
+    pub text: &'static str,
+    pub primary: bool,
+}
+
+pub fn install_cell(action: i32, again: bool) -> InstallCell {
+    let (text, primary) = match action {
+        0 if again => ("Install again", true),
+        0 => ("Install", true),
+        // It asks first: a click selects the row, whose pane says why and has Install anyway.
+        1 => ("Install…", false),
+        2 => ("Installing…", false),
+        // The question the Installed tab's Remove… asks: the Recycle Bin, and its settings.
+        3 => ("Uninstall", false),
+        4 => ("Update", true),
+        // It asks first, as Install… does.
+        5 => ("Update…", false),
+        _ => ("", false),
+    };
+    InstallCell { text, primary }
+}
+
+/// The addon Browse's table selects by itself, `None` to leave the selection as it is: the top
+/// row of what it shows (`shown`, in its order) when the addon selected (`open`, empty for none)
+/// left it, and, at a fresh look (`fresh`: Browse entered, the table picked), when nothing is
+/// selected either. With nothing shown there is no top row, and nothing changes.
+pub fn table_pick<'a>(open: &str, shown: &[&'a str], fresh: bool) -> Option<&'a str> {
+    let top = *shown.first()?;
+    if open.is_empty() {
+        return fresh.then_some(top);
+    }
+    (!shown.contains(&open)).then_some(top)
+}
+
+/// The colour of a line in the Installed tab's Status column, as today's lines have them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Plain,
+    Good,
+    Look,
+    Never,
+}
+
+/// One installed addon's lines, as its row has them, for the Status column: SurvivorsForge's word
+/// against its update (`reason`, 1 waits for the player's OK, 2 never), where it stands (`state`,
+/// 1 good news, 2 needs a look), the other PCs (`share`, the same), its first problem, and whether
+/// it is up to date.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RowLines<'a> {
+    pub incoming: bool,
+    pub reason: (&'a str, i32),
+    pub state: (&'a str, i32),
+    pub share: (&'a str, i32),
+    pub problem: &'a str,
+    pub current: bool,
+}
+
+/// The Status column's one line for an installed addon, the rest being in its opened area: for an
+/// addon another PC brings, where it comes from; else what stands in the way of its update, what
+/// needs a look (where it stands, then the other PCs, then its first problem), what is news, and
+/// "Up to date" when nothing else is said and nothing is out. Empty when there is nothing to say.
+pub fn row_status(l: &RowLines) -> (String, Tone) {
+    let tone = |kind: i32| match kind {
+        1 => Tone::Good,
+        2 => Tone::Look,
+        _ => Tone::Plain,
+    };
+    let said = |text: &str| !text.trim().is_empty();
+    if l.incoming && said(l.state.0) {
+        return (l.state.0.to_string(), tone(l.state.1));
+    }
+    if said(l.reason.0) {
+        return (l.reason.0.to_string(), if l.reason.1 == 2 { Tone::Never } else { Tone::Look });
+    }
+    if said(l.state.0) && l.state.1 == 2 {
+        return (l.state.0.to_string(), Tone::Look);
+    }
+    if said(l.share.0) && l.share.1 == 2 {
+        return (l.share.0.to_string(), Tone::Look);
+    }
+    if said(l.problem) {
+        return (format!("⚠ {}", l.problem), Tone::Look);
+    }
+    if said(l.state.0) {
+        return (l.state.0.to_string(), tone(l.state.1));
+    }
+    if said(l.share.0) && l.share.1 == 1 {
+        return (l.share.0.to_string(), Tone::Good);
+    }
+    if l.current {
+        return ("Up to date".into(), Tone::Plain);
+    }
+    (String::new(), Tone::Plain)
 }
 
 /// One row of Versions…: one version of an addon, with all that is known of it here.
@@ -1826,5 +1961,98 @@ mod tests {
         assert_eq!(view.verdict(Origin::OurList, Some("a-forge"), "v2", Some("sha-v2")), Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 2 }));
         assert_eq!(view.verdict(Origin::OurList, Some("a-forge"), "v2", Some("sha-old")), Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 1 }));
         assert_eq!(w.lines()[0].verdict, Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 2 }), "the row judges our file by its own word");
+    }
+
+    #[test]
+    fn browse_starts_sorted_by_popularity_the_most_downloads_first() {
+        assert_eq!(Sort::DEFAULT, Sort::Popularity);
+        assert_eq!(Sort::from_index(Sort::DEFAULT.index()), Sort::DEFAULT);
+        for sort in [Sort::Name, Sort::Updated, Sort::Popularity] {
+            assert_eq!(Sort::from_index(sort.index()), sort);
+        }
+        let keys = |name: &'static str, downloads: Option<u64>| SortKeys { name, id: name, date: None, downloads };
+        let mut offers = vec![keys("Few", Some(12)), keys("Unknown", None), keys("Most", Some(8_382)), keys("Some", Some(940))];
+        offers.sort_by(|a, b| browse_order(a, b, Sort::DEFAULT, false));
+        assert_eq!(offers.iter().map(|k| k.name).collect::<Vec<_>>(), ["Most", "Some", "Few", "Unknown"], "not reversed; unknown counts last");
+    }
+
+    #[test]
+    fn the_safety_cell_names_who_vouches_for_an_addon() {
+        let ours = Some(("Discord Verified", 0));
+        // A level SurvivorsForge gives: the level, and "SurvivorsForge" under it.
+        let verified = SafetyCell { word: "verified".into(), kind: 4, by: "SurvivorsForge".into() };
+        assert_eq!(safety_cell(None, Some(("verified", 4))), verified);
+        assert_eq!(safety_cell(ours, Some(("verified", 4))), verified, "on both lists: SurvivorsForge's level");
+        assert_eq!(safety_cell(ours, Some(("no longer listed", 5))), SafetyCell { word: "no longer listed".into(), kind: 5, by: "SurvivorsForge".into() });
+        // Only on our list, or SurvivorsForge gives no level (off, silent): our list's word alone.
+        let discord = SafetyCell { word: "Discord Verified".into(), kind: 0, by: String::new() };
+        assert_eq!(safety_cell(ours, None), discord);
+        assert_eq!(safety_cell(ours, Some(("", 0))), discord);
+        // The Installed tab's other kinds: their own badge's word.
+        assert_eq!(safety_cell(Some(("Added by you", 1)), None), SafetyCell { word: "Added by you".into(), kind: 1, by: String::new() });
+        assert_eq!(safety_cell(Some(("Installed by hand", 3)), None).word, "Installed by hand");
+        assert_eq!(safety_cell(Some(("SurvivorsForge", 4)), None), SafetyCell { word: "SurvivorsForge".into(), kind: 4, by: String::new() });
+        assert_eq!(safety_cell(None, None), SafetyCell::default());
+    }
+
+    #[test]
+    fn the_install_column_says_what_its_button_does() {
+        let cell = |action: i32| {
+            let c = install_cell(action, false);
+            (c.text, c.primary)
+        };
+        assert_eq!(cell(0), ("Install", true));
+        assert_eq!(cell(1), ("Install…", false));
+        assert_eq!(cell(2), ("Installing…", false));
+        assert_eq!(cell(3), ("Uninstall", false));
+        assert_eq!(cell(4), ("Update", true));
+        assert_eq!(cell(5), ("Update…", false));
+        assert_eq!(cell(9), ("", false));
+        // Removed on this PC: its Install says so; the others don't change.
+        assert_eq!(install_cell(0, true), InstallCell { text: "Install again", primary: true });
+        assert_eq!(install_cell(1, true).text, "Install…");
+        assert_eq!(install_cell(3, true).text, "Uninstall");
+    }
+
+    #[test]
+    fn the_table_selects_its_top_row_when_nothing_or_nothing_shown_is_selected() {
+        let shown = ["b", "a", "c"];
+        // Browse entered, or the table picked, with nothing selected: the top row.
+        assert_eq!(table_pick("", &shown, true), Some("b"));
+        // Nothing selected (its pane closed) and the list filtered again: it stays so.
+        assert_eq!(table_pick("", &shown, false), None);
+        // The one selected is still shown: it stays, fresh look or not.
+        assert_eq!(table_pick("c", &shown, false), None);
+        assert_eq!(table_pick("c", &shown, true), None);
+        // It left the filtered list: the top row, fresh look or not.
+        assert_eq!(table_pick("z", &shown, false), Some("b"));
+        assert_eq!(table_pick("z", &shown, true), Some("b"));
+        // Nothing shown: no top row, nothing changes.
+        assert_eq!(table_pick("z", &[], true), None);
+        assert_eq!(table_pick("", &[], true), None);
+    }
+
+    #[test]
+    fn the_installed_status_is_the_line_that_matters_most() {
+        let status = |l: RowLines| row_status(&l);
+        assert_eq!(status(RowLines { current: true, ..Default::default() }), ("Up to date".to_string(), Tone::Plain));
+        assert_eq!(status(RowLines { state: ("Kept at this version; 0.8.0 is out", 0), ..Default::default() }), ("Kept at this version; 0.8.0 is out".to_string(), Tone::Plain));
+        assert_eq!(status(RowLines { state: ("Goes in when you press Play", 1), ..Default::default() }).1, Tone::Good);
+        // SurvivorsForge's word comes before where it stands.
+        let asks = RowLines { reason: ("Waits for your OK: SurvivorsForge hasn't scanned this version yet", 1), state: ("Goes in when you press Play", 1), ..Default::default() };
+        assert_eq!(status(asks), ("Waits for your OK: SurvivorsForge hasn't scanned this version yet".to_string(), Tone::Look));
+        assert_eq!(status(RowLines { reason: ("SurvivorsForge blocked it. It stays as you have it; no updates.", 2), current: true, ..Default::default() }).1, Tone::Never);
+        // What needs a look before news; a problem before plain words, and before "Up to date".
+        let split = RowLines { share: ("Its settings changed here and on PC 2 since they last matched: pick one below", 2), current: true, ..Default::default() };
+        assert_eq!(status(split).1, Tone::Look);
+        assert_eq!(status(RowLines { problem: "needs Ace3, which isn't in AddOns", current: true, ..Default::default() }), ("⚠ needs Ace3, which isn't in AddOns".to_string(), Tone::Look));
+        assert_eq!(status(RowLines { share: ("Settings from PC 2 come in at the next Play", 1), current: true, ..Default::default() }).1, Tone::Good);
+        // "On every PC" is plain: up to date says more.
+        assert_eq!(status(RowLines { share: ("On every PC", 0), current: true, ..Default::default() }).0, "Up to date");
+        // Another PC brings it: where it comes from.
+        let incoming = RowLines { incoming: true, state: ("From PC 2: it comes here at the next Play", 1), reason: ("Waits for your OK: …", 1), ..Default::default() };
+        assert_eq!(status(incoming), ("From PC 2: it comes here at the next Play".to_string(), Tone::Good));
+        // A copy installed by hand, with nothing to say: nothing.
+        assert_eq!(status(RowLines::default()), (String::new(), Tone::Plain));
     }
 }

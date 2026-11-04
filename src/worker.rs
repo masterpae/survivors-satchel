@@ -1372,7 +1372,7 @@ impl Worker {
         settings.addons.update_by_themselves = form.addons_auto;
         settings.addons.shared = form.addons_shared;
         settings.addons.forge = form.addons_forge;
-        settings.addons.browse_view = satchel_core::settings::browse_view_or_cards(&form.browse_view);
+        settings.addons.browse_view = satchel_core::settings::browse_view_or_default(&form.browse_view);
         settings.pause_when_away = form.pause_when_away;
         settings.theme = match form.theme {
             1 => Theme::Light,
@@ -1432,7 +1432,7 @@ impl Worker {
     /// Browse's switch: the view is kept in settings.toml as soon as it is picked, on its own, so
     /// fields being edited in Settings stay as they are (the form isn't pushed again).
     fn browse_view(&mut self, view: &str) {
-        let view = satchel_core::settings::browse_view_or_cards(view);
+        let view = satchel_core::settings::browse_view_or_default(view);
         if self.engine.settings.addons.browse_view == view {
             return;
         }
