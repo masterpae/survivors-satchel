@@ -182,6 +182,7 @@ fn cells(row: OfferRow, trust: (&str, i32), again: bool) -> OfferRow {
         install_primary: button.primary,
         installed: row.action >= 3,
         installed_id: if row.action >= 3 { row.id.clone() } else { SharedString::new() },
+        installed_name: if row.action >= 3 { row.name.clone() } else { SharedString::new() },
         ..row
     }
 }

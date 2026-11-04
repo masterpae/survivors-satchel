@@ -1967,7 +1967,9 @@ impl Worker {
                     reason,
                     warning: o.warning.clone().unwrap_or_default(),
                     installed: o.installed,
+                    // The Installed tab's line Uninstall removes, and its name for the question.
                     installed_id: self.offer_line(o).map(|l| l.id.clone()).unwrap_or_default(),
+                    installed_name: self.offer_line(o).map(|l| l.name.clone()).unwrap_or_default(),
                     // Removed on this PC: its Install says Install again.
                     again: !o.installed && a.store.removal(&o.id).is_some(),
                     safety,

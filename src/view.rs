@@ -357,8 +357,11 @@ pub struct OfferLine {
     /// It is in AddOns: a check mark after its name, and the table's "Installed only".
     pub installed: bool,
     /// Its row in the Installed tab, which Uninstall removes (its record's id, or `folder:<name>`
-    /// for a copy installed by hand); empty while it isn't installed.
+    /// for a copy installed by hand, `overview::installed_line`), and that row's name, which the
+    /// question names. Empty while it isn't installed, and when no row is this addon alone (a zip
+    /// pack holding it and others): no Uninstall then.
     pub installed_id: String,
+    pub installed_name: String,
     /// It was removed on this PC and isn't installed now: its Install says Install again.
     pub again: bool,
     /// The table's Safety column (`overview::safety_cell`).
@@ -772,6 +775,7 @@ fn offer_row(offer: &OfferLine) -> OfferRow {
         warning: text(&offer.warning),
         installed: offer.installed,
         installed_id: text(&offer.installed_id),
+        installed_name: text(&offer.installed_name),
         // The lists it is on: the pane's Safety line names ours.
         ours: offer.origin != ORIGIN_FORGE,
         forge: offer.origin != ORIGIN_OURS,

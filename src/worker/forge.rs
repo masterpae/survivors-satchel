@@ -962,23 +962,20 @@ impl Worker {
         })
     }
 
-    /// The installed addon an offer stands for, as the Installed tab lists it: its own record, one
-    /// installed from the same repository (by its link, say), or a copy installed by hand in its
-    /// main folder. `None` while it isn't installed.
+    /// The installed addon an offer stands for, as the Installed tab lists it, which Browse's
+    /// Uninstall removes (`overview::installed_line`): its own record, else the one line from its
+    /// repository or holding its main folder whose folders are all its own (our catalog's, or
+    /// SurvivorsForge's). `None` while it isn't installed, and when no line is this addon alone
+    /// (a zip pack holding it and others): its row then says Installed, without Uninstall.
     pub(super) fn offer_line(&self, offer: &Offer) -> Option<&overview::Line> {
         if !offer.installed {
             return None;
         }
-        let lines = &self.addons.lines;
-        let main = match forge::slug_in(&offer.id) {
-            Some(slug) => self.forge_folders(Some(slug)).and_then(|f| f.first().cloned()),
-            None => self.addons.catalog.get(&offer.id).and_then(|e| e.folders.first().cloned()),
+        let folders = match forge::slug_in(&offer.id) {
+            Some(slug) => self.forge_folders(Some(slug)).unwrap_or_default(),
+            None => self.addons.catalog.get(&offer.id).map(|e| e.folders.clone()).unwrap_or_default(),
         };
-        lines
-            .iter()
-            .find(|l| l.id == offer.id)
-            .or_else(|| lines.iter().find(|l| !offer.repo.trim().is_empty() && l.repo.as_deref().is_some_and(|r| forge::same_repo(r, &offer.repo))))
-            .or_else(|| main.and_then(|f| lines.iter().find(|l| l.folders.iter().any(|g| g.eq_ignore_ascii_case(&f)))))
+        overview::installed_line(&offer.id, &offer.repo, &folders, &self.addons.lines)
     }
 
     /// An offer's button, and the reason above it, in its pane and on its table row: Install;

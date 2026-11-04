@@ -142,7 +142,9 @@ export struct SettingsForm {
 // `downloads`: "8,382 downloads", or empty. `action`, as its pane's: 0 Install, 1 Install anyway
 // (it asks first: a click opens it), 2 Installing…, 3 Installed, 4 Update, 5 Update anyway (asks
 // first, as 1). `installed`: in AddOns (a check mark after its name); `installed-id`: its row in
-// the Installed tab, which Uninstall removes. The lists it is on (`ours`, `forge`). The table's
+// the Installed tab, which Uninstall removes, and `installed-name` that row's name, which the
+// question names (both empty when no row is this addon alone: no Uninstall). The lists it is on
+// (`ours`, `forge`). The table's
 // columns: who vouches for it (`safety`, coloured by `safety-kind` as its badge, with `safety-by`
 // under it), its tags in a line, its downloads as a number (`popularity`, empty when unknown), and
 // the Install column's button (`install-text`, the primary kind when `install-primary`).
@@ -163,6 +165,7 @@ export struct OfferRow {
     warning: string,
     installed: bool,
     installed-id: string,
+    installed-name: string,
     ours: bool,
     forge: bool,
     safety: string,
@@ -3449,10 +3452,11 @@ export component MainWindow inherits Window {
                                                 }
                                                 install => { root.browse-install(offer.id); }
                                                 update => { root.addon-update(offer.id); }
-                                                // The question the Installed tab's Remove… asks.
+                                                // The question the Installed tab's Remove… asks,
+                                                // naming the row it removes.
                                                 uninstall => {
                                                     root.remove-settings = false;
-                                                    root.remove-name = offer.name;
+                                                    root.remove-name = offer.installed-name;
                                                     root.remove-id = offer.installed-id;
                                                 }
                                             }

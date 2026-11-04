@@ -850,6 +850,28 @@ pub fn table_pick<'a>(open: &str, shown: &[&'a str], fresh: bool) -> Option<&'a 
     (!shown.contains(&open)).then_some(top)
 }
 
+/// The Installed tab's line an offer of Browse stands for, the one its Uninstall removes: the
+/// addon's own record (`id`); else the one line from its repository (`repo`), or holding its main
+/// folder, whose folders are all the addon's own (`folders`: our catalog's, or SurvivorsForge's).
+/// A line holding other addons' folders too, as a zip pack imported from a file does, is never it:
+/// removing it would remove them all. `None` when no line is it, or more than one could be.
+pub fn installed_line<'a>(id: &str, repo: &str, folders: &[String], lines: &'a [Line]) -> Option<&'a Line> {
+    if let Some(own) = lines.iter().find(|l| l.id == id) {
+        return Some(own);
+    }
+    let ours = |folder: &String| folders.iter().any(|f| f.eq_ignore_ascii_case(folder));
+    let main = folders.first();
+    let mut candidates = lines.iter().filter(|l| {
+        let same_repo = !repo.trim().is_empty() && l.repo.as_deref().is_some_and(|r| forge::same_repo(r, repo));
+        let holds_main = main.is_some_and(|m| l.folders.iter().any(|f| f.eq_ignore_ascii_case(m)));
+        (same_repo || holds_main) && !l.folders.is_empty() && l.folders.iter().all(ours)
+    });
+    match (candidates.next(), candidates.next()) {
+        (Some(one), None) => Some(one),
+        _ => None,
+    }
+}
+
 /// The colour of a line in the Installed tab's Status column, as today's lines have them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
@@ -2030,6 +2052,59 @@ mod tests {
         // Nothing shown: no top row, nothing changes.
         assert_eq!(table_pick("z", &[], true), None);
         assert_eq!(table_pick("", &[], true), None);
+    }
+
+    #[test]
+    fn uninstall_removes_only_a_line_that_is_this_addon_alone() {
+        let line = |id: &str, repo: Option<&str>, folders: &[&str]| Line {
+            id: id.into(),
+            name: id.into(),
+            badge: None,
+            author: String::new(),
+            repo: repo.map(str::to_string),
+            version: "1.0".into(),
+            released: None,
+            standing: Standing::Current,
+            on: true,
+            off: false,
+            switchable: true,
+            folders: folders.iter().map(|f| f.to_string()).collect(),
+            problems: Vec::new(),
+            notes: None,
+            back_to: None,
+            pinned: false,
+            replace_with: None,
+            verdict: Verdict::Go,
+            forge_slug: None,
+            icon_url: None,
+        };
+        let (id, repo) = ("survivor-ui", "morderous/SurvivorUI");
+        let folders = vec!["SurvivorUI".to_string()];
+        let found = |lines: &[Line]| installed_line(id, repo, &folders, lines).map(|l| l.id.clone());
+        // A zip pack imported from a file, holding this addon's folder and four others: never it.
+        let pack = line("file:ASPack", None, &["ASPack", "SurvivorUI", "ASDrops", "AZSMaxHit", "LocalClock"]);
+        assert_eq!(found(std::slice::from_ref(&pack)), None);
+        // A copy installed by hand: its folder's line.
+        let by_hand = line("folder:SurvivorUI", Some(repo), &["SurvivorUI"]);
+        assert_eq!(found(&[pack.clone(), by_hand.clone()]), Some("folder:SurvivorUI".into()));
+        // A record added by its link, from the same repository (GitHub doesn't tell case apart).
+        let linked = line("morderous/survivorui", Some("Morderous/SurvivorUI"), &["SurvivorUI"]);
+        assert_eq!(found(std::slice::from_ref(&linked)), Some("morderous/survivorui".into()));
+        // Its own record first, whatever else is there.
+        let own = line(id, Some(repo), &["SurvivorUI"]);
+        assert_eq!(found(&[pack.clone(), linked.clone(), own]), Some(id.into()));
+        // Two lines from the same repository: the one whose folders are its own, else none.
+        let wider = line("morderous/survivorui-plus", Some(repo), &["SurvivorUI", "SurvivorUIPlates"]);
+        assert_eq!(found(&[wider.clone(), linked.clone()]), Some("morderous/survivorui".into()));
+        let twin = line("morderous/survivorui-copy", Some(repo), &["SurvivorUI"]);
+        assert_eq!(found(&[linked, twin]), None, "either could be it");
+        assert_eq!(found(&[wider]), None);
+        // Folders compare as Windows names do; an addon with several takes a line holding them all.
+        let bordo = vec!["BordoUI".to_string(), "BordoUI_Media".to_string()];
+        let bordo_link = line("threenox/bordoui", Some("threenox/BordoUI"), &["bordoui", "BordoUI_Media"]);
+        assert_eq!(installed_line("bordo-ui", "threenox/BordoUI", &bordo, std::slice::from_ref(&bordo_link)).map(|l| l.id.as_str()), Some("threenox/bordoui"));
+        // A listing without folders: only its own record.
+        assert_eq!(installed_line("forge:totems", "sam/Totems", &[], &[line("sam/totems", Some("sam/Totems"), &["Totems"])]).map(|l| l.id.as_str()), None);
     }
 
     #[test]
