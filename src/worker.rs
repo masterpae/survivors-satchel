@@ -1616,38 +1616,38 @@ impl Worker {
     /// The first start's Start: the game's folder (detected, or picked there) and what the
     /// defaults file beside the exe set are written, and the first sync runs.
     fn finish_setup(&mut self) {
-        let refuse = |worker: &Self, key: &str, why: &str| {
-            let typed = match key {
-                "folder" => worker.form_view().saved.folder,
-                _ => worker.form_view().saved.game_dir,
-            };
-            worker.answer_form(Answered { key: key.into(), typed, applied: false, why: why.into() });
+        let refuse = |worker: &Self, why: &str| {
+            let typed = worker.form_view().saved.game_dir;
+            worker.answer_form(Answered { key: "game-dir".into(), typed, applied: false, why: why.into() });
         };
-        let settings = self.engine.settings.clone();
+        let mut settings = self.engine.settings.clone();
         let Some(dir) = settings.game_dir.clone().filter(|d| game_ok(Some(d))) else {
-            refuse(self, "game-dir", "The game isn't in this folder: choose the one it is in");
+            refuse(self, "The game isn't in this folder: choose the one it is in");
             return;
         };
         // The first sync may replace this PC's save: only with the game closed.
         if self.scanner.game_running(&dir) {
-            refuse(self, "game-dir", "The game is running: close it, then press Start");
+            refuse(self, "The game is running: close it, then press Start");
             return;
         }
-        if let Some(folder) = settings.sync_folder()
-            && let Some(why) = paths::sync_folder_problem(folder, &self.engine.local, Some(&dir))
-        {
-            refuse(self, "folder", &format!("The network folder from the defaults file can't be used: {why}"));
-            return;
+        // A network folder from the defaults file that can't be used: sync stays off rather than
+        // the first start stopping here, where Settings can't be reached to change it.
+        let problem = settings.sync_folder().and_then(|folder| paths::sync_folder_problem(folder, &self.engine.local, Some(&dir)));
+        if let Some(why) = problem {
+            log!("sync left off at the first start: {why}");
+            settings.sync.enabled = false;
+            self.say(format!("Sync stays off: the network folder from the defaults file can't be used ({why}). Choose another in Settings."));
         }
         if let Err(e) = settings.save(&self.engine.local.settings()) {
             log!("settings not saved: {e}");
-            refuse(self, "game-dir", &format!("Settings couldn't be saved: {e}"));
+            refuse(self, &format!("Settings couldn't be saved: {e}"));
             return;
         }
         log!("settings saved (sync {}, folder {:?}, PC {:?})", settings.sync.enabled, settings.sync.folder, settings.pc_name);
         if !self.engine.state.pc_names.iter().any(|n| n.eq_ignore_ascii_case(&settings.pc_name)) {
             self.engine.state.pc_names.push(settings.pc_name.clone());
         }
+        self.engine.settings = settings;
         self.apply_windows_settings();
         self.engine.state.setup_done = true;
         // A new install has nothing to tell about earlier versions.

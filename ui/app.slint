@@ -5251,7 +5251,11 @@ export component MainWindow inherits Window {
                                             placeholder-text: "\\\\server\\share\\Azeroth Survivors Saves";
                                             horizontal-stretch: 1;
                                             accepted(text) => { root.setting-text("folder", text); }
-                                            edited => { root.folder-refused = ""; }
+                                            // Typing: this field is being typed in, and its refusal goes.
+                                            edited => {
+                                                root.focused-field = "folder";
+                                                root.folder-refused = "";
+                                            }
                                             changed has-focus => {
                                                 if (self.has-focus) {
                                                     root.focused-field = "folder";
@@ -5286,7 +5290,11 @@ export component MainWindow inherits Window {
                                             font-size: 12px;
                                             width: 200px;
                                             accepted(text) => { root.setting-text("pc-name", text); }
-                                            edited => { root.name-refused = ""; }
+                                            // Typing: this field is being typed in, and its refusal goes.
+                                            edited => {
+                                                root.focused-field = "pc-name";
+                                                root.name-refused = "";
+                                            }
                                             changed has-focus => {
                                                 if (self.has-focus) {
                                                     root.focused-field = "pc-name";
@@ -5367,7 +5375,11 @@ export component MainWindow inherits Window {
                                             placeholder-text: "Not set";
                                             horizontal-stretch: 1;
                                             accepted(text) => { root.setting-text("game-dir", text); }
-                                            edited => { root.game-refused = ""; }
+                                            // Typing: this field is being typed in, and its refusal goes.
+                                            edited => {
+                                                root.focused-field = "game-dir";
+                                                root.game-refused = "";
+                                            }
                                             changed has-focus => {
                                                 if (self.has-focus) {
                                                     root.focused-field = "game-dir";
@@ -5738,12 +5750,6 @@ export component MainWindow inherits Window {
                                         font-size: 12px;
                                         overflow: elide;
                                         color: Look.muted;
-                                    }
-                                    if root.folder-refused != "": Text {
-                                        text: "✗ " + root.folder-refused;
-                                        font-size: 12px;
-                                        wrap: word-wrap;
-                                        color: Look.red;
                                     }
                                 }
                             }

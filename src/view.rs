@@ -1532,6 +1532,7 @@ pub fn set_theme(window: &MainWindow, card: &PlayCard, dark: bool) {
 /// - the one being typed in (`focused-field`: Alt-Tab or a popup doesn't end that, a click on
 ///   another control does) is never touched, unless the answer is for the very text it holds;
 /// - any other shows the saved value: text typed there and never applied with Enter goes.
+/// A form that answers no change (at start, at the first start's steps) clears every refusal.
 pub fn apply_form(window: &MainWindow, view: &FormView) {
     let saved = &view.saved;
     let focused = window.get_focused_field();
@@ -1553,8 +1554,11 @@ pub fn apply_form(window: &MainWindow, view: &FormView) {
                 }
                 set_refusal(window, key, "");
             }
-            None if focused.as_str() == key || !refusal(window, key).is_empty() => {}
-            None => set_field(window, key, value),
+            None if focused.as_str() == key || (answered.is_some() && !refusal(window, key).is_empty()) => {}
+            None => {
+                set_field(window, key, value);
+                set_refusal(window, key, "");
+            }
         }
     }
     // The sync switch turned on with a network folder that can't be used or doesn't answer: why,
