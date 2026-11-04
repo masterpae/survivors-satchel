@@ -536,6 +536,37 @@ fn changelog() -> ModelRc<ChangelogEntry> {
     ModelRc::new(VecModel::from(entries))
 }
 
+/// The game's patch notes as the app lists them: the version and date, the paragraph, then the
+/// file's lines, or the one muted line that says the full notes are on Discord.
+fn game_notes(notes: &[satchel_core::game_news::Note]) -> ModelRc<ChangelogEntry> {
+    use satchel_core::changelog::Block;
+    let entries: Vec<ChangelogEntry> = notes
+        .iter()
+        .map(|n| {
+            let mut blocks: Vec<ChangelogBlock> = Vec::new();
+            if !n.paragraph.is_empty() {
+                blocks.push(ChangelogBlock { kind: 0, text: n.paragraph.as_str().into() });
+            }
+            if n.in_file && !n.blocks.is_empty() {
+                blocks.extend(n.blocks.iter().map(|b| match b {
+                    Block::Paragraph(t) => ChangelogBlock { kind: 0, text: t.as_str().into() },
+                    Block::Heading(t) => ChangelogBlock { kind: 1, text: t.as_str().into() },
+                    Block::Bullet(t) => ChangelogBlock { kind: 2, text: t.as_str().into() },
+                    Block::Inner(t) => ChangelogBlock { kind: 3, text: t.as_str().into() },
+                }));
+            } else {
+                blocks.push(ChangelogBlock { kind: 4, text: "The full notes are on the game's Discord".into() });
+            }
+            ChangelogEntry {
+                version: n.version.as_str().into(),
+                date: n.date.map(|d| d.format("%-d %b %Y").to_string()).unwrap_or_default().into(),
+                blocks: ModelRc::new(VecModel::from(blocks)),
+            }
+        })
+        .collect();
+    ModelRc::new(VecModel::from(entries))
+}
+
 fn removed(name: &str, kind: i32, badge: &str, version: &str, when: &str, detail: &str, note: &str) -> RemovedRow {
     RemovedRow {
         id: name.into(),
@@ -789,7 +820,7 @@ fn main() {
     ui.set_changelog_open("0.4.0".into());
     ui.set_whats_new_open(true);
     snap(&main, size, &out.join("19-whats-new.ppm"));
-    ui.set_changelog_open("0.3.0".into());
+    ui.set_changelog_open("0.7.2".into());
     snap(&main, size, &out.join("19b-whats-new-older.ppm"));
     ui.set_whats_new_open(false);
     ui.set_tab(1);
@@ -1282,6 +1313,46 @@ fn main() {
     ui.set_addons_page(3);
     both("39c-addons-removed-asks", size);
     ui.set_addons_page(0);
+    ui.set_tab(0);
+
+    // 0.8: the game's patch notes. The Play tab's line, new and then seen; the panel with the
+    // real file's versions and one build seen live only (the newest, marked); the panel with
+    // nothing cached; About's block with the two answer times; each in both themes.
+    let file = satchel_core::changelog::versions(include_str!("../../../game/patch-notes.md"));
+    let mut seen = std::collections::BTreeMap::new();
+    seen.insert(
+        "0.141.1".to_string(),
+        satchel_core::game_news::Seen {
+            notes: "A small fix: Scholomance's loot rolls once more per kill as 0.141.0 said, and the Armory shows the right chance again.".into(),
+            modified: satchel_core::game_news::http_date("Wed, 04 Nov 2026 14:12:00 GMT"),
+            first_seen: None,
+        },
+    );
+    ui.set_game_notes(game_notes(&satchel_core::game_news::merge(&file, &seen)));
+    ui.set_game_news_version("0.141.1".into());
+    ui.set_game_news_line("Azeroth Survivors 0.141.1 · what's new".into());
+    ui.set_game_news_new(true);
+    ui.set_game_news_latest_answer("last answer 14:40".into());
+    ui.set_game_news_notes_answer("last answer 14:12".into());
+    both("40-play-game-news-new", size);
+    ui.set_game_news_new(false);
+    both("40b-play-game-news-seen", size);
+    ui.set_game_news_open(true);
+    both("41-game-news-panel", size);
+    // Tall enough for a whole long version and the ones after it.
+    both("41c-game-news-panel-tall", PhysicalSize::new(580, 1600));
+    ui.set_game_notes(game_notes(&[]));
+    ui.set_game_notes_empty("No notes on this PC yet: they show once the game's update server or the notes file has answered.".into());
+    ui.set_game_news_latest_answer("no answer yet on this PC".into());
+    ui.set_game_news_notes_answer("no answer yet on this PC".into());
+    both("41b-game-news-panel-empty", size);
+    ui.set_game_news_open(false);
+    ui.set_game_notes_empty("".into());
+    ui.set_game_news_latest_answer("last answer 14:40".into());
+    ui.set_game_news_notes_answer("last answer 14:12".into());
+    ui.set_tab(4);
+    // Tall enough for every group, the two About blocks at the foot.
+    both("42-settings-about-game-news", PhysicalSize::new(580, 2150));
     ui.set_tab(0);
 
     let card = PlayCard::new().expect("card");
