@@ -229,6 +229,7 @@ fn main() {
     window.on_link_clear(sender(&tx, || Command::LinkClear));
     window.on_install_again(with_id(&tx, Command::InstallAgain));
     window.on_whats_new_seen(sender(&tx, || Command::WhatsNewSeen));
+    window.on_game_news_seen(sender(&tx, || Command::GameNewsSeen));
     {
         let (tx, weak) = (tx.clone(), window.as_weak());
         window.on_find_game(move || {

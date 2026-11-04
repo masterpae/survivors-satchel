@@ -77,6 +77,40 @@ pub struct View {
     pub checks: u32,
     /// The version the Play card's Update now puts in place: only on the version check's question.
     pub card_update: String,
+    /// The game's patch notes: the Play tab's line, the panel and About's two answer times.
+    pub game_news: GameNewsView,
+}
+
+/// The game's patch notes as the window shows them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GameNewsView {
+    /// The Play tab's line, "Azeroth Survivors 0.141.0 · what's new"; empty when no build is
+    /// known on this PC (the line hides).
+    pub line: String,
+    /// The panel hasn't been opened for that build yet: the line is marked as new.
+    pub new: bool,
+    /// The newest build the game's update server names; empty when none is known.
+    pub version: String,
+    /// The panel's versions, newest first, 30 at most.
+    pub notes: Vec<GameNote>,
+    /// "Older notes are in the game's Discord" when there are more than 30; empty otherwise.
+    pub footer: String,
+    /// What the panel says when there is nothing cached at all; empty otherwise.
+    pub empty: String,
+    /// About's two lines: when each source last answered, or that it hasn't yet.
+    pub latest_answer: String,
+    pub notes_answer: String,
+}
+
+/// One version in the game's patch notes: its version and date, then its blocks as What's new
+/// shows them (0 a paragraph, 1 a heading, 2 a point, 3 a point inside a point, 4 an aside in
+/// muted text: "The full notes are on the game's Discord").
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GameNote {
+    pub version: String,
+    /// "4 Nov 2026", or empty when no date is known.
+    pub date: String,
+    pub blocks: Vec<(i32, String)>,
 }
 
 /// Where the game's own settings stand with the other PCs.
@@ -727,6 +761,19 @@ fn panel_row(panel: &PanelLine) -> PanelRow {
     }
 }
 
+/// The game's patch notes as the window lists them, in What's new's own shape.
+fn game_notes(notes: &[GameNote]) -> ModelRc<ChangelogEntry> {
+    let entries: Vec<ChangelogEntry> = notes
+        .iter()
+        .map(|n| ChangelogEntry {
+            version: text(&n.version),
+            date: text(&n.date),
+            blocks: ModelRc::new(VecModel::from(n.blocks.iter().map(|(kind, t)| ChangelogBlock { kind: *kind, text: text(t) }).collect::<Vec<_>>())),
+        })
+        .collect();
+    ModelRc::new(VecModel::from(entries))
+}
+
 /// Versions… as the window lists it.
 fn versions_row(versions: &VersionsView) -> VersionsRow {
     let rows: Vec<VersionItem> = versions
@@ -1016,6 +1063,17 @@ fn apply(window: &MainWindow, tray: &SatchelTray, card: &PlayCard, view: &View) 
         // "Checking…" from the click until the worker has taken that check up and, when it asks
         // GitHub, until the answer.
         window.set_checking(view.checking || CHECKS_ASKED.get() > view.checks);
+        let news = &view.game_news;
+        window.set_game_news_line(text(&news.line));
+        window.set_game_news_new(news.new);
+        window.set_game_news_version(text(&news.version));
+        window.set_game_notes_footer(text(&news.footer));
+        window.set_game_notes_empty(text(&news.empty));
+        window.set_game_news_latest_answer(text(&news.latest_answer));
+        window.set_game_news_notes_answer(text(&news.notes_answer));
+        if old.is_none_or(|o| o.game_news.notes != news.notes) {
+            window.set_game_notes(game_notes(&news.notes));
+        }
 
         window.set_state(state);
         window.set_banner(text(&view.banner));

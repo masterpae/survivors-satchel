@@ -547,6 +547,7 @@ impl Worker {
             Answer::ForgeDetails { slug, answer } => self.forge_details_answer(&slug, answer),
             Answer::ForgeVersions { slug, answer } => self.forge_versions_answer(&slug, answer),
             Answer::ForgeFindings { slug, tag, answer } => self.forge_findings_answer(&slug, &tag, answer),
+            Answer::GameNews { feed, answer } => self.news_answer(feed, answer),
             Answer::LookedUp(result) => {
                 let catalog = &self.addons.catalog;
                 self.addons.link = match result {

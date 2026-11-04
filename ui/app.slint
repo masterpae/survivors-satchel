@@ -97,7 +97,7 @@ export struct RemovedRow {
 }
 
 // A block of a version's changes: `kind` 0 a paragraph, 1 a heading, 2 a point, 3 a point inside
-// a point.
+// a point, 4 an aside in muted text (the game's notes: "The full notes are on the game's Discord").
 export struct ChangelogBlock {
     kind: int,
     text: string,
@@ -1785,6 +1785,28 @@ component RemovedItem inherits Rectangle {
     }
 }
 
+// A version's blocks, one under the other: What's new's and the game's patch notes'.
+component BlockLines inherits VerticalLayout {
+    in property <[ChangelogBlock]> blocks;
+    spacing: 4px;
+    for block in root.blocks: HorizontalLayout {
+        padding-left: block.kind == 3 ? 30px : block.kind == 2 ? 12px : 0px;
+        padding-top: block.kind == 1 ? 6px : 0px;
+        spacing: 6px;
+        if block.kind == 2 || block.kind == 3: Text {
+            text: block.kind == 3 ? "–" : "•";
+            color: Look.muted;
+        }
+        Text {
+            text: block.text;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            font-weight: block.kind == 1 ? 600 : 400;
+            color: block.kind == 4 ? Look.muted : Palette.foreground;
+        }
+    }
+}
+
 // One version in What's new; a click opens what changed in it.
 component ChangelogItem inherits Rectangle {
     in property <ChangelogEntry> entry;
@@ -1823,23 +1845,48 @@ component ChangelogItem inherits Rectangle {
                 vertical-alignment: center;
             }
         }
-        if root.open: VerticalLayout {
-            spacing: 4px;
-            for block in root.entry.blocks: HorizontalLayout {
-                padding-left: block.kind == 3 ? 30px : block.kind == 2 ? 12px : 0px;
-                padding-top: block.kind == 1 ? 6px : 0px;
-                spacing: 6px;
-                if block.kind >= 2: Text {
-                    text: block.kind == 3 ? "–" : "•";
-                    color: Look.muted;
-                }
-                Text {
-                    text: block.text;
-                    wrap: word-wrap;
-                    horizontal-stretch: 1;
-                    font-weight: block.kind == 1 ? 600 : 400;
+        if root.open: BlockLines {
+            blocks: root.entry.blocks;
+        }
+    }
+}
+
+// One version of the game's patch notes, open as it is: the version and its date (when one is
+// known), the newest build marked, then its paragraph and lines.
+component GameNoteItem inherits Rectangle {
+    in property <ChangelogEntry> entry;
+    in property <bool> current;
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 6px;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.entry.version;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            if root.current: VerticalLayout {
+                alignment: center;
+                Badge {
+                    text: "Newest build";
+                    kind: 0;
                 }
             }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: root.entry.date;
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+            }
+        }
+        if root.entry.blocks.length > 0: BlockLines {
+            blocks: root.entry.blocks;
         }
     }
 }
@@ -2351,6 +2398,24 @@ export component MainWindow inherits Window {
         root.whats-new-open = true;
         root.whats-new-seen();
     }
+    // The game's patch notes: the Play tab's line ("Azeroth Survivors 0.141.0 · what's new",
+    // empty when no build is known here; `game-news-new`: not opened for that build yet), the
+    // panel's versions, newest first, in What's new's shape, its last line when older ones are
+    // left out, what it says with nothing cached, and About's two answer times.
+    in property <string> game-news-line;
+    in property <bool> game-news-new;
+    in property <string> game-news-version;
+    in property <[ChangelogEntry]> game-notes;
+    in property <string> game-notes-footer;
+    in property <string> game-notes-empty;
+    in property <string> game-news-latest-answer;
+    in property <string> game-news-notes-answer;
+    in-out property <bool> game-news-open;
+    callback game-news-seen();
+    function open-game-news() {
+        root.game-news-open = true;
+        root.game-news-seen();
+    }
 
     // The game isn't in its folder: Play, Addons, Saves and Playtime say so.
     in property <bool> game-found: true;
@@ -2467,6 +2532,17 @@ export component MainWindow inherits Window {
                     if root.sync-on: Button {
                         text: "Open the network folder";
                         clicked => { root.open-folder(); }
+                    }
+                }
+                // The game's newest build, once its update server has named one; a click opens
+                // the game's patch notes. Blue until they have been opened for that build.
+                if root.game-news-line != "": HorizontalLayout {
+                    alignment: start;
+                    LinkText {
+                        text: root.game-news-line;
+                        ink: root.game-news-new ? Look.blue : Look.muted;
+                        font-size: 12px;
+                        clicked => { root.open-game-news(); }
                     }
                 }
                 Text {
@@ -3984,6 +4060,38 @@ export component MainWindow inherits Window {
                                     }
                                 }
                             }
+                            // Where the game's patch notes come from: its update server, and the
+                            // notes file in the Satchel's repository, with when each last answered.
+                            Rectangle {
+                                border-width: 1px;
+                                border-color: Palette.border;
+                                border-radius: 6px;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 6px;
+                                    Text {
+                                        text: "Where the game's patch notes come from";
+                                        font-weight: 600;
+                                    }
+                                    Text {
+                                        text: "The newest build's note comes from the game's own update server, the file Azeroth Survivors reads to update itself (" + root.game-news-latest-answer + ").";
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: "The full notes come from game/patch-notes.md in the Satchel's repository, kept by hand from the game's Discord posts; an edit there reaches every PC within half an hour, without an update of the Satchel (" + root.game-news-notes-answer + ").";
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        Button {
+                                            text: "What's new in the game";
+                                            clicked => { root.open-game-news(); }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -4206,6 +4314,72 @@ export component MainWindow inherits Window {
                         current: entry.version == root.app-version;
                         open: root.changelog-open == entry.version;
                         toggle => { root.changelog-open = root.changelog-open == entry.version ? "" : entry.version; }
+                    }
+                }
+            }
+        }
+    }
+
+    // The game's patch notes over the window, newest first, every version open: the newest
+    // build's note from the game's update server, the full notes from the Satchel's repository.
+    // Esc or Close closes it.
+    if root.game-news-open: Overlay {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        news-keys := FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.game-news-open = false;
+                    return accept;
+                }
+                return reject;
+            }
+            VerticalBox {
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "What's new in the game";
+                        font-size: 20px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Button {
+                        text: "Close";
+                        clicked => { root.game-news-open = false; }
+                    }
+                }
+                Text {
+                    text: "Azeroth Survivors' patch notes, newest first: the newest build's note from the game's own update server, and the full notes kept with the Satchel. The text is the game developer's.";
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    color: Look.muted;
+                }
+                if root.game-notes-empty != "": Text {
+                    text: root.game-notes-empty;
+                    wrap: word-wrap;
+                }
+                news-scroll := ScrollView {
+                    vertical-stretch: 1;
+                    content-height: news-list.preferred-height;
+                    news-list := VerticalLayout {
+                        width: news-scroll.visible-width - 14px;
+                        height: self.preferred-height;
+                        alignment: start;
+                        spacing: 6px;
+                        for entry in root.game-notes: GameNoteItem {
+                            entry: entry;
+                            current: entry.version == root.game-news-version;
+                        }
+                        if root.game-notes-footer != "": Text {
+                            text: root.game-notes-footer;
+                            font-size: 12px;
+                            color: Look.muted;
+                            wrap: word-wrap;
+                        }
                     }
                 }
             }

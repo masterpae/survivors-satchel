@@ -3,6 +3,7 @@
 
 mod addons;
 mod forge;
+mod game_news;
 mod share;
 
 use crate::net::{self, Answer};
@@ -130,6 +131,8 @@ pub enum Command {
     CheckUpdates,
     /// What's new was opened: "Updated to …" goes.
     WhatsNewSeen,
+    /// The game's patch notes were opened: the Play line stops being new for the build it names.
+    GameNewsSeen,
     /// The no-game panel's Find it: the game's folder is looked for and kept when found.
     /// The no-game panel's Find it, with the Settings form as it stands (unsaved edits stay).
     FindGame(Form),
@@ -227,6 +230,7 @@ pub struct Worker {
     addons: addons::AddonsState,
     share: share::ShareState,
     forge: forge::ForgeState,
+    news: game_news::NewsState,
 }
 
 /// How a Satchel that a newer one keeps out gets the new one while none is on offer: from GitHub,
@@ -341,10 +345,12 @@ impl Worker {
         }
         let net = net::start(engine.local.addon_cache(), engine.local.forge_dir(), commands);
         let forge = forge::ForgeState::new(engine.local.forge_dir());
+        let news = game_news::NewsState::new(engine.local.game_news_dir());
         Worker {
             addons: addons::AddonsState::new(store, net),
             share: share::ShareState::new(memory),
             forge,
+            news,
             engine,
             ui,
             tracker: Tracker::default(),
@@ -445,14 +451,17 @@ impl Worker {
         if let Err(e) = self.engine.flush_playtime() {
             log!("waiting playtime not sent: {e}");
         }
-        // SurvivorsForge's answers kept on this PC, before the first lists are made from them.
+        // SurvivorsForge's answers kept on this PC, before the first lists are made from them;
+        // the game's patch notes as last fetched.
         self.forge_load();
+        self.news_load();
         self.refresh();
         self.push_form();
         self.addons_scan();
         self.addons_prune_cache();
         self.addons_look();
         self.forge_look();
+        self.news_look();
         self.share_look();
         self.satchel_look();
     }
@@ -594,6 +603,7 @@ impl Worker {
             Command::UpdateNow => self.update_now(),
             Command::CheckUpdates => self.check_updates(),
             Command::WhatsNewSeen => self.whats_new_seen(),
+            Command::GameNewsSeen => self.news_seen(),
             Command::FindGame(form) => self.find_game(form),
             Command::OpenGameSite => win::open_url(win::GAME_SITE),
             Command::Net(answer) => self.addons_answer(answer),
@@ -651,6 +661,8 @@ impl Worker {
         // 30 minutes, usually a 304. What goes in after a session is then judged on a fresh answer,
         // and "isn't answering" never just means nobody asked.
         self.forge_look();
+        // The game's patch notes keep theirs the same way: two small requests per 30 minutes.
+        self.news_look();
     }
 
     fn on_event(&mut self, event: Event) {
@@ -1959,6 +1971,7 @@ impl Worker {
             checking: self.check_pending,
             checks: self.checks,
             card_update: if self.card_gate { self.offer().map(|o| o.version.clone()).unwrap_or_default() } else { String::new() },
+            game_news: self.news_view(),
         };
         (view, shown)
     }
