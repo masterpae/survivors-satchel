@@ -5454,6 +5454,13 @@ export component MainWindow inherits Window {
                                             font-size: 12.5px;
                                             clicked => { root.news-sources-open = true; }
                                         }
+                                    }
+                                    // The two links of a build that knows its repository, on a line of
+                                    // their own: the five don't fit the 680 px column on one.
+                                    if root.issue-url != "" || root.repo-url != "": HorizontalLayout {
+                                        spacing: 14px;
+                                        padding-bottom: 4px;
+                                        alignment: start;
                                         if root.issue-url != "": LinkText {
                                             text: "Report a problem";
                                             ink: Look.accent;

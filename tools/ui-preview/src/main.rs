@@ -282,11 +282,12 @@ fn icon_of(id: &str) -> Image {
 }
 
 /// Browse: our list from the catalog this build carries, joined with what SurvivorsForge said on
-/// 31 Oct, plus three addons only on SurvivorsForge. LuckyOdds, AZS Spell Meter and
-/// SurvivorsDragonUi count as installed. BordoUI shows as it would had no admin approved its
-/// flagged scan (it waits for the player's OK); the rest is as read that day. 0.7.2: icons for most
-/// of those SurvivorsForge lists, and its own addons' dates and download counts from its registry
-/// (sample figures).
+/// 31 Oct, plus three addons only on SurvivorsForge. Installed as the Installed tab lists them
+/// (`INSTALLED`: AZS Spell Meter and Azeroth Stats with a newer version out, so Update); Cursor
+/// Reticle was removed here (Install again). BordoUI shows as it would had no admin approved its
+/// flagged scan (it waits for the player's OK, and another PC brings it); the rest is as read that
+/// day. 0.7.2: icons for most of those SurvivorsForge lists, and its own addons' dates and download
+/// counts from its registry (sample figures).
 fn offers() -> Vec<Offer> {
     use satchel_core::addons::catalog::Catalog;
     use satchel_core::addons::overview::initials;
@@ -305,7 +306,7 @@ fn offers() -> Vec<Offer> {
                 tags.push((*category).to_string());
             }
             let badges: Vec<(&str, i32)> = badges.iter().map(|(t, k)| (t.as_str(), *k)).collect();
-            let installed = ["lucky-odds", "azs-spell-meter", "survivors-dragon-ui"].contains(&e.id.as_str());
+            let action = INSTALLED.iter().find(|(id, _)| *id == e.id).map_or(0, |(_, action)| *action);
             let warning = if e.id == "keijin-ui" { "doesn't mix with SurvivorsDragonUi, which you have" } else { "" };
             // SurvivorsForge's five LuckyOdds versions, 31 Oct: 230 + 761 + 2,853 + 2,870 + 1,668.
             let (downloads, popularity) = if e.id == "lucky-odds" { ("8,382 downloads", "8,382") } else { ("", "") };
@@ -322,7 +323,7 @@ fn offers() -> Vec<Offer> {
                 badges: badge_rows(&badges),
                 version: e.latest.shown_version().into(),
                 date: days_ago((today - e.latest.published.date_naive()).num_days()).into(),
-                action: if installed { 3 } else { 0 },
+                action,
                 reason: SharedString::new(),
                 warning: warning.into(),
                 ours: true,
@@ -332,7 +333,7 @@ fn offers() -> Vec<Offer> {
                 ..Default::default()
             };
             Offer {
-                row: cells(row, (trust, 4), false),
+                row: cells(row, (trust, 4), e.id == "cursor-reticle"),
                 tags,
                 origin: if forge.is_some() { 1 } else { 0 },
                 trust: (trust.to_string(), 4),
@@ -404,7 +405,11 @@ fn offers() -> Vec<Offer> {
             version: version.into(),
             // 0.7.2: its date and count come with the registry.
             date: days_ago(days).into(),
-            action: if reason.is_empty() { 0 } else { 1 },
+            action: if !reason.is_empty() {
+                1
+            } else {
+                INSTALLED.iter().find(|(i, _)| *i == id).map_or(0, |(_, action)| *action)
+            },
             reason: reason.into(),
             warning: SharedString::new(),
             ours: false,
@@ -424,6 +429,11 @@ fn offers() -> Vec<Offer> {
     offers.sort_by_key(|o| o.row.name.trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase());
     offers
 }
+
+/// The addons installed here, as the Installed tab lists them, with Browse's action for each: 3
+/// Uninstall, 4 Update (a newer version is out).
+const INSTALLED: [(&str, i32); 6] =
+    [("azs-spell-meter", 4), ("azeroth-cursor", 3), ("azeroth-stats", 4), ("lucky-odds", 3), ("survivors-dragon-ui", 3), ("forge:totemmanager", 3)];
 
 /// 2,870: a count as people read it.
 fn thousands(n: u64) -> String {
@@ -582,20 +592,6 @@ fn pcs(values: &[(&str, bool, &str)]) -> ModelRc<PcRow> {
     ModelRc::new(VecModel::from(values.iter().map(|(name, this_pc, line)| PcRow { name: (*name).into(), this_pc: *this_pc, line: (*line).into() }).collect::<Vec<_>>()))
 }
 
-fn questions(values: &[(&str, &[(&str, i32, &str)])]) -> ModelRc<QuestionRow> {
-    ModelRc::new(VecModel::from(
-        values
-            .iter()
-            .map(|(text, buttons)| QuestionRow {
-                text: (*text).into(),
-                buttons: ModelRc::new(VecModel::from(
-                    buttons.iter().map(|(t, action, id)| QuestionButton { text: (*t).into(), action: *action, id: (*id).into() }).collect::<Vec<_>>(),
-                )),
-            })
-            .collect::<Vec<_>>(),
-    ))
-}
-
 fn saves(values: &[(&str, &str, &str, &str, &str, bool, bool)]) -> ModelRc<SaveRow> {
     ModelRc::new(VecModel::from(
         values
@@ -613,18 +609,76 @@ fn saves(values: &[(&str, &str, &str, &str, &str, bool, bool)]) -> ModelRc<SaveR
     ))
 }
 
-/// The newest note of the real patch-notes file, as Home's What's new card shows it: its
-/// paragraph, then its lines.
-fn newest_note() -> (String, ModelRc<ChangelogBlock>) {
+/// The newest note of the real patch-notes file, as Home's What's new card shows it
+/// (`game_news::card`): its version, its paragraph and first lines, and whether lines were left
+/// out.
+fn newest_note() -> (String, ModelRc<ChangelogBlock>, bool) {
     let file = satchel_core::changelog::versions(include_str!("../../../game/patch-notes.md"));
     let newest = file.first().expect("game/patch-notes.md has a version");
     let notes = game_notes(&satchel_core::game_news::merge(std::slice::from_ref(newest), &std::collections::BTreeMap::new()));
     let entry = notes.row_data(0).expect("the newest note");
-    (newest.version.clone(), entry.blocks)
+    let blocks: Vec<ChangelogBlock> = entry.blocks.iter().collect();
+    let (shown, more) = satchel_core::game_news::card(&blocks, |b| b.kind == 0);
+    (newest.version.clone(), ModelRc::new(VecModel::from(shown.to_vec())), more)
 }
 
-/// Home, the rail and Settings as a PC with sync on sees them on 4 Nov: three PCs, the real
-/// patch notes, sample playtimes, progress versions and activity (the mock's figures).
+/// Home's Needs-you card as the app makes it (`shell::needs_you`), its buttons numbered as the
+/// window numbers them.
+fn needs_you(facts: &satchel_core::shell::NeedsYouFacts) -> ModelRc<QuestionRow> {
+    use satchel_core::shell::Action;
+    let rows: Vec<QuestionRow> = satchel_core::shell::needs_you(facts)
+        .iter()
+        .map(|q| QuestionRow {
+            text: q.text.as_str().into(),
+            buttons: ModelRc::new(VecModel::from(
+                q.buttons
+                    .iter()
+                    .map(|(label, action)| {
+                        let (code, id) = match action {
+                            Action::ChooseProgress => (0, ""),
+                            Action::GameKeepHere => (1, ""),
+                            Action::GameUseOther => (2, ""),
+                            Action::GameUseOwn => (3, ""),
+                            Action::AddonKeepHere(id) => (4, id.as_str()),
+                            Action::AddonUseOther(id) => (5, id.as_str()),
+                            Action::InstallAnyway(id) => (6, id.as_str()),
+                            Action::ShowScan(id) => (7, id.as_str()),
+                            Action::OpenSettings => (8, ""),
+                        };
+                        QuestionButton { text: label.as_str().into(), action: code, id: id.into() }
+                    })
+                    .collect::<Vec<_>>(),
+            )),
+        })
+        .collect();
+    ModelRc::new(VecModel::from(rows))
+}
+
+/// What the Settings fields hold, as saved: the hint "Enter to apply" shows only where a field
+/// differs from it.
+fn saved_form(ui: &MainWindow) -> SettingsForm {
+    SettingsForm {
+        game_dir: ui.get_game_dir(),
+        sync: ui.get_sync_switch(),
+        folder: ui.get_sync_folder(),
+        pc_name: ui.get_pc_name(),
+        start_with_windows: ui.get_start_with_windows(),
+        desktop_shortcut: ui.get_desktop_shortcut(),
+        notifications: ui.get_notifications(),
+        addons_auto: ui.get_addons_auto(),
+        addons_shared: ui.get_addons_shared(),
+        addons_forge: ui.get_addons_forge(),
+        pause_when_away: ui.get_pause_when_away(),
+        theme: ui.get_theme(),
+        game_shared: ui.get_game_shared(),
+        browse_view: ui.get_browse_view(),
+    }
+}
+
+/// Home, the rail, Addons and Settings as a PC with sync on sees them on 4 Nov: three PCs, the real
+/// patch notes, sample playtimes, progress versions and activity (sample figures, see
+/// docs/plan-0.9.md), and one set of addons that every page agrees on: the Installed tab's rows,
+/// Browse's check marks, the rail's count and Home's question.
 fn fill(ui: &MainWindow) {
     ui.set_state(TrayState::Synced);
     ui.set_sync_on(true);
@@ -633,24 +687,42 @@ fn fill(ui: &MainWindow) {
     ui.set_app_build("Built from 1b9cab0".into());
     ui.set_settings_path(r"C:\Users\Player\AppData\Roaming\SurvivorsSatchel\settings.toml".into());
     // The rail.
-    let (version, blocks) = newest_note();
+    let (version, blocks, more) = newest_note();
     ui.set_build_line(format!("Build {version}").into());
     ui.set_build_link(true);
-    ui.set_game_news_version(version.into());
+    ui.set_game_news_version(version.as_str().into());
     ui.set_game_news_new(true);
+    ui.set_news_version(version.into());
     ui.set_news_blocks(blocks);
+    ui.set_news_more(more);
     ui.set_progress_line("Progress synced 2 min ago · 3 PCs".into());
     ui.set_progress_dot(0);
-    ui.set_addons_line("7 addons on · 1 waits for your OK".into());
+    // Five on (Azeroth Cursor is off), and BordoUI, which Desktop brings, waits for an OK.
+    ui.set_addons_line(satchel_core::shell::addons_line(satchel_core::shell::AddonsFacts {
+        installed: 6,
+        on: 5,
+        at_play: 1,
+        waiting_ok: 1,
+        downloading: false,
+        checked: true,
+    })
+    .text
+    .into());
     ui.set_addons_dot(3);
     ui.set_last_line("Last played today, 34 min · Laptop".into());
     // Home.
     ui.set_pcs(pcs(&[("Laptop", true, "played today · synced 2 min ago"), ("Desktop", false, "played yesterday · synced yesterday 21:40"), ("Study PC", false, "played Sun · synced Sun 19:05")]));
     ui.set_pcs_week("This week: 4 h 12 min · 6 sessions".into());
-    ui.set_questions(questions(&[(
-        "BordoUI 2.8.18 waits for your OK: SurvivorsForge's scan found 1 warning in this version",
-        &[("Install anyway", 7, "bordo-ui"), ("Show what it found", 8, "bordo-ui")],
-    )]));
+    ui.set_questions(needs_you(&satchel_core::shell::NeedsYouFacts {
+        waiting_ok: vec![satchel_core::shell::WaitingOk {
+            id: "bordo-ui".into(),
+            name: "BordoUI".into(),
+            version: "2.8.18".into(),
+            reason: "SurvivorsForge's scan found 1 warning in this version".into(),
+            incoming: true,
+        }],
+        ..Default::default()
+    }));
     ui.set_recent(recent(&[
         (0, "Progress sent · v27 · 8.1 KB", "2 min ago"),
         (2, "Played 34 min on Laptop", "today 13:20"),
@@ -696,7 +768,8 @@ fn fill(ui: &MainWindow) {
     ui.set_theme(2);
     ui.set_game_shared(true);
     ui.set_game_line("The same on every PC · Desktop's, version 3".into());
-    ui.set_saved_form(SettingsForm { addons_forge: true, ..Default::default() });
+    ui.set_browse_view("table".into());
+    ui.set_saved_form(saved_form(ui));
     ui.set_forge_answer("Last answer 14:40".into());
     ui.set_discord_checked("4 Nov 2026".into());
     ui.set_forge_repo_url(satchel_core::addons::forge::REPO.into());
@@ -716,90 +789,104 @@ fn fill(ui: &MainWindow) {
     ui.set_repo_url("https://github.com/owner/survivors-satchel".into());
     ui.set_issue_url("https://github.com/owner/survivors-satchel/issues/new?template=bug.yml&version=0.9.0".into());
     ui.set_changelog(changelog());
-    // The Installed tab in columns: updates, one that waits for the player's OK, one held back,
-    // one kept at its version, one installed by hand, one SurvivorsForge's own, one from another PC.
+    // The Installed tab in columns, as Browse checks them: one update that goes in at Play, one
+    // turned off, one kept at an older version, one shared with every PC, one SurvivorsForge's
+    // own; and BordoUI, which Desktop brings and which waits for the player's OK. Authors and
+    // versions as the catalog has them.
+    let all = offers();
+    let author = |id: &str| all.iter().find(|o| o.row.id.as_str() == id).map(|o| o.row.author.to_string()).unwrap_or_default();
+    let latest = |id: &str| all.iter().find(|o| o.row.id.as_str() == id).map(|o| o.row.version.to_string()).unwrap_or_default();
+    let verified = || badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · verified", 4)]);
     let rows = vec![
-        AddonRow { icon: icon_of("aether-hud"), badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · unscanned", 5)]), reason: "Waits for your OK: SurvivorsForge hasn't scanned this version yet".into(), reason_kind: 1, ..addon("AetherHUD", 0, "NORehabRocket", "1.4.0", "1.5.0", ("", 0), "") },
-        AddonRow { icon: icon_of("azs-spell-meter"), badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · verified", 4)]), released: "2 days ago".into(), ..addon("AZS Spell Meter", 0, "kex0", "1.34", "1.36", ("Goes in when you press Play", 1), "") },
         AddonRow {
-            badges: badge_rows(&[("SurvivorsForge · flagged", 5)]),
-            badge: "SurvivorsForge · flagged".into(),
-            badge_kind: 4,
-            initials: "BO".into(),
+            id: "azs-spell-meter".into(),
+            icon: icon_of("azs-spell-meter"),
+            badges: verified(),
+            released: "8 days ago".into(),
+            ..addon("AZS Spell Meter", 0, &author("azs-spell-meter"), "1.38.2", &latest("azs-spell-meter"), ("Goes in when you press Play", 1), "")
+        },
+        AddonRow {
+            id: "azeroth-cursor".into(),
+            on: false,
+            released: "3 days ago".into(),
+            ..addon("Azeroth Cursor", 0, &author("azeroth-cursor"), &latest("azeroth-cursor"), "", ("", 0), "")
+        },
+        AddonRow {
+            id: "azeroth-stats".into(),
+            icon: icon_of("azeroth-stats"),
+            badges: verified(),
+            pinned: true,
+            can_update: true,
+            released: "12 days ago".into(),
+            state: format!("Kept at this version; {} is out", latest("azeroth-stats")).into(),
+            ..addon("Azeroth Stats", 0, &author("azeroth-stats"), "1.9.1", "", ("", 0), "")
+        },
+        AddonRow {
+            id: "bordo-ui".into(),
+            badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · flagged", 5)]),
             reason: "Waits for your OK: SurvivorsForge's scan found 1 warning in this version".into(),
             reason_kind: 1,
             state: "From Desktop".into(),
             incoming: true,
             switchable: false,
             can_pin: false,
-            has_page: true,
             released: SharedString::new(),
-            ..addon("BordoUI", 1, "threenox", "v2.8.18", "", ("", 0), "")
+            ..addon("BordoUI", 0, &author("bordo-ui"), &latest("bordo-ui"), "", ("", 0), "")
         },
         AddonRow {
-            replace_with: "4.5.0".into(),
-            icon: icon_of("keijin-ui"),
-            ..addon("KeijinUI", 3, "KeijinDE", "4.4.1", "", ("Not one of its author's releases: replace it with 4.5.0 to get updates", 2), "installed by hand, and its files aren't one of its author's releases, so it isn't updated")
-        },
-        AddonRow {
+            id: "lucky-odds".into(),
             icon: icon_of("lucky-odds"),
-            badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · verified", 4)]),
-            back_to: "0.8.0".into(),
-            pinned: true,
+            badges: verified(),
             share: "On every PC".into(),
             shared: true,
-            state: "Kept at this version; 0.9.0 is out".into(),
-            ..addon("LuckyOdds", 0, "cadoky", "0.8.0", "", ("", 0), "")
+            released: "2 days ago".into(),
+            ..addon("LuckyOdds", 0, &author("lucky-odds"), &latest("lucky-odds"), "", ("", 0), "")
         },
         AddonRow {
-            icon: icon_of("survivor-ui"),
-            badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · source changed", 6)]),
-            reason: "The file changed after SurvivorsForge scanned it. It stays as you have it; no updates.".into(),
-            reason_kind: 2,
-            released: "11 days ago".into(),
-            ..addon("Survivor UI", 0, "morderous", "3.0.47", "", ("", 0), "")
+            id: "survivors-dragon-ui".into(),
+            icon: icon_of("survivors-dragon-ui"),
+            badges: verified(),
+            released: "today".into(),
+            ..addon("SurvivorsDragonUi", 0, &author("survivors-dragon-ui"), &latest("survivors-dragon-ui"), "", ("", 0), "")
         },
-        AddonRow { icon: icon_of("survivors-dragon-ui"), badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · verified", 4)]), released: "5 days ago".into(), ..addon("SurvivorsDragonUi", 0, "migwynkriid13", "3.2.64", "", ("", 0), "") },
         AddonRow {
+            id: "forge:totemmanager".into(),
             icon: icon_of("forge:totemmanager"),
             badge: "SurvivorsForge · scanned".into(),
             badge_kind: 4,
             badges: badge_rows(&[("SurvivorsForge · scanned", 4)]),
             released: "3 days ago".into(),
-            ..addon("TotemManager", 1, "BippyMiester", "v1.1.1", "", ("", 0), "")
+            ..addon("TotemManager", 1, &author("forge:totemmanager"), &latest("forge:totemmanager"), "", ("", 0), "")
         },
     ];
     set_rows(ui, rows);
-    ui.set_addons_count(7);
-    ui.set_addons_header("2 updates · 1 goes in when you press Play, 1 asks first · 1 kept at an older version".into());
-    ui.set_addons_share("On every PC · 1 change from another PC comes in at the next Play".into());
+    // The lines the app counts: the six installed here (BordoUI isn't yet).
+    ui.set_addons_count(6);
+    ui.set_addons_header("1 update · it goes in when you press Play · 1 kept at an older version".into());
+    ui.set_addons_share("On every PC · BordoUI from Desktop waits for your OK".into());
     ui.set_addons_footer("New releases checked 12 minutes ago.".into());
     ui.set_can_update_all(true);
     ui.set_removed_rows(ModelRc::new(VecModel::from(vec![
-        RemovedRow {
-            reason: "Waits for your OK: SurvivorsForge hasn't scanned this version yet".into(),
-            reason_kind: 1,
-            ..removed("Azeroth Cursor", 0, "Discord Verified", "1.0.0", "today 10:24", "Its settings stayed in the game's folder", "")
-        },
+        removed("Cursor Reticle", 0, "Discord Verified", &latest("cursor-reticle"), "today 10:24", "Its settings stayed in the game's folder", ""),
         RemovedRow {
             reason: "SurvivorsForge blocked it: Sends your chat elsewhere".into(),
             reason_kind: 2,
-            ..removed("Big Cursor", 1, "Added by you", "0.3.4", "yesterday 23:10", "Its settings went with it; they come back with it", "")
+            ..removed("Chat Relay", 1, "Added by you", "0.3.4", "yesterday 23:10", "Its settings went with it; they come back with it", "")
         },
         removed("Old Meter", 2, "From a file", "2.1", "27 Oct 18:02", "Its settings stayed in the game's folder", "It came from a zip file: import the zip again"),
     ])));
     ui.set_browse_note("18 Discord Verified · 15 on SurvivorsForge · the catalog of today 10:54".into());
-    ui.set_browse_view("table".into());
     ui.set_browse_sort(2);
-    ui.set_link_text("github.com/Hearts47/RunPace".into());
+    ui.set_link_text("github.com/a-player/RunPace".into());
     ui.set_link_state(2);
-    ui.set_link_owner("Hearts47 · 1 star · last change today 09:12".into());
+    ui.set_link_owner("a-player · 1 star · last change today 09:12".into());
     ui.set_link_release("v1.1.0 · RunPace.zip · licence MIT · checksum matches GitHub's".into());
     ui.set_link_goes("RunPace · nothing left out · kills and XP per minute".into());
     ui.set_link_note("Not reviewed by the game's devs. Addon code can't reach your PC, and it asks before each update.".into());
 }
 
-/// Renders every state of section 9 of the 0.9 plan, in both themes, at the three sizes.
+/// Renders every state the 0.9 plan lists (see docs/plan-0.9.md), in both themes, at the three
+/// sizes.
 fn main() {
     let out = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| "preview".into());
     fs::create_dir_all(&out).expect("the output folder could not be created");
@@ -848,14 +935,17 @@ fn main() {
     ui.set_sync_on(true);
     ui.set_progress_line("Progress synced 2 min ago · 3 PCs".into());
     // Nothing yet: no notes, no activity, no playtime, no questions.
-    let (news_version, news_blocks) = (ui.get_game_news_version(), ui.get_news_blocks());
+    let (news_version, news_blocks, news_more) = (ui.get_game_news_version(), ui.get_news_blocks(), ui.get_news_more());
+    let addons_line = ui.get_addons_line();
     let (recent_lines, question_rows, day_bars, session_rows) = (ui.get_recent(), ui.get_questions(), ui.get_playtime_days(), ui.get_sessions());
     ui.set_build_line("The game's notes come here once read".into());
     ui.set_build_link(false);
     ui.set_game_news_version("".into());
+    ui.set_news_version("".into());
     ui.set_news_blocks(ModelRc::new(VecModel::from(Vec::<ChangelogBlock>::new())));
+    ui.set_news_more(false);
     ui.set_recent(recent(&[]));
-    ui.set_questions(questions(&[]));
+    ui.set_questions(needs_you(&Default::default()));
     ui.set_playtime_week("0 min".into());
     ui.set_playtime_week_sessions(0);
     ui.set_playtime_days(days(&[("Thu", 0), ("Fri", 0), ("Sat", 0), ("Sun", 0), ("Mon", 0), ("Tue", 0), ("Today", 0)]));
@@ -869,8 +959,10 @@ fn main() {
     both("50e-home-nothing-yet", size);
     ui.set_build_line(format!("Build {news_version}").into());
     ui.set_build_link(true);
+    ui.set_news_version(news_version.clone());
     ui.set_game_news_version(news_version);
     ui.set_news_blocks(news_blocks);
+    ui.set_news_more(news_more);
     ui.set_recent(recent_lines);
     ui.set_questions(question_rows);
     ui.set_playtime_week("4 h 12 min".into());
@@ -878,7 +970,7 @@ fn main() {
     ui.set_playtime_days(day_bars);
     ui.set_sessions(session_rows);
     ui.set_progress_line("Progress synced 2 min ago · 3 PCs".into());
-    ui.set_addons_line("7 addons on · 1 waits for your OK".into());
+    ui.set_addons_line(addons_line);
     ui.set_addons_dot(3);
     ui.set_last_line("Last played today, 34 min · Laptop".into());
     ui.set_pcs(pcs(&[("Laptop", true, "played today · synced 2 min ago"), ("Desktop", false, "played yesterday · synced yesterday 21:40"), ("Study PC", false, "played Sun · synced Sun 19:05")]));
@@ -988,13 +1080,11 @@ fn main() {
     ui.set_saves_open(false);
     ui.set_saved_key("sync".into());
     ui.set_sync_folder(r"C:\Users\Player\AppData\Roaming\wenilla-rogue\Saves".into());
-    ui.set_folder_status("✗ Can't be used: the network folder is inside the game's progress folder".into());
-    ui.set_folder_status_kind(2);
+    ui.set_folder_refused("Can't be used: the network folder is inside the game's progress folder".into());
     both("52c-settings-saved", size);
     ui.set_saved_key("".into());
+    ui.set_folder_refused("".into());
     ui.set_sync_folder(r"\\server\share\Azeroth Survivors Saves".into());
-    ui.set_folder_status("✓ Folder answers · 3 PCs seen · 27 versions".into());
-    ui.set_folder_status_kind(1);
 
     // The first start: the game found, and not found.
     ui.set_tab(0);

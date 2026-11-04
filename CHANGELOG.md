@@ -12,7 +12,9 @@ The design pass: a new shape for every screen, dark by default.
   playtime, as cards.
 - The game and Play live in a rail on the left of every page; the rail says which game build is
   current, how your progress stands and whether your addons are up to date.
-- Settings apply as you change them; each one says "✓ Saved".
+- Settings apply as you change them: switches as you click, a typed folder or name with Enter; each
+  one says "✓ Saved". Restore defaults resets the other switches and the theme, and leaves sync, the
+  two sharing switches, your folders and this PC's name as they are.
 - The first start is one screen: your game, found, and Start.
 
 ### Changed

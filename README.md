@@ -6,6 +6,10 @@
 
 **Your Azeroth Survivors addons and progress, managed for you and the same on every PC you play on.**
 
+Survivor's Satchel is a small Windows app that sits beside [Azeroth Survivors](https://wow.aethus.pl):
+it installs and updates your addons, keeps your progress backed up and in sync across your PCs, and
+starts the game for you.
+
 ![Home, dark](docs/screenshots/readme/home-dark.png#gh-dark-mode-only)
 ![Home, light](docs/screenshots/readme/home-light.png#gh-light-mode-only)
 
@@ -77,14 +81,19 @@ from the network folder.
 
 ## What it touches
 
-- Inside the game's folder, only `benilla-config\AddOns` (your addons, backed up first) and, with
-  sync on, the game's settings files it carries (interface options, key bindings, macros, chat,
-  camera, where windows sit; graphics, the window and the UI scale stay on each PC).
+- Inside the game's folder: `benilla-config\AddOns` (your addons, backed up first); with "The same
+  addons and their settings on every PC" on, the addons' settings in `benilla-config\saved\<Addon>.lua`;
+  and, with sync on, the game's settings files it carries (interface options, key bindings, macros,
+  chat, camera, where windows sit; graphics, the window and the UI scale stay on each PC).
 - The progress file `%APPDATA%\wenilla-rogue\characters.txt`, replaced only after a safety copy,
-  with the game closed. A damaged or empty save never travels.
-- `%APPDATA%\SurvivorsSatchel\settings.toml` (Settings → About shows the path).
-- `%LOCALAPPDATA%\SurvivorsSatchel\` (backups, caches, the log).
+  with the game closed. A damaged or empty save never travels. A safety copy also goes in the game's
+  own `%APPDATA%\wenilla-rogue\Saves\`, so the game's Import can bring it back.
+- `%APPDATA%\SurvivorsSatchel\`: `settings.toml` (Settings → About shows the path), the safety
+  copies, the playtime, the activity and the log.
+- `%LOCALAPPDATA%\SurvivorsSatchel\`: the addons' backups and downloads, the caches and this PC's
+  memory.
 - The network folder you chose, with sync on.
+- When you turn them on, the Start-with-Windows entry and the desktop shortcut.
 
 The Satchel connects to GitHub, to read releases and download addons; to SurvivorsForge, for its
 addon list and details (you can turn that off in Settings); to the game's update server, for the
@@ -119,7 +128,7 @@ this one.
 
 ## Code signing policy
 
-The exe is not code-signed yet, so Windows warns once, as above. Every release carries the
+The exe is not code-signed yet, so Windows warns once, as above. Every release from 0.7.0 carries the
 maintainer's minisign signature, which the Satchel checks before any update, and which you can check
 by hand as shown. A certificate-based signature, which Windows recognises by itself, is planned for
 1.0.
