@@ -17,7 +17,7 @@ use satchel_core::addons::github;
 use satchel_core::addons::overview::{self, ForgeView, Offer, Standing};
 use satchel_core::log;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -51,17 +51,6 @@ impl Held {
             Held::Install { id, .. } | Held::Update { id, .. } | Held::Again { id, .. } | Held::Version { id, .. } => id,
         }
     }
-}
-
-/// An icon, by its address, as far as it got this run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Icon {
-    /// Waiting for its turn on the network thread, or on it.
-    Asked,
-    /// The window holds it.
-    Shown,
-    /// Its download or decode failed (one log line): the initials stay, until the next start.
-    Failed,
 }
 
 /// The picture viewer: the screenshot it shows (its place in the strip, its address), and whether
@@ -106,10 +95,9 @@ pub(super) struct ForgeState {
     asked: BTreeSet<(String, String)>,
     /// Versions asked about for an addon another PC brings, until the next registry.
     follow_asked: BTreeSet<(String, String)>,
-    /// Icons by address, asked for this run: a line shows its icon once the window holds it.
-    pub(super) icons: BTreeMap<String, Icon>,
-    /// Icons waiting for the network thread, in the order they were asked for.
-    icon_queue: VecDeque<String>,
+    /// The icons asked for this run, and the ones waiting for the network thread: a line shows its
+    /// icon once the window holds it.
+    icons: forge::IconQueue,
     /// The picture on its way now, one at a time: its address.
     picture_out: Option<String>,
     /// The viewer, while it is open.
@@ -138,8 +126,7 @@ impl ForgeState {
             held: Vec::new(),
             asked: BTreeSet::new(),
             follow_asked: BTreeSet::new(),
-            icons: BTreeMap::new(),
-            icon_queue: VecDeque::new(),
+            icons: forge::IconQueue::default(),
             picture_out: None,
             viewer: None,
             shown: -1,
@@ -150,7 +137,7 @@ impl ForgeState {
     /// (the initials show).
     pub(super) fn icon_key(&self, url: Option<&str>) -> Option<String> {
         let url = url?;
-        (self.icons.get(url) == Some(&Icon::Shown)).then(|| forge::Pictures::name(url))
+        self.icons.shown(url).then(|| forge::Pictures::name(url))
     }
 
     /// What SurvivorsForge says, for the core's verdicts and offers.
@@ -633,11 +620,13 @@ impl Worker {
 
     // Pictures -------------------------------------------------------------------------------------
 
-    /// The icons of what the Addons tab shows on `page` (0 Installed, 1 Browse; -1 neither), with the
-    /// switch on: each one not asked for yet this run joins the queue.
+    /// The icons of what the Addons tab shows on `page` (0 Installed, 1 Browse; -1 neither): each
+    /// one not asked for yet this run joins the queue, while icons may be fetched at all
+    /// (`forge_icons_allowed`); when they may not, what waits is dropped.
     pub(super) fn forge_icons_wanted(&mut self, page: i32) {
         self.forge.shown = page;
-        if !self.forge_on() {
+        if !self.forge_icons_allowed() {
+            self.forge.icons.drop_waiting();
             return;
         }
         let urls: Vec<String> = match page {
@@ -646,27 +635,33 @@ impl Worker {
             _ => Vec::new(),
         };
         for url in urls {
-            if !self.forge.icons.contains_key(&url) {
-                self.forge.icons.insert(url.clone(), Icon::Asked);
-                self.forge.icon_queue.push_back(url);
-            }
+            self.forge.icons.want(&url);
         }
         self.forge_pictures_next();
     }
 
+    /// Whether icons may be fetched now: SurvivorsForge's switch is on, and the Addons tab shows
+    /// its Installed or Browse page. Off, or the tab left, no more go out (one already on its way
+    /// finishes, and is kept), and the queue is dropped.
+    fn forge_icons_allowed(&self) -> bool {
+        self.forge_on() && matches!(self.forge.shown, 0 | 1)
+    }
+
     /// The next picture to the network thread, when none is on its way: the viewer's screenshot
-    /// first, then the icons in the order they were asked for. One at a time, so whatever already
-    /// waits there goes first, and an install asked for meanwhile waits for one picture at most.
+    /// first, then the icons in the order they were asked for, while they may be fetched. One at a
+    /// time, so whatever already waits there goes first, and an install asked for meanwhile waits
+    /// for one picture at most.
     fn forge_pictures_next(&mut self) {
         if self.forge.picture_out.is_some() {
             return;
         }
+        let icons_allowed = self.forge_icons_allowed();
         let next = match self.forge.viewer.as_mut().filter(|v| v.waiting) {
             Some(viewer) => {
                 viewer.waiting = false;
                 Some((viewer.url.clone(), false))
             }
-            None => self.forge.icon_queue.pop_front().map(|url| (url, true)),
+            None => self.forge.icons.next(icons_allowed).map(|url| (url, true)),
         };
         let Some((url, icon)) = next else { return };
         if self.addons.net.send(Job::Picture { url: url.clone(), icon }).is_ok() {
@@ -685,14 +680,14 @@ impl Worker {
             log!("{url}: the {} wasn't shown: {why}", if icon { "icon" } else { "picture" });
         }
         if icon {
-            let state = match pixels {
+            let shown = match pixels {
                 Ok(pixels) => {
                     self.ui.push_icon(forge::Pictures::name(url), pixels);
-                    Icon::Shown
+                    true
                 }
-                Err(_) => Icon::Failed,
+                Err(_) => false,
             };
-            self.forge.icons.insert(url.to_string(), state);
+            self.forge.icons.done(url, shown);
         } else if let Some(viewer) = self.forge.viewer.as_mut().filter(|v| v.url == url) {
             viewer.waiting = false;
             self.ui.push_shot(viewer.index, pixels.ok());

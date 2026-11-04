@@ -1158,7 +1158,7 @@ fn main() {
                 "v0.5.0",
                 ("Waits for your OK: SurvivorsForge's scan found 1 warning in this version", 1),
             ),
-            version("0.4.0", "", "12 Oct 2026 · 230 downloads", ("SurvivorsForge · unscanned", 5), 0, "", ("", 0)),
+            version("0.4.0", "", "12 Oct 2026 · 230 downloads", ("SurvivorsForge · unscanned", 5), 0, "", ("SurvivorsForge has no checksum for this version yet", 2)),
         ])),
         loading: false,
     };

@@ -17,7 +17,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde::de::{DeserializeOwned, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -978,11 +978,51 @@ pub struct State {
     /// Slug → its repository when last listed, so an addon of ours that leaves the registry keeps
     /// its slug and shows as dropped.
     pub repos: BTreeMap<String, String>,
-    /// Slug → tag → a word that held that version back (flagged, unscanned, blocked,
-    /// source_changed), with the file it was about. It keeps holding that file back after the answer
-    /// that gave it stops being current, until a current answer about that file says otherwise: old
-    /// data can't let anything in, but still holds back.
+    /// Slug → a word that held a version back (flagged, unscanned, blocked, source_changed), by
+    /// `restriction_key`: the tag alone for a word given without a checksum (every record 0.7.1
+    /// kept), which speaks for the tag whatever its file; the tag and the file's checksum for a
+    /// word about one file, which speaks for that file alone, so words about different files under
+    /// one tag are kept apart, and none is dropped or weakened by a word about another file. A word
+    /// keeps holding back after the answer that gave it stops being current, until a current answer
+    /// about the same file, or about the tag itself, says otherwise: old data can't let anything in,
+    /// but still holds back.
     pub restrictions: BTreeMap<String, BTreeMap<String, Restriction>>,
+}
+
+impl State {
+    /// The word kept about version `tag` of `slug` that speaks for the file with checksum
+    /// `sha256`: the one about that very file, else one kept without a checksum, which speaks for
+    /// the tag whatever its file. With no checksum given, any word kept about the tag.
+    pub fn restriction(&self, slug: &str, tag: &str, sha256: Option<&str>) -> Option<&Restriction> {
+        let tags = self.restrictions.get(slug)?;
+        let sha = clean_sha(sha256);
+        if let Some(sha) = sha.as_deref()
+            && let Some(kept) = tags.get(&restriction_key(tag, Some(sha)))
+        {
+            return Some(kept);
+        }
+        if let Some(kept) = tags.get(tag).filter(|kept| kept.covers(sha.as_deref())) {
+            return Some(kept);
+        }
+        if sha.is_some() {
+            return None;
+        }
+        tags.iter().find(|(key, kept)| kept.sha256.as_deref().is_some_and(|s| **key == restriction_key(tag, Some(s)))).map(|(_, kept)| kept)
+    }
+}
+
+/// The key a word about version `tag` is kept under in `State::restrictions`: the tag alone when
+/// the file isn't known, else the tag and the file's checksum (lowercase hex), `<tag>@<sha256>`.
+pub fn restriction_key(tag: &str, sha256: Option<&str>) -> String {
+    match sha256 {
+        Some(sha) => format!("{tag}@{sha}"),
+        None => tag.to_string(),
+    }
+}
+
+/// A checksum as the restrictions keep it: trimmed, lowercase; `None` when there is none.
+fn clean_sha(sha256: Option<&str>) -> Option<String> {
+    sha256.map(str::trim).filter(|s| !s.is_empty()).map(str::to_ascii_lowercase)
 }
 
 /// A word that held a version back, as SurvivorsForge gave it.
@@ -992,9 +1032,9 @@ pub struct Restriction {
     /// `flagged`, `unscanned`, `blocked` or `source_changed`.
     pub trust: String,
     pub findings: Counts,
-    /// SurvivorsForge's checksum of the file the word was about (lowercase hex): a file replaced
-    /// under the same tag isn't the one judged, so it is judged again. `None`: kept before 0.7.2,
-    /// or given without a checksum; it speaks for the tag, whatever its file.
+    /// SurvivorsForge's checksum of the file the word was about (lowercase hex), the one in its
+    /// key: a file replaced under the same tag isn't the one judged, so it is judged again. `None`:
+    /// kept before 0.7.2, or given without a checksum; it speaks for the tag, whatever its file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
 }
@@ -1010,21 +1050,31 @@ impl Restriction {
     }
 }
 
-/// A current answer's word on one version, about the file with checksum `sha256`: one that holds
-/// it back is kept, any other lifts what was kept about that file (a word about another file under
-/// the same tag stays).
+/// A current answer's word on one version, about the file with checksum `sha256` (none: about
+/// the tag itself). One that holds back is kept under its key, beside what is kept about other
+/// files under the tag. Any other lifts what was kept about that very file, and what was kept
+/// about the tag without a checksum, which that file's answer speaks for too; a word about the
+/// tag itself lifts everything kept about the tag. Nothing kept about another file is touched: a
+/// word about one file never lifts what held another back.
 fn note_word(s: &mut State, slug: &str, tag: &str, word: Word, findings: Counts, sha256: Option<&str>) {
-    let sha256 = sha256.map(str::trim).filter(|s| !s.is_empty()).map(str::to_ascii_lowercase);
+    let sha256 = clean_sha(sha256);
     if word.restricts() {
-        let kept = Restriction { trust: word.as_str().to_string(), findings, sha256 };
-        s.restrictions.entry(slug.to_string()).or_default().insert(tag.to_string(), kept);
-    } else if let Some(tags) = s.restrictions.get_mut(slug) {
-        if tags.get(tag).is_some_and(|kept| kept.covers(sha256.as_deref())) {
-            tags.remove(tag);
+        let kept = Restriction { trust: word.as_str().to_string(), findings, sha256: sha256.clone() };
+        s.restrictions.entry(slug.to_string()).or_default().insert(restriction_key(tag, sha256.as_deref()), kept);
+        return;
+    }
+    let Some(tags) = s.restrictions.get_mut(slug) else { return };
+    match sha256.as_deref() {
+        Some(sha) => {
+            tags.remove(&restriction_key(tag, Some(sha)));
+            if tags.get(tag).is_some_and(|kept| kept.covers(Some(sha))) {
+                tags.remove(tag);
+            }
         }
-        if tags.is_empty() {
-            s.restrictions.remove(slug);
-        }
+        None => tags.retain(|key, kept| key.as_str() != tag && !kept.sha256.as_deref().is_some_and(|s| *key == restriction_key(tag, Some(s)))),
+    }
+    if tags.is_empty() {
+        s.restrictions.remove(slug);
     }
 }
 
@@ -1465,6 +1515,72 @@ impl Pictures {
     }
 }
 
+// Icons, as the Addons tab asks for them ----------------------------------------------------------
+
+/// What became of an icon asked for this run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IconState {
+    /// Waiting for its turn on the network thread, or on it.
+    Asked,
+    /// The window holds it.
+    Shown,
+    /// Its download or decode failed (one log line): the initials stay, until the next start.
+    Failed,
+}
+
+/// The icons the Addons tab asked for this run, by address, and the ones still waiting for the
+/// network thread, in the order they were asked for. Each is asked for once per run. They go out
+/// one at a time, and only while they may at all (`next`'s `allowed`: SurvivorsForge's switch on,
+/// and the tab showing a page that lists them); when that stops holding, what waits is dropped, to
+/// be asked for again when it is shown again. One already on its way finishes, and is kept.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct IconQueue {
+    states: BTreeMap<String, IconState>,
+    waiting: VecDeque<String>,
+}
+
+impl IconQueue {
+    /// An icon a page in view lists: queued, unless it was asked for this run already.
+    pub fn want(&mut self, url: &str) {
+        if !self.states.contains_key(url) {
+            self.states.insert(url.to_string(), IconState::Asked);
+            self.waiting.push_back(url.to_string());
+        }
+    }
+
+    /// The next icon for the network thread, while icons may be fetched (`allowed`); when they
+    /// may not, nothing, and what waits is dropped.
+    pub fn next(&mut self, allowed: bool) -> Option<String> {
+        if !allowed {
+            self.drop_waiting();
+            return None;
+        }
+        self.waiting.pop_front()
+    }
+
+    /// Forgets the icons still waiting: they are asked for again when they are shown again.
+    pub fn drop_waiting(&mut self) {
+        for url in self.waiting.drain(..) {
+            self.states.remove(&url);
+        }
+    }
+
+    /// The network thread's answer for an icon: the window holds it (`shown`), or it failed.
+    pub fn done(&mut self, url: &str, shown: bool) {
+        self.states.insert(url.to_string(), if shown { IconState::Shown } else { IconState::Failed });
+    }
+
+    /// Whether the window holds this icon.
+    pub fn shown(&self, url: &str) -> bool {
+        self.states.get(url) == Some(&IconState::Shown)
+    }
+
+    /// How many icons wait for their turn.
+    pub fn waiting(&self) -> usize {
+        self.waiting.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1754,11 +1870,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("forge");
         let cache = Cache::open(folder.clone());
-        let held = |slug: &str, tag: &str| cache.state().restrictions.get(slug).and_then(|tags| tags.get(tag)).map(|r| r.trust.clone());
+        let held = |slug: &str, tag: &str| cache.state().restriction(slug, tag, None).map(|r| r.trust.clone());
         // The registry: Totems' latest v1.1 is flagged, Meter's verified.
         cache.store_registry(&registry_body("v2.0", true), None, t(12)).unwrap();
         assert_eq!(held("totems", "v1.1").as_deref(), Some("flagged"));
-        assert_eq!(cache.state().restrictions["totems"]["v1.1"].findings, Counts { critical: 1, warn: 2, info: 0 });
+        assert_eq!(cache.state().restriction("totems", "v1.1", None).unwrap().findings, Counts { critical: 1, warn: 2, info: 0 });
         assert_eq!(held("meter", "v2.0"), None, "a verified latest holds nothing back");
         // Its versions: v1.0 unscanned, v0.9 verified.
         cache.store_versions("totems", r#"[{"tag": "v1.0", "trust": "unscanned"}, {"tag": "v0.9", "trust": "verified"}]"#).unwrap();
@@ -2193,24 +2309,87 @@ mod tests {
     fn a_word_holds_back_only_the_file_it_was_about() {
         let dir = tempfile::tempdir().unwrap();
         let cache = Cache::open(dir.path().join("forge"));
-        // The registry flags Totems' v1.1, whose file is "b…".
+        let (b, c, d) = ("b".repeat(64), "c".repeat(64), "d".repeat(64));
+        let held = |tag: &str, sha: Option<&str>| cache.state().restriction("totems", tag, sha).map(|r| r.trust.clone());
+        let saying = |sha: &str, trust: &str| format!(r#"[{{"tag": "v1.1", "trust": "{trust}", "sha256": "{sha}"}}]"#);
+        // The registry flags Totems' v1.1, whose file is "b…": kept under its tag and checksum.
         cache.store_registry(&registry_body("v2.0", true), None, t(12)).unwrap();
-        let kept = cache.state().restrictions["totems"]["v1.1"].clone();
-        assert_eq!((kept.trust.as_str(), kept.sha256.clone()), ("flagged", Some("b".repeat(64))));
-        assert!(kept.covers(Some(&"B".repeat(64))) && kept.covers(None), "that file, or one not known");
-        assert!(!kept.covers(Some(&"c".repeat(64))), "a file replaced under the same tag is judged again");
-        // A current word letting in another file under v1.1 lifts nothing about this one; one about
-        // this file does.
-        let lifting = |sha: &str| format!(r#"[{{"tag": "v1.1", "trust": "verified", "sha256": "{sha}"}}]"#);
-        cache.store_versions("totems", &lifting(&"c".repeat(64))).unwrap();
-        assert_eq!(cache.state().restrictions["totems"]["v1.1"].sha256, Some("b".repeat(64)));
-        cache.store_versions("totems", &lifting(&"b".repeat(64))).unwrap();
+        let kept = cache.state().restriction("totems", "v1.1", Some(&b)).cloned().unwrap();
+        assert_eq!((kept.trust.as_str(), kept.sha256.clone()), ("flagged", Some(b.clone())));
+        assert!(cache.state().restrictions["totems"].contains_key(&restriction_key("v1.1", Some(&b))));
+        assert_eq!(held("v1.1", Some(&b.to_uppercase())).as_deref(), Some("flagged"), "that file, in any case");
+        assert_eq!(held("v1.1", None).as_deref(), Some("flagged"), "the tag, whatever the file");
+        assert_eq!(held("v1.1", Some(&c)), None, "a file replaced under the same tag is judged again");
+        assert!(kept.covers(Some(&b.to_uppercase())) && kept.covers(None) && !kept.covers(Some(&c)));
+        // Another file, "c…", flagged under v1.1 too: both are kept, each for its own file.
+        cache.store_versions("totems", &saying(&c, "flagged")).unwrap();
+        assert_eq!((held("v1.1", Some(&b)).as_deref(), held("v1.1", Some(&c)).as_deref(), held("v1.1", Some(&d))), (Some("flagged"), Some("flagged"), None));
+        // A current word letting "c…" in lifts what was kept about it, and nothing about "b…";
+        // one about "b…" lifts that.
+        cache.store_versions("totems", &saying(&c, "verified")).unwrap();
+        assert_eq!((held("v1.1", Some(&b)).as_deref(), held("v1.1", Some(&c))), (Some("flagged"), None), "a word about one file never lifts what held another back");
+        cache.store_versions("totems", &saying(&b, "verified")).unwrap();
         assert!(!cache.state().restrictions.contains_key("totems"));
-        // A word kept before 0.7.2 has no checksum: it speaks for its tag, whatever the file, and is
-        // written as it was.
-        let before: Restriction = serde_json::from_str(r#"{"trust": "flagged", "findings": {"critical": 0, "warn": 1}}"#).unwrap();
-        assert!(before.sha256.is_none() && before.covers(Some(&"c".repeat(64))));
-        assert!(!serde_json::to_string(&before).unwrap().contains("sha256"));
+        // A current word about v1.1 itself, naming no file, lifts everything kept about it.
+        cache.store_versions("totems", &saying(&b, "flagged")).unwrap();
+        cache.store_versions("totems", &saying(&c, "unscanned")).unwrap();
+        assert_eq!(cache.state().restrictions["totems"].len(), 2);
+        cache.store_versions("totems", r#"[{"tag": "v1.1", "trust": "scanned"}]"#).unwrap();
+        assert!(!cache.state().restrictions.contains_key("totems"));
+        assert_eq!((restriction_key("v1.1", None), restriction_key("v1.1", Some("ab"))), ("v1.1".to_string(), "v1.1@ab".to_string()));
+    }
+
+    #[test]
+    fn a_word_kept_before_0_7_2_speaks_for_its_tag() {
+        // state.json as 0.7.1 wrote it: one record per tag, without a checksum.
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("forge");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("state.json"), r#"{"restrictions": {"totems": {"v1.1": {"trust": "flagged", "findings": {"critical": 0, "warn": 1}}}}}"#).unwrap();
+        let cache = Cache::open(folder.clone());
+        let (b, c) = ("b".repeat(64), "c".repeat(64));
+        let held = |tag: &str, sha: Option<&str>| cache.state().restriction("totems", tag, sha).map(|r| r.trust.clone());
+        let kept = cache.state().restriction("totems", "v1.1", Some(&b)).cloned().unwrap();
+        assert!(kept.sha256.is_none() && kept.covers(Some(&c)) && kept.covers(None));
+        assert_eq!((held("v1.1", Some(&b)).as_deref(), held("v1.1", Some(&c)).as_deref(), held("v1.1", None).as_deref()), (Some("flagged"), Some("flagged"), Some("flagged")), "whatever the file");
+        // A word about one file ("b…", the registry's) is kept beside it, and it is written as it
+        // was: an older Satchel reads it as before.
+        cache.store_registry(&registry_body("v2.0", true), None, t(12)).unwrap();
+        assert_eq!((held("v1.1", Some(&b)).as_deref(), held("v1.1", Some(&c)).as_deref()), (Some("flagged"), Some("flagged")));
+        let written: Value = serde_json::from_str(&fs::read_to_string(folder.join("state.json")).unwrap()).unwrap();
+        let totems = &written["restrictions"]["totems"];
+        assert_eq!((totems["v1.1"]["trust"].as_str(), totems["v1.1"].get("sha256")), (Some("flagged"), None));
+        assert_eq!(totems[restriction_key("v1.1", Some(&b))]["sha256"].as_str(), Some(b.as_str()));
+        // As 0.7.1 did, a clean current word on the tag lifts it; the word about another file, "b…",
+        // isn't touched by it.
+        cache.store_versions("totems", &format!(r#"[{{"tag": "v1.1", "trust": "verified", "sha256": "{c}"}}]"#)).unwrap();
+        assert_eq!((held("v1.1", Some(&c)), held("v1.1", Some(&b)).as_deref()), (None, Some("flagged")));
+    }
+
+    #[test]
+    fn icons_go_out_only_while_the_tab_shows_them() {
+        let (a, b) = ("https://forge.rezondes.net/img/a.webp", "https://forge.rezondes.net/img/b.webp");
+        let mut icons = IconQueue::default();
+        icons.want(a);
+        icons.want(b);
+        icons.want(a);
+        assert_eq!(icons.waiting(), 2, "each asked for once");
+        assert_eq!(icons.next(true).as_deref(), Some(a));
+        // The switch turned off, or the tab left: nothing goes out, and what waited is dropped.
+        assert_eq!(icons.next(false), None);
+        assert_eq!((icons.waiting(), icons.next(true)), (0, None));
+        // The one on its way still comes, and is kept; the dropped one is asked for again when it
+        // is shown again, the kept one not.
+        icons.done(a, true);
+        assert!(icons.shown(a));
+        icons.want(a);
+        icons.want(b);
+        assert_eq!((icons.waiting(), icons.next(true).as_deref()), (1, Some(b)));
+        assert_eq!(icons.next(true), None);
+        // One that failed isn't asked for again this run: the initials stay.
+        icons.done(b, false);
+        icons.want(b);
+        assert!(!icons.shown(b) && icons.next(true).is_none());
     }
 
     #[test]

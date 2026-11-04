@@ -144,11 +144,12 @@ impl<'a> ForgeView<'a> {
         forge::word_for(self.entry(slug), self.versions.get(slug).map(Vec::as_slice), tag)
     }
 
-    /// A word that held version `tag` back in an answer no longer current (`State::restrictions`),
-    /// with the switch on, when it was about the file with checksum `sha256` (or either checksum
-    /// isn't known): a file replaced under the same tag is judged again.
+    /// A word that held version `tag` back in an answer no longer current (`State::restriction`),
+    /// with the switch on, when it was about the file with checksum `sha256`, or kept without one
+    /// (no checksum given: any word about the tag): a file replaced under the same tag is judged
+    /// again.
     pub fn restriction(&self, slug: &str, tag: &str, sha256: Option<&str>) -> Option<(forge::Word, forge::Counts)> {
-        let kept = self.state.restrictions.get(slug).filter(|_| self.switch_on)?.get(tag).filter(|kept| kept.covers(sha256))?;
+        let kept = self.state.restriction(slug, tag, sha256).filter(|_| self.switch_on)?;
         Some((forge::Word::parse(&kept.trust), kept.findings)).filter(|(word, _)| word.restricts())
     }
 
@@ -803,13 +804,30 @@ pub struct VersionRow {
 /// The one thing a row of Versions… does.
 #[derive(Clone, Debug, PartialEq)]
 pub enum VersionAction {
-    /// Nothing: it is the one installed, or there is neither a backup nor a download of it.
+    /// Nothing: it is the one installed.
     None,
     /// Go back to this: swapped in from its backup, as Go back does (`Kept::backup`).
     Back { backup: String },
     /// Install this version: downloaded and installed through the install path and its checks,
-    /// from our catalog's release or from SurvivorsForge's list of versions.
-    Install { release: Release },
+    /// from our catalog's release, or (`forge`) from SurvivorsForge's list of versions, whose zip
+    /// must then hold exactly the folders SurvivorsForge lists.
+    Install { release: Release, forge: bool },
+    /// Nothing can be done with it here, and why, in the player's words: SurvivorsForge has no
+    /// checksum for it yet, or its download isn't on the addon's own GitHub
+    /// (`forge::version_release`'s checks).
+    Refused { why: forge::Why },
+}
+
+/// What Versions… does with a SurvivorsForge version: installs it when its release can be
+/// downloaded (`forge::version_release`'s checks); else it says why not.
+fn forge_action(release: Release) -> VersionAction {
+    if !release.url.is_empty() {
+        VersionAction::Install { release, forge: true }
+    } else if release.sha256.is_empty() {
+        VersionAction::Refused { why: forge::Why::NotHashed }
+    } else {
+        VersionAction::Refused { why: forge::Why::NotOnGitHub }
+    }
 }
 
 /// What Versions… is made from: whatever is known of the addon here.
@@ -853,8 +871,8 @@ fn row_for<'r>(rows: &'r mut Vec<VersionRow>, tag: &str, version: impl FnOnce() 
 /// earlier ones kept in the backups, our catalog's releases and SurvivorsForge's versions (its
 /// registry's latest too, before its versions are fetched). One action each: none for the installed
 /// one; Go back for a kept one, which needs no download; Install for a release or a SurvivorsForge
-/// version that can be downloaded (`forge::version_release`'s checks). Whether SurvivorsForge lets
-/// it in is the verdict's, asked by the caller as for every install.
+/// version that can be downloaded, else why not (`forge::version_release`'s checks). Whether
+/// SurvivorsForge lets it in is the verdict's, asked by the caller as for every install.
 pub fn versions(of: &VersionsOf) -> Vec<VersionRow> {
     let mut rows: Vec<VersionRow> = Vec::new();
     if let Some(record) = of.record {
@@ -879,7 +897,7 @@ pub fn versions(of: &VersionsOf) -> Vec<VersionRow> {
         row.size = row.size.or((release.size > 0).then_some(release.size));
         row.prerelease |= release.prerelease;
         if row.action == VersionAction::None && !release.url.is_empty() {
-            row.action = VersionAction::Install { release: release.clone() };
+            row.action = VersionAction::Install { release: release.clone(), forge: false };
         }
     }
     if let Some(listed) = of.listed {
@@ -891,9 +909,8 @@ pub fn versions(of: &VersionsOf) -> Vec<VersionRow> {
             row.word = Some((forge::Word::parse(version.trust.as_deref().unwrap_or("unscanned")), version.findings));
             row.game = (version.game_min.clone(), version.game_max.clone());
             row.prerelease |= version.prerelease;
-            let release = forge::version_release(listed, version);
-            if row.action == VersionAction::None && !release.url.is_empty() {
-                row.action = VersionAction::Install { release };
+            if row.action == VersionAction::None {
+                row.action = forge_action(forge::version_release(listed, version));
             }
         }
         if let Some(latest) = listed.latest.as_ref().filter(|l| !l.tag.is_empty()) {
@@ -904,10 +921,10 @@ pub fn versions(of: &VersionsOf) -> Vec<VersionRow> {
             if row.game == (None, None) {
                 row.game = (latest.game_min.clone(), latest.game_max.clone());
             }
-            if row.action == VersionAction::None
-                && let Some(release) = forge::latest_release(listed, latest.published_at.unwrap_or(DateTime::<Utc>::MIN_UTC)).filter(|r| !r.url.is_empty())
+            if matches!(row.action, VersionAction::None | VersionAction::Refused { .. })
+                && let Some(release) = forge::latest_release(listed, latest.published_at.unwrap_or(DateTime::<Utc>::MIN_UTC))
             {
-                row.action = VersionAction::Install { release };
+                row.action = forge_action(release);
             }
         }
     }
@@ -1698,18 +1715,20 @@ mod tests {
             },
             forge::Version { tag: "v2".into(), downloads: Some(77), trust: Some("verified".into()), ..forge::Version::default() },
             forge::Version { tag: "v0.8".into(), published_at: Some(day(2)), asset_url: Some("https://github.com/o/A/releases/download/v0.8/A.zip".into()), ..forge::Version::default() },
+            forge::Version { tag: "v0.7".into(), asset_url: Some("https://example.com/A-v0.7.zip".into()), sha256: Some("sha-v0.7".into()), trust: Some("scanned".into()), ..forge::Version::default() },
         ];
         let record = w.store.get("a").unwrap();
         let rows = versions(&VersionsOf { record: Some(record), catalog: w.catalog.get("a"), listed: Some(&entry), versions: Some(theirs.as_slice()) });
         let tags: Vec<&str> = rows.iter().map(|r| r.tag.as_str()).collect();
-        assert_eq!(tags, ["v3", "v2", "v1", "v0.8", "v0.9"], "newest first, one row per version");
-        let (v3, v2, v1, v08, v09) = (&rows[0], &rows[1], &rows[2], &rows[3], &rows[4]);
+        assert_eq!(tags, ["v3", "v2", "v1", "v0.8", "v0.9", "v0.7"], "newest first, one row per version, the undated last");
+        let (v3, v2, v1, v08, v09, v07) = (&rows[0], &rows[1], &rows[2], &rows[3], &rows[4], &rows[5]);
         assert_eq!((v3.word, v3.game.clone()), (Some((forge::Word::Flagged, theirs[0].findings)), (Some("1.0".into()), Some("1.1".into()))));
-        assert!(matches!(&v3.action, VersionAction::Install { release } if release.url.ends_with("/v3/A-v3.zip") && release.sha256 == "sha-v3"), "on the author's GitHub, with a checksum");
+        assert!(matches!(&v3.action, VersionAction::Install { release, forge: true } if release.url.ends_with("/v3/A-v3.zip") && release.sha256 == "sha-v3"), "on the author's GitHub, with a checksum: SurvivorsForge's, held to its folders");
         assert_eq!((v2.published, v2.downloads, v2.word.map(|(w, _)| w)), (Some(day(29)), Some(100), Some(forge::Word::Verified)), "our catalog's date and count");
-        assert!(matches!(&v2.action, VersionAction::Install { release } if release.url == w.catalog.get("a").unwrap().latest.url), "our catalog's release");
+        assert!(matches!(&v2.action, VersionAction::Install { release, forge: false } if release.url == w.catalog.get("a").unwrap().latest.url), "our catalog's release");
         assert_eq!((v1.installed, v1.published, &v1.action), (true, Some(day(25)), &VersionAction::None), "the one in AddOns does nothing");
-        assert_eq!((v08.word.map(|(w, _)| w), &v08.action), (Some(forge::Word::Unscanned), &VersionAction::None), "no checksum yet: nothing downloads it");
+        assert_eq!((v08.word.map(|(w, _)| w), &v08.action), (Some(forge::Word::Unscanned), &VersionAction::Refused { why: forge::Why::NotHashed }), "no checksum yet: nothing downloads it, and the row says so");
+        assert_eq!(&v07.action, &VersionAction::Refused { why: forge::Why::NotOnGitHub }, "a download elsewhere: never, and the row says so");
         assert_eq!((v09.kept.clone(), &v09.action), (Some(("2026-10-20 10-00-00 a".to_string(), day(20))), &VersionAction::Back { backup: "2026-10-20 10-00-00 a".into() }));
         // Kept at v1, the way a version picked here is: nothing goes in by itself at Play.
         let lines = w.lines();
@@ -1724,7 +1743,11 @@ mod tests {
         let rows = versions(&VersionsOf { record: w.store.get("forge:totems"), listed: Some(&totems), ..VersionsOf::default() });
         assert_eq!(rows.iter().map(|r| (r.tag.as_str(), r.installed)).collect::<Vec<_>>(), [("v1.1", false), ("v1.0", true)]);
         assert_eq!((rows[0].published, rows[0].word.map(|(w, _)| w)), (Some(day(30)), Some(forge::Word::Verified)));
-        assert!(matches!(&rows[0].action, VersionAction::Install { release } if release.url.ends_with("/v1.1/totems.zip")));
+        assert!(matches!(&rows[0].action, VersionAction::Install { release, forge: true } if release.url.ends_with("/v1.1/totems.zip")));
+        // Its latest without a checksum yet: the row says so.
+        totems.latest.as_mut().unwrap().sha256 = None;
+        let rows = versions(&VersionsOf { record: w.store.get("forge:totems"), listed: Some(&totems), ..VersionsOf::default() });
+        assert_eq!(&rows[0].action, &VersionAction::Refused { why: forge::Why::NotHashed });
         // Not installed and not listed anywhere: nothing.
         assert!(versions(&VersionsOf::default()).is_empty());
     }
@@ -1791,10 +1814,17 @@ mod tests {
         // SurvivorsForge's latest moved on to v3; an older answer flagged v2's file "sha-old".
         w.registry = registry(vec![listed("a-forge", "o/A", &["A"], "v3", "verified", Some("sha-v3"))]);
         let flagged = forge::Restriction { trust: "flagged".into(), findings: forge::Counts { critical: 0, warn: 1, info: 0 }, sha256: Some("sha-old".into()) };
-        w.forge_state.restrictions.insert("a-forge".into(), [("v2".to_string(), flagged)].into());
+        w.forge_state.restrictions.insert("a-forge".into(), [(forge::restriction_key("v2", Some("sha-old")), flagged)].into());
         let join = w.join();
         let view = w.view(&join);
         assert_eq!(view.verdict(Origin::OurList, Some("a-forge"), "v2", Some("sha-v2")), Verdict::Go, "our v2 is another file: judged again, by our rule");
         assert_eq!(view.verdict(Origin::OurList, Some("a-forge"), "v2", Some("sha-old")), Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 1 }), "the file it was about stays held back");
+        // Our file flagged too, by a later answer: each file keeps its own word.
+        let ours = forge::Restriction { trust: "flagged".into(), findings: forge::Counts { critical: 0, warn: 2, info: 0 }, sha256: Some("sha-v2".into()) };
+        w.forge_state.restrictions.get_mut("a-forge").unwrap().insert(forge::restriction_key("v2", Some("sha-v2")), ours);
+        let view = w.view(&join);
+        assert_eq!(view.verdict(Origin::OurList, Some("a-forge"), "v2", Some("sha-v2")), Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 2 }));
+        assert_eq!(view.verdict(Origin::OurList, Some("a-forge"), "v2", Some("sha-old")), Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 1 }));
+        assert_eq!(w.lines()[0].verdict, Verdict::Ask(forge::Why::Flagged { critical: 0, warn: 2 }), "the row judges our file by its own word");
     }
 }

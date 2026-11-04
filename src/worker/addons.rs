@@ -1139,9 +1139,12 @@ impl Worker {
     }
 
     /// What Install again installs for a removed addon: the version it had, from its download
-    /// link, the catalog, or (`url` empty) the zip kept on this PC or the NAS.
+    /// link, the catalog, or (`url` empty) the zip kept on this PC or in the network folder. A copy
+    /// of our list's release that an import re-zipped is judged, and fetched, as that release
+    /// (`judged_sha`), as its Installed row judged it: not as another file than the one
+    /// SurvivorsForge scanned.
     fn again_want(&self, record: &Record) -> Want {
-        let sha256 = record.sha256.clone().unwrap_or_default();
+        let sha256 = overview::judged_sha(&self.addons.catalog, record, record.tag.as_deref(), record.sha256.as_deref()).unwrap_or_default().to_string();
         let release = Release {
             tag: record.tag.clone().unwrap_or_else(|| sha256.clone()),
             version: record.version.clone(),
@@ -1509,8 +1512,9 @@ impl Worker {
     }
 
     /// The install of `release` of addon `id` picked in Versions…: through the install path like any
-    /// other, pinned once in; SurvivorsForge's own held to the folders it lists.
-    fn version_want(&self, id: &str, release: Release, released: Option<DateTime<Utc>>) -> Option<Want> {
+    /// other, pinned once in. A release from SurvivorsForge's list of versions (`forge`) is held to
+    /// the folders SurvivorsForge lists the addon (`slug`) with, as its own addons' installs are.
+    fn version_want(&self, id: &str, release: Release, released: Option<DateTime<Utc>>, slug: Option<&str>, forge: bool) -> Option<Want> {
         if let Some(slug) = forge::slug_in(id) {
             let entry = self.forge_view().entry(slug)?;
             return Some(Want {
@@ -1536,7 +1540,7 @@ impl Worker {
             release,
             released,
             forge: None,
-            expected_folders: None,
+            expected_folders: if forge { self.forge_folders(slug) } else { None },
             ok: false,
             pin: true,
         })
@@ -1561,8 +1565,8 @@ impl Worker {
         }
         let (of, slug) = self.versions_of(id);
         let row = overview::versions(&of).into_iter().find(|r| r.tag == tag);
-        let Some(overview::VersionRow { action: VersionAction::Install { release }, published, .. }) = row else { return };
-        let Some(mut want) = self.version_want(id, release, published) else { return };
+        let Some(overview::VersionRow { action: VersionAction::Install { release, forge }, published, .. }) = row else { return };
+        let Some(mut want) = self.version_want(id, release, published, slug.as_deref(), forge) else { return };
         if ask_first
             && let Some(slug) = slug.as_deref()
             && self.forge_view().word(slug, tag).is_none()
@@ -1626,8 +1630,10 @@ impl Worker {
                         Some(verdict) => (0, String::new(), verdict.why().map(Why::text).unwrap_or_default(), 2),
                         None => (1, backup.clone(), String::new(), 0),
                     },
+                    // Nothing can be done with it here: the row says why, in SurvivorsForge's words.
+                    VersionAction::Refused { why } => (0, String::new(), why.text(), 2),
                     VersionAction::Install { .. } if busy(&row.tag) => (4, row.tag.clone(), String::new(), 0),
-                    VersionAction::Install { release } => match self.version_want(&id, release.clone(), row.published).map(|w| self.want_verdict(&w)) {
+                    VersionAction::Install { release, forge } => match self.version_want(&id, release.clone(), row.published, slug.as_deref(), *forge).map(|w| self.want_verdict(&w)) {
                         Some(Verdict::Go) => (2, row.tag.clone(), String::new(), 0),
                         Some(Verdict::Ask(why)) => (3, row.tag.clone(), format!("Waits for your OK: {}", why.text()), 1),
                         Some(Verdict::No(why)) => (0, String::new(), why.text(), 2),
