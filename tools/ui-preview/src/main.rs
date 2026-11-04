@@ -1526,7 +1526,7 @@ fn main() {
     // The Installed tab in columns: updates, one that waits for the player's OK, one held back, one
     // kept at its version, one installed by hand, one SurvivorsForge's own, one from another PC.
     let columns_rows = vec![
-        AddonRow { icon: icon_of("aether-hud"), badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · unscanned", 5)]), reason: "Waits for your OK: SurvivorsForge hasn't scanned this version yet".into(), reason_kind: 1, ..addon("AetherHUD", 0, "Aethus", "1.4.0", "1.5.0", ("", 0), "") },
+        AddonRow { icon: icon_of("aether-hud"), badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · unscanned", 5)]), reason: "Waits for your OK: SurvivorsForge hasn't scanned this version yet".into(), reason_kind: 1, ..addon("AetherHUD", 0, "NORehabRocket", "1.4.0", "1.5.0", ("", 0), "") },
         AddonRow { icon: icon_of("azs-spell-meter"), badges: badge_rows(&[("Discord Verified", 0), ("SurvivorsForge · verified", 4)]), released: "2 days ago".into(), ..addon("AZS Spell Meter", 0, "kex0", "1.34", "1.36", ("Goes in when you press Play", 1), "") },
         AddonRow {
             badges: badge_rows(&[("SurvivorsForge · flagged", 5)]),
