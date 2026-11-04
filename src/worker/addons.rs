@@ -209,6 +209,23 @@ pub(super) const UNLISTED_BADGE: (&str, i32) = ("No longer listed", 1);
 /// (its switch is off, or it is silent and the level would let things in).
 pub(super) const FORGE_BADGE: (&str, i32) = ("SurvivorsForge", 4);
 
+/// How long ago a version was released, under the Installed tab's Released heading: "today",
+/// "3 days ago" (the heading says the rest).
+fn released_when(days: i64) -> String {
+    let said = overview::released_ago(days);
+    said.strip_prefix("released ").unwrap_or(&said).to_string()
+}
+
+/// A Status line's colour as the window numbers it: 0 plain, 1 good news, 2 needs a look, 3 never.
+fn tone_kind(tone: overview::Tone) -> i32 {
+    match tone {
+        overview::Tone::Plain => 0,
+        overview::Tone::Good => 1,
+        overview::Tone::Look => 2,
+        overview::Tone::Never => 3,
+    }
+}
+
 fn badge_text(badge: Option<Badge>) -> (&'static str, i32) {
     match badge {
         Some(Badge::Verified) => ("Discord Verified", 0),
@@ -541,7 +558,7 @@ impl Worker {
                     self.share_follow_now(true);
                 }
             }
-            Answer::Picture { url, icon, pixels } => self.forge_picture_answer(&url, icon, pixels),
+            Answer::Picture { url, kind, pixels } => self.forge_picture_answer(&url, kind, pixels),
             Answer::Satchel(result) => self.satchel_answer(result),
             Answer::ForgeRegistry(answer) => self.forge_registry_answer(answer),
             Answer::ForgeDetails { slug, answer } => self.forge_details_answer(&slug, answer),
@@ -1749,6 +1766,18 @@ impl Worker {
                 };
                 // A copy installed by hand is replaced under its verified addon's id.
                 let replacing = line.id.strip_prefix("folder:").and_then(|f| a.catalog.for_folder(f)).is_some_and(|e| waiting(&e.id));
+                // The Safety column: SurvivorsForge's level, else our badge's word.
+                let level = forge_level(&forge_view, line.forge_slug.as_deref(), &line.verdict, None).map(|(level, kind, _)| (level, kind));
+                let safety = overview::safety_cell(Some((badge, badge_kind)), level);
+                // The Status column: the one line that matters most; the opened area has them all.
+                let (status, tone) = overview::row_status(&overview::RowLines {
+                    incoming: false,
+                    reason: (&reason, reason_kind),
+                    state: (&state, state_kind),
+                    share: (&share, share_kind),
+                    problem: problems.first().map(String::as_str).unwrap_or_default(),
+                    current: line.standing == Standing::Current,
+                });
                 AddonLine {
                     id: line.id.clone(),
                     initials: initials(&line.name),
@@ -1761,7 +1790,8 @@ impl Worker {
                     reason_kind,
                     author: line.author.clone(),
                     version: line.version.clone(),
-                    released: line.released.map(|t| overview::released_ago(days_since(t))).unwrap_or_default(),
+                    // Under the column's heading, Released: "3 days ago".
+                    released: line.released.map(|t| released_when(days_since(t))).unwrap_or_default(),
                     update,
                     state,
                     state_kind,
@@ -1786,12 +1816,31 @@ impl Worker {
                     settings_per_pc: record.is_some_and(|r| r.settings_per_pc),
                     ask_pc,
                     incoming: false,
+                    safety,
+                    status,
+                    status_kind: tone_kind(tone),
                 }
             })
             .collect();
 
         let mut rows = rows;
-        rows.extend(self.share_incoming());
+        // The addons another PC brings: their Safety and Status columns, from their own lines.
+        rows.extend(self.share_incoming().into_iter().map(|mut row| {
+            let level = row.badges.iter().find_map(|(text, kind)| text.strip_prefix("SurvivorsForge · ").map(|level| (level.to_string(), *kind)));
+            let ours = row.badges.iter().find(|(text, _)| !text.starts_with("SurvivorsForge · ")).cloned().unwrap_or_else(|| (row.badge.clone(), row.badge_kind));
+            // "SurvivorsForge · verified (v1.2)": the level alone.
+            let level = level.map(|(level, kind)| (level.split(" (").next().unwrap_or_default().to_string(), kind));
+            row.safety = overview::safety_cell(Some((ours.0.as_str(), ours.1)), level.as_ref().map(|(l, k)| (l.as_str(), *k)));
+            let (status, tone) = overview::row_status(&overview::RowLines {
+                incoming: true,
+                reason: (&row.reason, row.reason_kind),
+                state: (&row.state, row.state_kind),
+                ..Default::default()
+            });
+            row.status = status;
+            row.status_kind = tone_kind(tone);
+            row
+        }));
         rows.sort_by_key(|r| r.name.to_lowercase());
         // A turned-off addon's update waits for it to be on: it isn't counted, only mentioned. One
         // SurvivorsForge says No to never comes, so it isn't counted at all.
@@ -1886,19 +1935,17 @@ impl Worker {
                 let offered = self.offer_tag(&o.id);
                 let badges: Vec<(String, i32)> =
                     ours.into_iter().chain(forge_badge(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref())).collect();
-                // Its level alone, for the table's SurvivorsForge column and its filters.
+                // Its level alone, for the table's Safety column and its filters.
                 let (trust, trust_kind) = forge_level(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref()).map_or((String::new(), 0), |(level, kind, _)| (level.to_string(), kind));
+                // Who vouches for it: SurvivorsForge's level, else our list, else SurvivorsForge for
+                // one of its own while it gives no level.
+                let vouch = if o.origin == 2 { FORGE_BADGE } else { ("Discord Verified", 0) };
+                let safety = overview::safety_cell(Some(vouch), Some((trust.as_str(), trust_kind)));
                 // A newer release found on GitHub's page carries no true date.
                 let date = o.date.filter(|_| newer.is_none());
-                let action = if o.installed {
-                    3
-                } else if waiting(&o.id) {
-                    2
-                } else if matches!(o.verdict, Verdict::Ask(_)) {
-                    1
-                } else {
-                    0
-                };
+                // Its pane's button, the table row's too: Install, Install anyway, Installing…,
+                // Installed, Update, Update anyway.
+                let (action, reason) = self.panel_action(o);
                 OfferLine {
                     id: o.id.clone(),
                     initials: initials(&o.name),
@@ -1908,7 +1955,6 @@ impl Worker {
                     summary: o.summary.clone(),
                     badges,
                     trust,
-                    trust_kind,
                     tags: o.tags.clone(),
                     origin: o.origin,
                     version: newer.map(shown).unwrap_or_else(|| o.version.clone()),
@@ -1918,11 +1964,13 @@ impl Worker {
                     downloads: o.downloads,
                     downloads_text: o.downloads.map(downloads_text).unwrap_or_default(),
                     action,
-                    reason: match &o.verdict {
-                        Verdict::Ask(why) if action == 1 => why.text(),
-                        _ => String::new(),
-                    },
+                    reason,
                     warning: o.warning.clone().unwrap_or_default(),
+                    installed: o.installed,
+                    installed_id: self.offer_line(o).map(|l| l.id.clone()).unwrap_or_default(),
+                    // Removed on this PC: its Install says Install again.
+                    again: !o.installed && a.store.removal(&o.id).is_some(),
+                    safety,
                 }
             })
             .collect();

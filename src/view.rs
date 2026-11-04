@@ -9,7 +9,7 @@ use crate::{
 };
 use satchel_core::activity::Kind;
 use satchel_core::addons::forge;
-use satchel_core::addons::overview::{Sort, SortKeys, browse_order};
+use satchel_core::addons::overview::{self, SafetyCell, Sort, SortKeys, browse_order};
 use satchel_core::changelog::Block;
 use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, StandardListViewItem, VecModel};
 use std::cell::{Cell, RefCell};
@@ -261,7 +261,7 @@ pub struct AddonLine {
     pub reason_kind: i32,
     pub author: String,
     pub version: String,
-    /// "released 3 days ago", or empty when the date isn't known.
+    /// When it was released, under the Released heading: "3 days ago"; empty when not known.
     pub released: String,
     /// The version an update brings, else empty.
     pub update: String,
@@ -295,6 +295,13 @@ pub struct AddonLine {
     pub ask_pc: String,
     /// Not here yet: another PC has it, and it comes at the next Play.
     pub incoming: bool,
+    /// The Safety column: SurvivorsForge's level with "SurvivorsForge" under it, else its badge's
+    /// word (`overview::safety_cell`).
+    pub safety: SafetyCell,
+    /// The Status column's one line (`overview::row_status`), and its colour: 0 plain, 1 good
+    /// news, 2 needs a look, 3 never. Its opened area has every line whole.
+    pub status: String,
+    pub status_kind: i32,
 }
 
 /// An addon on offer in Browse: one card. The worker sends every offer; Browse searches, filters
@@ -318,10 +325,9 @@ pub struct OfferLine {
     /// player's OK ("· flagged", "· unscanned", no longer listed there); 6 never ("· blocked").
     /// Browse shows exactly these: nothing is hard-coded there.
     pub badges: Vec<(String, i32)>,
-    /// SurvivorsForge's level as its badge words it ("verified", "flagged"…), with the badge's
-    /// kind: the table's SurvivorsForge column and its filters. Empty when there is no badge.
+    /// SurvivorsForge's level as its badge words it ("verified", "flagged"…): the table's Safety
+    /// filters (its Safety column shows it, coloured, in `safety`). Empty when there is no badge.
     pub trust: String,
-    pub trust_kind: i32,
     /// Our group and SurvivorsForge's category ("Meters and HUDs", "Combat"): the filters offer
     /// every tag of every line, and the search looks in them.
     pub tags: Vec<String>,
@@ -338,15 +344,25 @@ pub struct OfferLine {
     pub downloads: Option<u64>,
     /// The count as the card says it ("8,382 downloads"); empty when unknown.
     pub downloads_text: String,
-    /// The card's button: 0 Install; 1 Install… (it asks first: the panel opens, with `reason` and
-    /// Install anyway); 2 Installing…; 3 Installed. Its install shows as under way at once
-    /// (`installing`), until the worker's answer.
+    /// Its button, as its pane has it (`PanelLine::action`): 0 Install; 1 Install anyway (it asks
+    /// first: the card and the table's row select it, and its pane says why, with Install anyway);
+    /// 2 Installing…; 3 Installed (the table's row: Uninstall); 4 Update; 5 Update anyway (asks
+    /// first, as 1). Its install shows as under way at once (`installing`), until the worker's answer.
     pub action: i32,
-    /// Why it waits for the player's OK, for action 1: "SurvivorsForge hasn't scanned this version
-    /// yet". Empty otherwise.
+    /// Why it waits for the player's OK, for actions 1 and 5: "SurvivorsForge hasn't scanned this
+    /// version yet". Empty otherwise.
     pub reason: String,
     /// It doesn't mix with an addon this PC has; shown only while it isn't installed.
     pub warning: String,
+    /// It is in AddOns: a check mark after its name, and the table's "Installed only".
+    pub installed: bool,
+    /// Its row in the Installed tab, which Uninstall removes (its record's id, or `folder:<name>`
+    /// for a copy installed by hand); empty while it isn't installed.
+    pub installed_id: String,
+    /// It was removed on this PC and isn't installed now: its Install says Install again.
+    pub again: bool,
+    /// The table's Safety column (`overview::safety_cell`).
+    pub safety: SafetyCell,
 }
 
 /// The panel Browse slides in for one addon, its content only: the name, author,
@@ -391,12 +407,14 @@ pub struct PanelLine {
     pub error: String,
 }
 
-/// One screenshot in the strip: its shape, as its details give it, and its caption.
+/// One screenshot in the pictures row: its shape, as its details give it, its caption, and the key
+/// of its thumbnail once the window holds it (`push_thumb`); empty: the placeholder frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PictureLine {
     pub width: u32,
     pub height: u32,
     pub caption: String,
+    pub thumb: String,
 }
 
 /// "Add from a link": 0 nothing yet, 1 looking, 2 found, 3 failed.
@@ -505,6 +523,24 @@ impl Ui {
         });
     }
 
+    /// A thumbnail of the open addon `id`'s pictures row, decoded on the network thread, kept by
+    /// the window under `key` while that addon stays open: its frame shows it (the next view does)
+    /// in place of the placeholder. One for an addon no longer open is dropped.
+    pub fn push_thumb(&self, id: String, key: String, pixels: SharedPixelBuffer<Rgba8Pixel>) {
+        let _ = self.window.upgrade_in_event_loop(move |window| {
+            if window.get_browse_panel_id().as_str() != id {
+                return;
+            }
+            THUMBS.with(|thumbs| {
+                let mut thumbs = thumbs.borrow_mut();
+                if thumbs.0 != id {
+                    *thumbs = (id, BTreeMap::new());
+                }
+                thumbs.1.insert(key, slint::Image::from_rgba8(pixels));
+            });
+        });
+    }
+
     /// The viewer's screenshot `index`, decoded on the network thread, or `None`: it isn't
     /// available. Shown only while the viewer is still on that picture; the window holds no other.
     pub fn push_shot(&self, index: usize, pixels: Option<SharedPixelBuffer<Rgba8Pixel>>) {
@@ -529,6 +565,9 @@ impl Ui {
 thread_local! {
     // The icons the network thread decoded, by key, held for this run (at most 128 pixels a side).
     static ICONS: RefCell<BTreeMap<String, slint::Image>> = const { RefCell::new(BTreeMap::new()) };
+    // The open addon's thumbnails, by key, with the addon they are of (at most 192 pixels a side):
+    // dropped when its pane closes or another addon opens.
+    static THUMBS: RefCell<(String, BTreeMap<String, slint::Image>)> = const { RefCell::new((String::new(), BTreeMap::new())) };
     static SHOWN: RefCell<Option<View>> = const { RefCell::new(None) };
     // The panel content the window holds: it is set again only when the content differs.
     static PANEL: RefCell<Option<PanelLine>> = const { RefCell::new(None) };
@@ -615,6 +654,29 @@ fn icon(key: &str) -> slint::Image {
     ICONS.with(|icons| icons.borrow().get(key).cloned().unwrap_or_default())
 }
 
+/// The open addon's thumbnail the window holds under `key`; none (the placeholder shows) for an
+/// empty key, one not here yet, or one of another addon.
+fn thumb(id: &str, key: &str) -> slint::Image {
+    if key.is_empty() {
+        return slint::Image::default();
+    }
+    THUMBS.with(|thumbs| {
+        let thumbs = thumbs.borrow();
+        if thumbs.0 == id { thumbs.1.get(key).cloned().unwrap_or_default() } else { slint::Image::default() }
+    })
+}
+
+/// The pane closed, or another addon opened: the thumbnails held go (`open` is the addon open
+/// now, empty for none).
+pub fn drop_thumbs(open: &str) {
+    THUMBS.with(|thumbs| {
+        let mut thumbs = thumbs.borrow_mut();
+        if thumbs.0 != open {
+            *thumbs = (String::new(), BTreeMap::new());
+        }
+    });
+}
+
 fn addon_row(line: &AddonLine) -> AddonRow {
     AddonRow {
         id: text(&line.id),
@@ -652,6 +714,11 @@ fn addon_row(line: &AddonLine) -> AddonRow {
         incoming: line.incoming,
         reason: text(&line.reason),
         reason_kind: line.reason_kind,
+        safety: text(&line.safety.word),
+        safety_kind: line.safety.kind,
+        safety_by: text(&line.safety.by),
+        status: text(&line.status),
+        status_kind: line.status_kind,
     }
 }
 
@@ -685,6 +752,8 @@ fn card_summary(summary: &str) -> String {
 }
 
 fn offer_row(offer: &OfferLine) -> OfferRow {
+    // The table's Install column: its button's words, from the action.
+    let cell = overview::install_cell(offer.action, offer.again);
     OfferRow {
         id: text(&offer.id),
         initials: text(&offer.initials),
@@ -701,13 +770,19 @@ fn offer_row(offer: &OfferLine) -> OfferRow {
         action: offer.action,
         reason: text(&offer.reason),
         warning: text(&offer.warning),
-        // The table's columns.
+        installed: offer.installed,
+        installed_id: text(&offer.installed_id),
+        // The lists it is on: the pane's Safety line names ours.
         ours: offer.origin != ORIGIN_FORGE,
         forge: offer.origin != ORIGIN_OURS,
-        trust: text(&offer.trust),
-        trust_kind: offer.trust_kind,
+        // The table's columns.
+        safety: text(&offer.safety.word),
+        safety_kind: offer.safety.kind,
+        safety_by: text(&offer.safety.by),
         tags: text(&offer.tags.join(" · ")),
         popularity: text(&offer.downloads.map(thousands).unwrap_or_default()),
+        install_text: text(cell.text),
+        install_primary: cell.primary,
     }
 }
 
@@ -751,7 +826,12 @@ fn panel_row(panel: &PanelLine) -> PanelRow {
             panel
                 .pictures
                 .iter()
-                .map(|p| PictureRow { width: p.width.clamp(1, 1 << 14) as i32, height: p.height.clamp(1, 1 << 14) as i32, caption: text(&p.caption) })
+                .map(|p| PictureRow {
+                    width: p.width.clamp(1, 1 << 14) as i32,
+                    height: p.height.clamp(1, 1 << 14) as i32,
+                    caption: text(&p.caption),
+                    thumb: thumb(&panel.id, &p.thumb),
+                })
                 .collect::<Vec<_>>(),
         )),
         action: panel.action,
@@ -797,6 +877,8 @@ fn versions_row(versions: &VersionsView) -> VersionsRow {
 /// The panel's content, when it is for the addon open now and the window holds something else.
 fn push_panel(window: &MainWindow, panel: Option<&PanelLine>) {
     let open = window.get_browse_panel_id();
+    // Another addon opened: the thumbnails held of the one before go.
+    drop_thumbs(open.as_str());
     let Some(panel) = panel.filter(|p| !p.id.is_empty() && p.id == open.as_str()) else { return };
     PANEL.with(|held| {
         let mut held = held.borrow_mut();
@@ -817,8 +899,9 @@ pub fn installing(window: &MainWindow, id: Option<&str>) {
         let Some(view) = shown.as_mut() else { return };
         match id {
             Some(id) => {
-                // Install or Install… becomes Installing…; an installed one stays Installed.
-                view.addons.offers.iter_mut().filter(|o| o.id == id && o.action < 2).for_each(|o| o.action = 2);
+                // Install, Install anyway, Update or Update anyway becomes Installing…; an
+                // installed one stays Installed.
+                view.addons.offers.iter_mut().filter(|o| o.id == id && matches!(o.action, 0 | 1 | 4 | 5)).for_each(|o| o.action = 2);
                 view.addons.rows.iter_mut().filter(|r| r.id == id).for_each(|r| r.installing = true);
                 if let Some(panel) = view.addons.panel.as_mut().filter(|p| p.id == id && matches!(p.action, 0 | 1 | 4 | 5)) {
                     panel.action = 2;
@@ -847,6 +930,10 @@ pub fn checking(window: &MainWindow) {
 const ORIGIN_OURS: i32 = 0;
 const ORIGIN_FORGE: i32 = 2;
 const ORIGIN_NONE: i32 = 3;
+
+/// The window's Addons tab, and its Browse page.
+const TAB_ADDONS: i32 = 1;
+const PAGE_BROWSE: i32 = 1;
 
 /// How much wider than a chip the table's check box for the same tag is: its box and the gap.
 const CHECK_WIDER: usize = 14;
@@ -975,6 +1062,9 @@ pub fn filter_offers(window: &MainWindow) {
     let installed_only = table && window.get_browse_installed_only();
     let reverse = table && window.get_browse_sort_reverse();
     window.set_browse_trust_on(trust.len() as i32 + i32::from(installed_only));
+    // Browse entered or the table picked since the last filter: the table's top row may open.
+    let fresh = window.get_table_fresh();
+    window.set_table_fresh(false);
     SHOWN.with(|shown| {
         let shown = shown.borrow();
         let Some(view) = shown.as_ref() else { return };
@@ -990,14 +1080,27 @@ pub fn filter_offers(window: &MainWindow) {
             })
             .filter(|o| on.is_empty() || o.tags.iter().any(|t| on.contains(t)))
             .filter(|o| trust.is_empty() || trust.contains(&o.trust))
-            .filter(|o| !installed_only || o.action == 3)
+            .filter(|o| !installed_only || o.installed)
             .filter(|o| {
                 let hit = |field: &String| field.to_lowercase().contains(search.as_str());
                 search.is_empty() || hit(&o.name) || hit(&o.summary) || hit(&o.author) || o.tags.iter().any(hit)
             })
             .collect();
         picked.sort_by(|a, b| browse_order(&keys(a), &keys(b), sort, reverse));
+        // The table on screen selects its top row when the addon selected left what it shows, and,
+        // at a fresh look (Browse entered, the table picked), when none is selected either.
+        let on_screen = table && window.get_tab() == TAB_ADDONS && window.get_addons_page() == PAGE_BROWSE;
+        let pick = if on_screen {
+            let ids: Vec<&str> = picked.iter().map(|o| o.id.as_str()).collect();
+            overview::table_pick(window.get_browse_panel_id().as_str(), &ids, fresh).and_then(|id| picked.iter().find(|o| o.id == id).copied())
+        } else {
+            None
+        };
         window.set_offer_rows(ModelRc::new(VecModel::from(picked.into_iter().map(offer_row).collect::<Vec<_>>())));
+        // As a click on it does: its pane opens, its details and versions are asked for.
+        if let Some(offer) = pick {
+            window.invoke_open_offer(offer_row(offer));
+        }
         let open = window.get_browse_panel_id();
         if !open.is_empty() {
             match offers.iter().find(|o| o.id == open.as_str()) {
@@ -1005,7 +1108,11 @@ pub fn filter_offers(window: &MainWindow) {
                     window.set_panel_offer(offer_row(offer));
                     push_panel(window, view.addons.panel.as_ref());
                 }
-                None => window.set_browse_panel_id("".into()),
+                // No longer offered: it closes, as its ✕ closes it.
+                None => {
+                    window.set_browse_panel_id("".into());
+                    window.invoke_browse_close();
+                }
             }
         }
     });

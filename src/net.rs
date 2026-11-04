@@ -16,7 +16,7 @@ use crate::win;
 use crate::worker::Command;
 use chrono::{DateTime, Utc};
 use satchel_core::addons::catalog::Release;
-use satchel_core::addons::forge;
+use satchel_core::addons::forge::{self, PictureKind};
 use satchel_core::addons::github::{self, Pick, RestRelease, RestRepo, RestTag};
 use satchel_core::addons::overview::{Watch, plain};
 use satchel_core::addons::package;
@@ -78,9 +78,10 @@ pub enum Job {
     ForgeVersions(String),
     /// What SurvivorsForge's scan found in one version of an addon.
     ForgeFindings { slug: String, tag: String },
-    /// An icon (`icon`) or a screenshot from SurvivorsForge's host or GitHub's: from the pictures
-    /// kept on this PC, else downloaded and kept; decoded either way.
-    Picture { url: String, icon: bool },
+    /// An icon, a screenshot's thumbnail or a screenshot for the viewer (`kind`), from
+    /// SurvivorsForge's host or GitHub's: from the pictures kept on this PC, else downloaded and
+    /// kept; decoded either way, at its kind's size.
+    Picture { url: String, kind: PictureKind },
     /// One of the game's two patch-note sources, with the ETag of the copy kept (`If-None-Match`).
     GameNews { feed: Feed, etag: Option<String> },
 }
@@ -97,9 +98,10 @@ pub enum Answer {
     ForgeDetails { slug: String, answer: ForgeAnswer },
     ForgeVersions { slug: String, answer: ForgeAnswer },
     ForgeFindings { slug: String, tag: String, answer: ForgeAnswer },
-    /// A picture decoded into RGBA pixels, scaled down to its use (an icon to `forge::ICON_SIDE`,
-    /// a screenshot to `forge::SHOT_SIDE`), or why not, for the log.
-    Picture { url: String, icon: bool, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String> },
+    /// A picture decoded into RGBA pixels, scaled down to its use (`PictureKind::side`: an icon to
+    /// `forge::ICON_SIDE`, a thumbnail to `forge::THUMB_SIDE`, a screenshot to `forge::SHOT_SIDE`),
+    /// or why not, for the log.
+    Picture { url: String, kind: PictureKind, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String> },
     GameNews { feed: Feed, answer: NewsAnswer },
 }
 
@@ -185,7 +187,7 @@ fn run(jobs: Receiver<Job>, cache: &Path, pictures: &forge::Pictures, commands: 
             Job::ForgeDetails(slug) => Answer::ForgeDetails { answer: net.forge(forge_addon_url(&slug, ""), None), slug },
             Job::ForgeVersions(slug) => Answer::ForgeVersions { answer: net.forge(forge_addon_url(&slug, "/versions"), None), slug },
             Job::ForgeFindings { slug, tag } => Answer::ForgeFindings { answer: net.forge(forge_findings_url(&slug, &tag), None), slug, tag },
-            Job::Picture { url, icon } => Answer::Picture { pixels: guarded(|| net.picture(&url, icon, pictures)), url, icon },
+            Job::Picture { url, kind } => Answer::Picture { pixels: guarded(|| net.picture(&url, kind, pictures)), url, kind },
             Job::GameNews { feed, etag } => Answer::GameNews { feed, answer: net.game_news(feed, etag.as_deref()) },
         };
         if commands.send(Command::Net(answer)).is_err() {
@@ -423,10 +425,11 @@ impl Net {
         }
     }
 
-    /// An icon or a screenshot as pixels: only from an address `forge::picture_url_ok` allows; from
-    /// the pictures kept on this PC when it is there (it is static, so it shows offline too), else
-    /// downloaded and kept. Every failure is the answer's error, which the worker logs once.
-    fn picture(&self, url: &str, icon: bool, pictures: &forge::Pictures) -> Result<SharedPixelBuffer<Rgba8Pixel>, String> {
+    /// An icon, a thumbnail or a screenshot as pixels: only from an address `forge::picture_url_ok`
+    /// allows; from the pictures kept on this PC when it is there (it is static, so it shows offline
+    /// too, and a thumbnail and its screenshot share one file), else downloaded and kept. Every
+    /// failure is the answer's error, which the worker logs once.
+    fn picture(&self, url: &str, kind: PictureKind, pictures: &forge::Pictures) -> Result<SharedPixelBuffer<Rgba8Pixel>, String> {
         if !forge::picture_url_ok(url) {
             return Err("not on SurvivorsForge's host or GitHub's, so it wasn't fetched".into());
         }
@@ -440,7 +443,7 @@ impl Net {
                 bytes
             }
         };
-        decode(&bytes, if icon { forge::ICON_SIDE } else { forge::SHOT_SIDE }, icon)
+        decode(&bytes, kind.side(), kind == PictureKind::Icon)
     }
 
     /// A picture's bytes, at most `forge::PICTURE_MAX`, over https; a redirect is followed only to

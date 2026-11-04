@@ -12,7 +12,7 @@ use crate::net::{ForgeAnswer, Job};
 use crate::view::{PanelLine, PictureLine};
 use crate::win;
 use chrono::{DateTime, Local, Utc};
-use satchel_core::addons::forge::{self, Counts, Verdict, Why, Word};
+use satchel_core::addons::forge::{self, Counts, PictureKind, Verdict, Why, Word};
 use satchel_core::addons::github;
 use satchel_core::addons::overview::{self, ForgeView, Offer, Standing};
 use satchel_core::log;
@@ -98,8 +98,15 @@ pub(super) struct ForgeState {
     /// The icons asked for this run, and the ones waiting for the network thread: a line shows its
     /// icon once the window holds it.
     icons: forge::IconQueue,
-    /// The picture on its way now, one at a time: its address.
-    picture_out: Option<String>,
+    /// The thumbnails of the addon opened (`open`), as its pictures row asked for them: a frame
+    /// shows its thumbnail once the window holds it. Begun again when another addon opens or the
+    /// pane closes, as the window drops what it held.
+    thumbs: forge::IconQueue,
+    /// The addon whose pictures row the window shows, and how many frames it shows.
+    thumbs_for: Option<(String, usize)>,
+    /// The picture on its way now, one at a time: its address, its kind, and for a thumbnail the
+    /// addon it is for.
+    picture_out: Option<(String, PictureKind, Option<String>)>,
     /// The viewer, while it is open.
     viewer: Option<Viewer>,
     /// The Addons page in view (0 Installed, 1 Browse; -1 neither): the icons of what it lists
@@ -127,6 +134,8 @@ impl ForgeState {
             asked: BTreeSet::new(),
             follow_asked: BTreeSet::new(),
             icons: forge::IconQueue::default(),
+            thumbs: forge::IconQueue::default(),
+            thumbs_for: None,
             picture_out: None,
             viewer: None,
             shown: -1,
@@ -425,6 +434,8 @@ impl Worker {
         }
         f.reread();
         self.addons_lines();
+        // The open addon's pictures are known now: the frames shown get their thumbnails.
+        self.forge_thumbs_again();
     }
 
     /// An addon's versions (its panel opened, or an install asked about its version), kept; then
@@ -625,19 +636,20 @@ impl Worker {
     /// (`forge_icons_allowed`); when they may not, what waits is dropped.
     pub(super) fn forge_icons_wanted(&mut self, page: i32) {
         self.forge.shown = page;
-        if !self.forge_icons_allowed() {
+        if self.forge_icons_allowed() {
+            let urls: Vec<String> = match page {
+                0 => self.addons.lines.iter().filter_map(|l| l.icon_url.clone()).collect(),
+                1 => self.addons.offers.iter().filter_map(|o| o.icon_url.clone()).collect(),
+                _ => Vec::new(),
+            };
+            for url in urls {
+                self.forge.icons.want(&url);
+            }
+        } else {
             self.forge.icons.drop_waiting();
-            return;
         }
-        let urls: Vec<String> = match page {
-            0 => self.addons.lines.iter().filter_map(|l| l.icon_url.clone()).collect(),
-            1 => self.addons.offers.iter().filter_map(|o| o.icon_url.clone()).collect(),
-            _ => Vec::new(),
-        };
-        for url in urls {
-            self.forge.icons.want(&url);
-        }
-        self.forge_pictures_next();
+        // Browse left, or back: the open addon's thumbnails stop, or go on.
+        self.forge_thumbs_again();
     }
 
     /// Whether icons may be fetched now: SurvivorsForge's switch is on, and the Addons tab shows
@@ -647,52 +659,121 @@ impl Worker {
         self.forge_on() && matches!(self.forge.shown, 0 | 1)
     }
 
+    /// Whether the open addon's thumbnails may be fetched now: SurvivorsForge's switch is on, the
+    /// Addons tab shows Browse, and the pictures row the window shows is the open addon's.
+    fn forge_thumbs_allowed(&self) -> bool {
+        let open = self.forge.open.as_deref();
+        self.forge_on() && self.forge.shown == 1 && open.is_some() && self.forge.thumbs_for.as_ref().map(|(id, _)| id.as_str()) == open
+    }
+
+    /// The open addon's pictures row shows `frames` frames: their thumbnails are asked for, in
+    /// their order, and only those (never every picture it has).
+    pub(super) fn forge_thumbs_wanted(&mut self, id: &str, frames: usize) {
+        self.forge.thumbs_for = Some((id.to_string(), frames));
+        self.forge_thumbs_again();
+    }
+
+    /// The thumbnails of the frames shown, asked for again where they may be (after the details
+    /// came, Browse shown again); where they may not, what waits is dropped.
+    fn forge_thumbs_again(&mut self) {
+        if self.forge_thumbs_allowed()
+            && let Some((id, frames)) = self.forge.thumbs_for.clone()
+        {
+            let slug = self.offer_slug(&id);
+            let urls: Vec<String> = self.forge_pictures(slug.as_deref()).iter().take(frames).map(|p| p.url.trim().to_string()).collect();
+            for url in urls {
+                self.forge.thumbs.want(&url);
+            }
+        } else {
+            self.forge.thumbs.drop_waiting();
+        }
+        self.forge_pictures_next();
+    }
+
     /// The next picture to the network thread, when none is on its way: the viewer's screenshot
-    /// first, then the icons in the order they were asked for, while they may be fetched. One at a
-    /// time, so whatever already waits there goes first, and an install asked for meanwhile waits
-    /// for one picture at most.
+    /// first, then the open addon's thumbnails, then the icons, each in the order asked for and
+    /// only while it may be fetched (`forge::next_picture`). One at a time, so whatever already
+    /// waits there goes first, and an install asked for meanwhile waits for one picture at most.
     fn forge_pictures_next(&mut self) {
         if self.forge.picture_out.is_some() {
             return;
         }
-        let icons_allowed = self.forge_icons_allowed();
-        let next = match self.forge.viewer.as_mut().filter(|v| v.waiting) {
+        let (thumbs_allowed, icons_allowed) = (self.forge_thumbs_allowed(), self.forge_icons_allowed());
+        let shot = match self.forge.viewer.as_mut().filter(|v| v.waiting) {
             Some(viewer) => {
                 viewer.waiting = false;
-                Some((viewer.url.clone(), false))
+                Some(viewer.url.clone())
             }
-            None => self.forge.icons.next(icons_allowed).map(|url| (url, true)),
+            None => None,
         };
-        let Some((url, icon)) = next else { return };
-        if self.addons.net.send(Job::Picture { url: url.clone(), icon }).is_ok() {
-            self.forge.picture_out = Some(url);
+        let f = &mut self.forge;
+        let Some((url, kind)) = forge::next_picture(shot, &mut f.thumbs, thumbs_allowed, &mut f.icons, icons_allowed) else { return };
+        let addon = (kind == PictureKind::Thumb).then(|| f.open.clone()).flatten();
+        if self.addons.net.send(Job::Picture { url: url.clone(), kind }).is_ok() {
+            self.forge.picture_out = Some((url, kind, addon));
         }
     }
 
-    /// A picture's answer: an icon goes to the window, which keeps it for this run; the viewer's
-    /// screenshot shows if it is still the one open. A failure is one log line: the initials stay,
-    /// and the viewer says the picture isn't available.
-    pub(super) fn forge_picture_answer(&mut self, url: &str, icon: bool, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String>) {
-        if self.forge.picture_out.as_deref() == Some(url) {
-            self.forge.picture_out = None;
+    /// A picture's answer: an icon goes to the window, which keeps it for this run; a thumbnail,
+    /// when its addon is still the one open, to the window, which keeps it while it stays open; the
+    /// viewer's screenshot shows if it is still the one open. A failure is one log line: the
+    /// initials stay, the frame keeps its placeholder, and the viewer says the picture isn't
+    /// available.
+    pub(super) fn forge_picture_answer(&mut self, url: &str, kind: PictureKind, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String>) {
+        let mut thumb_for = None;
+        if let Some((out, out_kind, addon)) = self.forge.picture_out.take() {
+            if out == url && out_kind == kind {
+                thumb_for = addon;
+            } else {
+                self.forge.picture_out = Some((out, out_kind, addon));
+            }
         }
         if let Err(why) = &pixels {
-            log!("{url}: the {} wasn't shown: {why}", if icon { "icon" } else { "picture" });
-        }
-        if icon {
-            let shown = match pixels {
-                Ok(pixels) => {
-                    self.ui.push_icon(forge::Pictures::name(url), pixels);
-                    true
-                }
-                Err(_) => false,
+            let what = match kind {
+                PictureKind::Icon => "icon",
+                PictureKind::Thumb => "thumbnail",
+                PictureKind::Shot => "picture",
             };
-            self.forge.icons.done(url, shown);
-        } else if let Some(viewer) = self.forge.viewer.as_mut().filter(|v| v.url == url) {
-            viewer.waiting = false;
-            self.ui.push_shot(viewer.index, pixels.ok());
+            log!("{url}: the {what} wasn't shown: {why}");
+        }
+        match kind {
+            PictureKind::Icon => {
+                let shown = match pixels {
+                    Ok(pixels) => {
+                        self.ui.push_icon(forge::Pictures::name(url), pixels);
+                        true
+                    }
+                    Err(_) => false,
+                };
+                self.forge.icons.done(url, shown);
+            }
+            // Its addon closed meanwhile, or another opened: the window holds none of its now.
+            PictureKind::Thumb => {
+                if let Some(id) = thumb_for.filter(|id| self.forge.open.as_deref() == Some(id.as_str())) {
+                    let shown = match pixels {
+                        Ok(pixels) => {
+                            self.ui.push_thumb(id, forge::Pictures::name(url), pixels);
+                            true
+                        }
+                        Err(_) => false,
+                    };
+                    self.forge.thumbs.done(url, shown);
+                }
+            }
+            PictureKind::Shot => {
+                if let Some(viewer) = self.forge.viewer.as_mut().filter(|v| v.url == url) {
+                    viewer.waiting = false;
+                    self.ui.push_shot(viewer.index, pixels.ok());
+                }
+            }
         }
         self.forge_pictures_next();
+    }
+
+    /// The window's name for a thumbnail it holds of the open addon, for a frame whose picture is
+    /// `url`; empty until then (the placeholder shows).
+    fn thumb_key(&self, url: &str) -> String {
+        if self.forge.thumbs.shown(url) { forge::Pictures::name(url) } else { String::new() }
     }
 
     /// The screenshots of the addon SurvivorsForge lists as `slug` that may be shown: those on its
@@ -731,7 +812,12 @@ impl Worker {
     /// addons SurvivorsForge doesn't list fetch nothing. A request that failed isn't sent again by
     /// itself: opening the panel a minute later asks again.
     pub(super) fn browse_open(&mut self, id: &str) {
+        // Another addon: the window drops the thumbnails it held, so they are asked for anew.
+        if self.forge.open.as_deref() != Some(id) {
+            self.forge.thumbs = forge::IconQueue::default();
+        }
         self.forge.open = Some(id.to_string());
+        self.forge_thumbs_again();
         let Some(slug) = self.offer_slug(id) else { return };
         let listed = self.forge.registry.as_ref().is_some_and(|r| r.get(&slug).is_some());
         let dropped = forge::dropped(&self.forge.state, self.forge.registry.as_ref(), &slug);
@@ -759,9 +845,11 @@ impl Worker {
         self.forge.reread();
     }
 
-    /// The panel closed; nothing relies on hearing it (`BrowseOpen` says which is open).
+    /// The panel closed: its thumbnails stop, and the window drops those it held.
     pub(super) fn browse_close(&mut self) {
         self.forge.open = None;
+        self.forge.thumbs = forge::IconQueue::default();
+        self.forge.thumbs_for = None;
     }
 
     /// "Show what it found": the findings of the version the panel shows, from the cache or asked
@@ -860,7 +948,12 @@ impl Worker {
             pictures: self
                 .forge_pictures(slug)
                 .iter()
-                .map(|p| PictureLine { width: p.width.unwrap_or(16), height: p.height.unwrap_or(9), caption: p.caption.as_deref().map(str::trim).unwrap_or_default().to_string() })
+                .map(|p| PictureLine {
+                    width: p.width.unwrap_or(16),
+                    height: p.height.unwrap_or(9),
+                    caption: p.caption.as_deref().map(str::trim).unwrap_or_default().to_string(),
+                    thumb: self.thumb_key(p.url.trim()),
+                })
                 .collect(),
             action,
             reason,
@@ -869,10 +962,29 @@ impl Worker {
         })
     }
 
-    /// The panel's button, and the reason above it: Install; Install anyway when SurvivorsForge
-    /// asks first; Installing…; Installed; or, for an installed addon with a newer version, Update
-    /// or Update anyway.
-    fn panel_action(&self, offer: &Offer) -> (i32, String) {
+    /// The installed addon an offer stands for, as the Installed tab lists it: its own record, one
+    /// installed from the same repository (by its link, say), or a copy installed by hand in its
+    /// main folder. `None` while it isn't installed.
+    pub(super) fn offer_line(&self, offer: &Offer) -> Option<&overview::Line> {
+        if !offer.installed {
+            return None;
+        }
+        let lines = &self.addons.lines;
+        let main = match forge::slug_in(&offer.id) {
+            Some(slug) => self.forge_folders(Some(slug)).and_then(|f| f.first().cloned()),
+            None => self.addons.catalog.get(&offer.id).and_then(|e| e.folders.first().cloned()),
+        };
+        lines
+            .iter()
+            .find(|l| l.id == offer.id)
+            .or_else(|| lines.iter().find(|l| !offer.repo.trim().is_empty() && l.repo.as_deref().is_some_and(|r| forge::same_repo(r, &offer.repo))))
+            .or_else(|| main.and_then(|f| lines.iter().find(|l| l.folders.iter().any(|g| g.eq_ignore_ascii_case(&f)))))
+    }
+
+    /// An offer's button, and the reason above it, in its pane and on its table row: Install;
+    /// Install anyway when SurvivorsForge asks first; Installing…; Installed; or, for an installed
+    /// addon with a newer version, Update or Update anyway.
+    pub(super) fn panel_action(&self, offer: &Offer) -> (i32, String) {
         let a = &self.addons;
         let busy = a.waiting.iter().any(|w| w.id == offer.id) || self.forge.holds(&offer.id);
         if busy {

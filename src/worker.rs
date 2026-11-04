@@ -100,6 +100,8 @@ pub enum Command {
     PictureShow(String, usize),
     /// The viewer closed.
     PictureClose,
+    /// The open addon's pictures row shows this many frames (its id, the count): their thumbnails.
+    ThumbsShown(String, usize),
     /// Versions… opened for an addon (Browse's, or an installed one).
     VersionsOpen(String),
     VersionsClose,
@@ -586,6 +588,7 @@ impl Worker {
             Command::BrowseView(view) => self.browse_view(&view),
             Command::PictureShow(id, index) => self.forge_picture_show(&id, index),
             Command::PictureClose => self.forge_picture_close(),
+            Command::ThumbsShown(id, frames) => self.forge_thumbs_wanted(&id, frames),
             Command::VersionsOpen(id) => self.versions_open(&id),
             Command::VersionsClose => self.addons.versions_open = None,
             Command::VersionInstall(id, tag, anyway) => self.version_install_as(&id, &tag, anyway, true),
