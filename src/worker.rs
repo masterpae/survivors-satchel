@@ -4,12 +4,13 @@
 mod addons;
 mod forge;
 mod game_news;
+mod playtime;
 mod self_update;
 mod share;
 
 use crate::net::{self, Answer, Job};
 use crate::about;
-use crate::view::{Answered, Form, FormView, PcLine, Pill, PlaytimeView, RailView, Recent, SaveLine, Setup, Tray, Ui, View};
+use crate::view::{Answered, Form, FormView, PcLine, Pill, RailView, Recent, SaveLine, Setup, Tray, Ui, View};
 use crate::win;
 use chrono::{DateTime, Datelike, Local, Utc};
 use satchel_core::activity::{self, Kind};
@@ -20,7 +21,7 @@ use satchel_core::gate;
 use satchel_core::log;
 use satchel_core::markers::{HEARTBEAT_SECS, InUse, Other};
 use satchel_core::paths;
-use satchel_core::playtime::{self, Session, format_long, format_minutes};
+use satchel_core::playtime::format_minutes;
 use satchel_core::session::{Event, Tracker};
 use satchel_core::settings::{self as settings_rules, Settings, Theme};
 use satchel_core::shell::{self, Dot, NeedsYouFacts, Notice, WaitingOk};
@@ -171,12 +172,8 @@ struct Lists {
     saves: Vec<SaveLine>,
     saves_summary: String,
     rows: Vec<Row>,
-    playtime: PlaytimeView,
-    /// The newest session: its day as the rail says it, its minutes, its PC.
-    last_session: Option<(String, u32, String)>,
     /// The PCs of Home's Your PCs card, this PC first.
     pcs: Vec<PcLine>,
-    pcs_week: String,
     recent: Vec<Recent>,
     last_copy: Option<DateTime<Utc>>,
     /// The last successful send or bring-in: the newest version this PC sent or has.
@@ -193,8 +190,6 @@ pub struct Worker {
     epoch: Instant,
     // The session.
     marker: Option<InUse>,
-    session_start: Option<DateTime<Utc>>,
-    closed_at: Option<DateTime<Utc>>,
     sent: Option<u64>,
     launched: bool,
     live_seen: Option<SystemTime>,
@@ -238,6 +233,7 @@ pub struct Worker {
     last_view: Option<View>,
     /// The one channel to the network thread; it answers on the worker's own (`Command::Net`).
     net: Sender<Job>,
+    playtime: playtime::PlaytimeState,
     update: self_update::UpdateState,
     addons: addons::AddonsState,
     share: share::ShareState,
@@ -350,6 +346,7 @@ impl Worker {
         let news = game_news::NewsState::new(engine.local.game_news_dir());
         Worker {
             net,
+            playtime: playtime::PlaytimeState::default(),
             update: self_update::UpdateState::default(),
             addons: addons::AddonsState::new(store),
             share: share::ShareState::new(memory),
@@ -362,8 +359,6 @@ impl Worker {
             away: win::AwayWatch::start(),
             epoch: Instant::now(),
             marker: None,
-            session_start: None,
-            closed_at: None,
             sent: None,
             launched: false,
             live_seen: None,
@@ -446,9 +441,7 @@ impl Worker {
 
     fn startup(&mut self) {
         self.apply_windows_settings();
-        if let Err(e) = self.engine.flush_playtime() {
-            log!("waiting playtime not sent: {e}");
-        }
+        self.flush_playtime();
         // SurvivorsForge's answers kept on this PC, before the first lists are made from them;
         // the game's patch notes as last fetched.
         self.forge_load();
@@ -683,7 +676,7 @@ impl Worker {
             Event::Started => self.session_started(now),
             Event::Closed { updating } => {
                 log!("game closed{}", if updating { " and its files changed: an update" } else { "" });
-                self.closed_at = Some(now);
+                self.playtime.closed(now);
                 if self.engine.shared().is_some() {
                     self.send_after_close();
                     // The game writes the addons' settings as it closes: they go up now.
@@ -711,8 +704,7 @@ impl Worker {
 
     fn session_started(&mut self, now: DateTime<Utc>) {
         log!("game started{}", if self.launched { " by Play" } else { " without Play" });
-        self.session_start = Some(now);
-        self.closed_at = None;
+        self.playtime.started(now);
         self.sent = None;
         self.writes = 0;
         self.live_seen = fs::metadata(self.engine.local.live_save()).and_then(|m| m.modified()).ok();
@@ -877,18 +869,14 @@ impl Worker {
     }
 
     fn session_over(&mut self, now: DateTime<Utc>) {
-        let start = self.session_start.take().unwrap_or(now);
-        let end = self.closed_at.take().unwrap_or(now);
-        let session = Session::new(self.engine.pc(), start, end, self.tracker.updated, None);
+        let session = self.playtime.over(self.engine.pc(), now, self.tracker.updated);
         log!(
             "session over: {}, {} writes to the save while playing{}",
             format_minutes(session.minutes),
             self.writes,
             if session.updated { ", the game updated itself" } else { "" }
         );
-        if let Err(e) = self.engine.record_session(&session) {
-            log!("playtime not recorded: {e}");
-        }
+        self.record_session(&session);
         let mut line = format!("session {}", format_minutes(session.minutes));
         if session.updated {
             line.push_str(" · the game updated itself, still one session");
@@ -1265,9 +1253,7 @@ impl Worker {
         }
         self.offline = false;
         self.offline_told = false;
-        if let Err(e) = self.engine.flush_playtime() {
-            log!("waiting playtime not sent: {e}");
-        }
+        self.flush_playtime();
         if self.engine.state.send_pending {
             match outlook.decision {
                 Decision::Send => {
@@ -1887,7 +1873,7 @@ impl Worker {
                 .iter()
                 .map(|name| {
                     let synced = outlook.index.versions.iter().filter(|v| &v.pc == name).map(|v| v.saved).max();
-                    let played = sessions.iter().filter(|s| &s.pc == name).map(|s| s.start).max();
+                    let played = playtime::last_played(&sessions, name);
                     let mut parts = Vec::new();
                     if let Some(at) = played {
                         parts.push(format!("played {}", shell::day_word(at, &local_now)));
@@ -1922,29 +1908,7 @@ impl Worker {
             }
         }
         // Playtime: this week, the last seven days, per PC, the last sessions.
-        let sessions = self.engine.sessions().unwrap_or_default();
-        let totals = playtime::totals(&sessions, &local_now);
-        let most = totals.week_per_pc.iter().map(|(_, m)| *m).max().unwrap_or(0).max(1);
-        let days = playtime::per_day(&sessions, &local_now);
-        let tallest = days.iter().map(|d| d.minutes).max().unwrap_or(0).max(1);
-        lists.playtime = PlaytimeView {
-            week: format_long(totals.week),
-            week_sessions: totals.week_sessions,
-            today: format_long(totals.today),
-            all: format_long(totals.all),
-            days: days
-                .iter()
-                .enumerate()
-                .map(|(i, d)| {
-                    let label = if i == days.len() - 1 { "Today".to_string() } else { d.date.format("%a").to_string() };
-                    (label, d.minutes as f32 / tallest as f32, d.minutes)
-                })
-                .collect(),
-            per_pc: totals.week_per_pc.iter().map(|(pc, m)| (pc.clone(), format_long(*m), *m as f32 / most as f32)).collect(),
-            sessions: sessions.iter().take(30).map(|s| (shell::day_long(s.start, &local_now), s.pc.clone(), format_long(s.minutes))).collect(),
-        };
-        lists.pcs_week = format!("This week: {} · {} session{}", format_long(totals.week), totals.week_sessions, if totals.week_sessions == 1 { "" } else { "s" });
-        lists.last_session = sessions.first().map(|s| (shell::day_word(s.start, &local_now), s.minutes, s.pc.clone()));
+        self.playtime_lists(&local_now);
         lists.recent = activity::recent(&self.engine.local.activity(), 5)
             .unwrap_or_default()
             .iter()
@@ -2044,12 +2008,8 @@ impl Worker {
         let addons = self.addons_view();
         let addons_line = shell::addons_line(addons.rail);
         let playing = self.tracker.in_session();
-        let session_minutes = self.session_start.map(|start| ((Utc::now() - start).num_seconds().max(0) / 60) as u32);
-        let last_line = shell::last_line(
-            if playing { Some(session_minutes.unwrap_or(0)) } else { None },
-            sync_on,
-            self.lists.last_session.as_ref().map(|(day, minutes, pc)| (day.as_str(), *minutes, pc.as_str())),
-        );
+        let session_minutes = self.playtime.session_minutes();
+        let last_line = shell::last_line(if playing { Some(session_minutes.unwrap_or(0)) } else { None }, sync_on, self.playtime.last_session());
         let rail = RailView { build, progress: Some(progress), addons: Some(addons_line), last: last_line };
         // The top bar's pill: an update downloaded, or this version's What's new unseen.
         let update = self.update_line();
@@ -2131,10 +2091,10 @@ impl Worker {
             news_blocks,
             news_more,
             pcs: self.lists.pcs.clone(),
-            pcs_week: self.lists.pcs_week.clone(),
+            pcs_week: self.playtime.pcs_week(),
             questions,
             recent: self.lists.recent.clone(),
-            playtime: self.lists.playtime.clone(),
+            playtime: self.playtime.view(),
             saves: self.lists.saves.clone(),
             saves_summary: self.lists.saves_summary.clone(),
             saves_note,
