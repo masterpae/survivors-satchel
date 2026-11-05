@@ -13,10 +13,11 @@ use satchel_core::addons::catalog::{self, Catalog, Release};
 use satchel_core::addons::enabled::EnableList;
 use satchel_core::addons::forge::{self, Verdict, Why, Word};
 use satchel_core::addons::github;
-use satchel_core::addons::install::{Addons, Incoming};
+use satchel_core::addons::install::{AddonError, Addons, Incoming};
 use satchel_core::addons::overview::{self, Inputs, Line, Offer, Standing, VersionAction, initials};
 use satchel_core::addons::store::{Badge, Gone, Record, Store};
 use satchel_core::addons::{Found, GameAddons, package, scan, toc, tree};
+use satchel_core::paths::Local as LocalPaths;
 use satchel_core::{fsx, log, names};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -103,23 +104,23 @@ impl From<&str> for Refused {
 }
 
 pub(super) struct AddonsState {
-    pub(super) catalog: Catalog,
-    pub(super) store: Store,
-    pub(super) found: Vec<Found>,
+    catalog: Catalog,
+    store: Store,
+    found: Vec<Found>,
     /// Each managed folder's fingerprint now.
     prints: BTreeMap<String, String>,
-    pub(super) enabled: EnableList,
-    pub(super) lines: Vec<Line>,
-    pub(super) offers: Vec<Offer>,
+    enabled: EnableList,
+    lines: Vec<Line>,
+    offers: Vec<Offer>,
     /// Releases newer than the catalog or the record knows, from GitHub's pages, by addon id.
-    pub(super) newer: BTreeMap<String, Release>,
+    newer: BTreeMap<String, Release>,
     /// Downloaded zips: (addon id, release tag) → checksum.
-    pub(super) ready: BTreeMap<(String, String), String>,
-    pub(super) fetching: BTreeSet<(String, String)>,
+    ready: BTreeMap<(String, String), String>,
+    fetching: BTreeSet<(String, String)>,
     /// Downloads that failed, with why; tried again after the next look or "Check now".
-    pub(super) refused: BTreeMap<(String, String), String>,
+    refused: BTreeMap<(String, String), String>,
     /// Installs waiting for their download (or for the game to close).
-    pub(super) waiting: Vec<Want>,
+    waiting: Vec<Want>,
     /// Addons installed again from the Removed list, by id: once one is in, its switches are set
     /// as they were, and its settings come back from the removal's backup when they went with it.
     restore: BTreeMap<String, Gone>,
@@ -136,7 +137,7 @@ pub(super) struct AddonsState {
     adopted_note: Option<String>,
     message: Option<(String, Instant)>,
     /// The addon whose Versions… is open (its id), until it closes.
-    pub(super) versions_open: Option<String>,
+    versions_open: Option<String>,
 }
 
 impl AddonsState {
@@ -193,6 +194,94 @@ impl AddonsState {
     /// Whether an install of `id` waits for its download (or for the game to close).
     pub(super) fn waits_for(&self, id: &str) -> bool {
         self.waiting.iter().any(|w| w.id == id)
+    }
+
+    /// Every release newer than the catalog or the record knows, from GitHub's pages, by addon id.
+    pub(super) fn newer_releases(&self) -> &BTreeMap<String, Release> {
+        &self.newer
+    }
+
+    /// The record of an installed addon (or one recognised in AddOns).
+    pub(super) fn record(&self, id: &str) -> Option<&Record> {
+        self.store.get(id)
+    }
+
+    /// Every record, as addons.json holds them.
+    pub(super) fn records(&self) -> &[Record] {
+        &self.store.addons
+    }
+
+    /// The downloaded zip for this release, when it's in the cache.
+    pub(super) fn downloaded(&self, cache: &Path, id: &str, release: &Release) -> Option<(PathBuf, String)> {
+        zip_ready(cache, &self.ready, id, release)
+    }
+
+    /// Why a release's download failed, when it did.
+    pub(super) fn refused(&self, id: &str, tag: &str) -> Option<String> {
+        self.refused.get(&(id.to_string(), tag.to_string())).cloned()
+    }
+
+    /// A folder whose `.toc` says `DefaultState: disabled`: off unless the game's list says on.
+    pub(super) fn default_off(&self, folder: &str) -> bool {
+        self.found.iter().find(|f| f.folder.eq_ignore_ascii_case(folder)).and_then(|f| f.toc.as_ref()).is_some_and(|t| t.default_disabled)
+    }
+
+    /// The record's folders the game doesn't load, as the game names them.
+    pub(super) fn folders_off(&self, record: &Record) -> Vec<String> {
+        record.folders.keys().filter(|f| !self.enabled.is_on(f, self.default_off(f))).cloned().collect()
+    }
+
+    /// A zip that came another way than a download (from the network folder, a file): the
+    /// release is judged and installed as that file.
+    pub(super) fn mark_ready(&mut self, id: String, tag: String, sha256: String) {
+        self.ready.insert((id, tag), sha256);
+    }
+
+    /// Removes an addon as another PC did (`from`): its folders to the Recycle Bin, its settings
+    /// too unless kept, the backup made.
+    pub(super) fn remove_as_on(&mut self, game: &GameAddons, local: &LocalPaths, id: &str, keep_settings: bool, from: &str, now: DateTime<Utc>) -> Result<Record, AddonError> {
+        let mut addons = Addons { game, local, store: &mut self.store };
+        addons.remove(id, keep_settings, Some(from), now, win::recycle)
+    }
+
+    /// The switches another PC set, taken over where they differ: what changed, in words, and
+    /// the record's folders; `None` for an addon not recorded here. Saved by the caller.
+    pub(super) fn apply_followed_switches(&mut self, id: &str, pinned: bool, settings_per_pc: bool) -> Option<(Vec<String>, Vec<String>)> {
+        let record = self.store.get_mut(id)?;
+        let mut switches: Vec<String> = Vec::new();
+        if record.pinned != pinned {
+            record.pinned = pinned;
+            switches.push(if pinned { "kept at this version" } else { "updates again" }.into());
+        }
+        if record.settings_per_pc != settings_per_pc {
+            record.settings_per_pc = settings_per_pc;
+            switches.push(if settings_per_pc { "keeps its settings per PC" } else { "shares its settings" }.into());
+        }
+        Some((switches, record.folders.keys().cloned().collect()))
+    }
+
+    /// "Only on this PC" on or off; the addon's name, for what is said. Saved by the caller.
+    pub(super) fn set_local_only(&mut self, id: &str, on: bool) -> Option<String> {
+        let record = self.store.get_mut(id)?;
+        record.local_only = on;
+        Some(record.name.clone())
+    }
+
+    /// "Settings per PC" on or off; the addon's name, for what is said. Saved by the caller.
+    pub(super) fn set_settings_per_pc(&mut self, id: &str, on: bool) -> Option<String> {
+        let record = self.store.get_mut(id)?;
+        record.settings_per_pc = on;
+        Some(record.name.clone())
+    }
+
+    /// addons.json written.
+    pub(super) fn save_store(&self, path: &Path) -> io::Result<()> {
+        self.store.save(path)
+    }
+
+    /// Versions… closed.
+    pub(super) fn versions_close(&mut self) {
+        self.versions_open = None;
     }
 }
 

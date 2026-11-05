@@ -208,7 +208,7 @@ impl Worker {
             return None;
         }
         let index = self.sync.pc_names();
-        let list = self.share.list.iter().flat_map(|l| &l.addons).flat_map(|e| &e.pcs);
+        let list = self.share.pc_names();
         index.chain(list).find(|pc| same(pc)).cloned()
     }
 

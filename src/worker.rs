@@ -408,12 +408,12 @@ impl Worker {
             Command::PictureClose => self.forge_picture_close(),
             Command::ThumbsShown(id, frames) => self.forge_thumbs_wanted(&id, frames),
             Command::VersionsOpen(id) => self.versions_open(&id),
-            Command::VersionsClose => self.addons.versions_open = None,
+            Command::VersionsClose => self.addons.versions_close(),
             Command::VersionInstall(id, tag, anyway) => self.version_install_as(&id, &tag, anyway, true),
             Command::VersionBack(id, backup) => self.version_back(&id, Some(&backup)),
             Command::IncomingInstallAnyway(id) => self.incoming_install_anyway(&id),
             Command::OkAnyway(id) => {
-                if self.addons.store.get(&id).is_some() {
+                if self.addons.record(&id).is_some() {
                     self.addon_update_anyway(&id);
                 } else {
                     self.incoming_install_anyway(&id);

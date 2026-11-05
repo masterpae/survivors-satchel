@@ -4,16 +4,14 @@
 //! and the game's own, go up when the game closes and come in before it starts.
 
 use super::Worker;
-use super::addons::{FORGE_BADGE, Refused, Want, zip_ready};
+use super::addons::{FORGE_BADGE, Refused, Want};
 use super::forge::forge_badge;
 use crate::view::AddonLine;
-use crate::win;
 use chrono::{DateTime, Utc};
 use satchel_core::activity::Kind;
 use satchel_core::addons::catalog::Release;
 use satchel_core::addons::enabled::EnableList;
 use satchel_core::addons::forge::{self, Verdict};
-use satchel_core::addons::install::Addons;
 use satchel_core::addons::overview::{self, Standing, initials};
 use satchel_core::addons::share::{self, Agreed, Bundle, Entry, Here, List, Memory, OwnKept, SettingsStep, Shipped, Split, Step};
 use satchel_core::addons::store::{Badge, Record};
@@ -32,7 +30,7 @@ use std::path::Path;
 pub(super) struct ShareState {
     memory: Memory,
     /// The list as last read.
-    pub(super) list: Option<List>,
+    list: Option<List>,
     /// What each addon needs from this PC, from the last look: what it follows, and what of its
     /// own didn't go up.
     steps: BTreeMap<String, Step>,
@@ -73,6 +71,21 @@ impl ShareState {
     /// Why the last look didn't happen, in plain words.
     pub(super) fn problem(&self) -> Option<&String> {
         self.problem.as_ref()
+    }
+
+    /// The list as last read.
+    pub(super) fn list(&self) -> Option<&List> {
+        self.list.as_ref()
+    }
+
+    /// The list as just written.
+    pub(super) fn set_list(&mut self, list: List) {
+        self.list = Some(list);
+    }
+
+    /// The PCs the list names, with the addons they have.
+    pub(super) fn pc_names(&self) -> impl Iterator<Item = &String> {
+        self.list.iter().flat_map(|l| &l.addons).flat_map(|e| &e.pcs)
     }
 }
 
@@ -180,7 +193,7 @@ impl Worker {
         if id == game_settings::ID {
             return Some(SettingsSet::Game);
         }
-        let record = self.addons.store.get(id)?;
+        let record = self.addons.record(id)?;
         Some(SettingsSet::Addon { name: record.name.clone(), folders: record.folders.keys().cloned().collect() })
     }
 
@@ -190,20 +203,10 @@ impl Worker {
         }
     }
 
-    /// A folder whose `.toc` says `DefaultState: disabled`: off unless the game's list says on.
-    fn default_off(&self, folder: &str) -> bool {
-        self.addons.found.iter().find(|f| f.folder.eq_ignore_ascii_case(folder)).and_then(|f| f.toc.as_ref()).is_some_and(|t| t.default_disabled)
-    }
-
-    /// The record's folders the game doesn't load, as the game names them.
-    fn folders_off(&self, record: &Record) -> Vec<String> {
-        record.folders.keys().filter(|f| !self.addons.enabled.is_on(f, self.default_off(f))).cloned().collect()
-    }
-
     /// This PC's side of an addon; `None`: kept to this PC ("Only on this PC", or kept off it).
     fn here(&self, id: &str) -> Option<Here> {
         // An addon that is here speaks for itself, whatever was removed or kept off before.
-        let Some(record) = self.addons.store.get(id) else {
+        let Some(record) = self.addons.record(id) else {
             if self.share.memory.removed.contains_key(id) {
                 return Some(Here::Removed);
             }
@@ -216,15 +219,15 @@ impl Worker {
             return None;
         }
         // A folder that vanished from AddOns is put back from the list, never removed everywhere.
-        if self.addons.lines.iter().find(|l| l.id == id).is_none_or(|l| l.standing == Standing::Gone) {
+        if self.addons.lines().iter().find(|l| l.id == id).is_none_or(|l| l.standing == Standing::Gone) {
             return Some(Here::Missing);
         }
-        Some(Here::Has(Agreed::of(record, self.folders_off(record))))
+        Some(Here::Has(Agreed::of(record, self.addons.folders_off(record))))
     }
 
     /// Whether this PC has the entry's release in place (a folder deleted by hand doesn't count).
     fn has_release(&self, id: &str, release: &Shipped) -> bool {
-        self.addons.store.get(id).is_some_and(|r| share::identity(r) == release.sha256) && !matches!(self.here(id), Some(Here::Missing))
+        self.addons.record(id).is_some_and(|r| share::identity(r) == release.sha256) && !matches!(self.here(id), Some(Here::Missing))
     }
 
     /// The game was started (by hand) since Play was pressed: nothing is written in its folder.
@@ -241,7 +244,7 @@ impl Worker {
         {
             return Some(mine.cmp(&theirs));
         }
-        let releases = overview::releases(record, &self.addons.catalog, &self.addons.newer);
+        let releases = overview::releases(record, self.addons.catalog(), self.addons.newer_releases());
         let at = |tag: Option<&str>| releases.iter().position(|r| Some(r.tag.as_str()) == tag);
         match (at(record.tag.as_deref()), at(nas.tag.as_deref())) {
             // Newest first: the earlier one in the list is the newer.
@@ -262,10 +265,10 @@ impl Worker {
         let tag = record.tag.clone().unwrap_or_default();
         let known = self
             .addons
-            .catalog
+            .catalog()
             .get(&record.id)
             .and_then(|e| e.releases().find(|r| r.tag == tag).cloned())
-            .or_else(|| self.addons.newer.get(&record.id).filter(|r| r.tag == tag).cloned());
+            .or_else(|| self.addons.newer(&record.id).filter(|r| r.tag == tag).cloned());
         if let Some(release) = known.filter(|r| !r.url.is_empty()) {
             return release.url;
         }
@@ -283,7 +286,7 @@ impl Worker {
             pcs.push(pc.clone());
         }
         // Its folders the game doesn't load, as the list keeps them (lower case, sorted).
-        let here = Agreed::of(record, self.folders_off(record));
+        let here = Agreed::of(record, self.addons.folders_off(record));
         Entry {
             id: record.id.clone(),
             name: record.name.clone(),
@@ -427,11 +430,11 @@ impl Worker {
     fn share_decide(&mut self, list: &List) -> (Vec<(String, Option<Agreed>)>, Vec<String>, Vec<String>) {
         let pc = self.engine.pc().to_string();
         // Installed again: an older removal or opt-out no longer speaks for it.
-        let store = &self.addons.store;
-        self.share.memory.removed.retain(|id, _| store.get(id).is_none());
-        self.share.memory.opted_out.retain(|id| store.get(id).is_none());
+        let addons = &self.addons;
+        self.share.memory.removed.retain(|id, _| addons.record(id).is_none());
+        self.share.memory.opted_out.retain(|id| addons.record(id).is_none());
         let mut ids: BTreeSet<String> = list.addons.iter().map(|e| e.id.clone()).collect();
-        ids.extend(self.addons.store.addons.iter().map(|r| r.id.clone()));
+        ids.extend(self.addons.records().iter().map(|r| r.id.clone()));
         ids.extend(self.share.memory.agreed.keys().cloned());
         ids.extend(self.share.memory.removed.keys().cloned());
         let (mut send, mut leave, mut join) = (Vec::new(), Vec::new(), Vec::new());
@@ -449,13 +452,13 @@ impl Worker {
             // entry is, it matches the list again; else the first look would turn the whole addon off.
             let folders: Vec<String> = match nas {
                 Some(entry) => entry.folders.clone(),
-                None => self.addons.store.get(&id).map(|r| r.folders.keys().cloned().collect()).unwrap_or_default(),
+                None => self.addons.record(&id).map(|r| r.folders.keys().cloned().collect()).unwrap_or_default(),
             };
             let base = self.share.memory.agreed.get(&id).cloned().map(|b| b.with_folders(&folders));
             let theirs = nas.map(Entry::agreed);
             let step = share::step(&here, base.as_ref(), theirs.as_ref(), || match (&here, nas) {
                 (Here::Has(mine), Some(entry)) => {
-                    let record = self.addons.store.get(&id);
+                    let record = self.addons.record(&id);
                     share::here_wins(mine, &entry.agreed(), base.is_none(), || {
                         record.zip(entry.release.as_ref()).and_then(|(r, release)| self.newer(r, release))
                     })
@@ -513,7 +516,7 @@ impl Worker {
         let mut held: BTreeSet<String> = BTreeSet::new();
         for (id, _) in send {
             if let Some(Here::Has(_)) = self.here(id)
-                && let Some(record) = self.addons.store.get(id).filter(|r| r.badge == Badge::File)
+                && let Some(record) = self.addons.record(id).filter(|r| r.badge == Badge::File)
                 && let Err(e) = self.share_upload(shared, record)
             {
                 log!("addons: {} not sent: its zip couldn't go to the NAS: {e}", record.name);
@@ -533,7 +536,7 @@ impl Worker {
             }
             match self.here(id) {
                 Some(Here::Has(_)) => {
-                    let Some(record) = self.addons.store.get(id) else { continue };
+                    let Some(record) = self.addons.record(id) else { continue };
                     let entry = self.entry_of(record, &list, now);
                     log!("addons: {} {} goes to the other PCs", entry.name, record.shown_version());
                     agreed.push((id.clone(), entry.agreed()));
@@ -802,12 +805,11 @@ impl Worker {
         let from = entry.pc.clone();
         let id = entry.id.clone();
         let Some(release) = &entry.release else {
-            if self.addons.store.get(&id).is_none() {
+            if self.addons.record(&id).is_none() {
                 self.share.memory.agreed.insert(id, Agreed::removed());
                 return Followed::Quiet;
             }
-            let mut addons = Addons { game, local: &self.engine.local, store: &mut self.addons.store };
-            return match addons.remove(&id, entry.keep_settings, Some(&from), now, win::recycle) {
+            return match self.addons.remove_as_on(game, &self.engine.local, &id, entry.keep_settings, &from, now) {
                 Ok(record) => {
                     self.share.memory.agreed.insert(id, Agreed::removed());
                     let kept = if entry.keep_settings { "; its settings stay for a reinstall" } else { "" };
@@ -837,10 +839,10 @@ impl Worker {
                 if let Err(e) = fetched {
                     return Followed::Failed(format!("{} can't come from {from}: its zip in the network folder: {e}", entry.name));
                 }
-                self.addons.ready.insert((id.clone(), want.release.tag.clone()), release.sha256.clone());
+                self.addons.mark_ready(id.clone(), want.release.tag.clone(), release.sha256.clone());
             }
-            if zip_ready(&cache, &self.addons.ready, &id, &want.release).is_none() {
-                let why = self.addons.refused.get(&(id.clone(), want.release.tag.clone())).cloned();
+            if self.addons.downloaded(&cache, &id, &want.release).is_none() {
+                let why = self.addons.refused(&id, &want.release.tag);
                 return match why {
                     Some(why) => Followed::Failed(format!("{} {} from {from} wasn't downloaded: {why}", entry.name, release.shown_version())),
                     None => Followed::Downloading(format!("{} {} from {from} is still downloading; it comes in next time", entry.name, release.shown_version())),
@@ -854,27 +856,15 @@ impl Worker {
             }
         }
         // The switches, as on the other PCs.
-        let mut switches: Vec<String> = Vec::new();
-        let folders: Vec<String> = match self.addons.store.get_mut(&id) {
-            Some(record) => {
-                if record.pinned != entry.pinned {
-                    record.pinned = entry.pinned;
-                    switches.push(if entry.pinned { "kept at this version" } else { "updates again" }.into());
-                }
-                if record.settings_per_pc != entry.settings_per_pc {
-                    record.settings_per_pc = entry.settings_per_pc;
-                    switches.push(if entry.settings_per_pc { "keeps its settings per PC" } else { "shares its settings" }.into());
-                }
-                record.folders.keys().cloned().collect()
-            }
-            None => return Followed::Failed(format!("{} from {from} isn't recorded here", entry.name)),
+        let Some((mut switches, folders)) = self.addons.apply_followed_switches(&id, entry.pinned, entry.settings_per_pc) else {
+            return Followed::Failed(format!("{} from {from} isn't recorded here", entry.name));
         };
-        if let Err(e) = self.addons.store.save(&self.engine.local.addon_store()) {
+        if let Err(e) = self.addons.save_store(&self.engine.local.addon_store()) {
             return Followed::Failed(format!("{} from {from}: addons.json not saved: {e}", entry.name));
         }
         // Each folder on or off as the list has it; only the folders that differ are set.
         let off = entry.agreed().off;
-        let default_off: Vec<bool> = folders.iter().map(|f| self.default_off(f)).collect();
+        let default_off: Vec<bool> = folders.iter().map(|f| self.addons.default_off(f)).collect();
         let switched = EnableList::read(&game.enable_list()).and_then(|mut list| {
             let changed: Vec<(String, bool)> = folders
                 .iter()
@@ -1086,10 +1076,8 @@ impl Worker {
     }
 
     pub(super) fn addon_local_only(&mut self, id: &str, on: bool) {
-        let Some(record) = self.addons.store.get_mut(id) else { return };
-        record.local_only = on;
-        let name = record.name.clone();
-        if let Err(e) = self.addons.store.save(&self.engine.local.addon_store()) {
+        let Some(name) = self.addons.set_local_only(id, on) else { return };
+        if let Err(e) = self.addons.save_store(&self.engine.local.addon_store()) {
             return self.addons_say(format!("{name}: addons.json not saved: {e}"));
         }
         // Shared again: decided as on a first look, so nothing either side has is lost.
@@ -1100,10 +1088,8 @@ impl Worker {
     }
 
     pub(super) fn addon_settings_per_pc(&mut self, id: &str, on: bool) {
-        let Some(record) = self.addons.store.get_mut(id) else { return };
-        record.settings_per_pc = on;
-        let name = record.name.clone();
-        if let Err(e) = self.addons.store.save(&self.engine.local.addon_store()) {
+        let Some(name) = self.addons.set_settings_per_pc(id, on) else { return };
+        if let Err(e) = self.addons.save_store(&self.engine.local.addon_store()) {
             return self.addons_say(format!("{name}: addons.json not saved: {e}"));
         }
         let text = if on { format!("{name} keeps its settings per PC, on every PC") } else { format!("{name}'s settings go to every PC again") };
@@ -1182,14 +1168,14 @@ impl Worker {
             return (String::new(), 0, String::new());
         }
         let Some(list) = &self.share.list else { return (String::new(), 0, String::new()) };
-        let Some(record) = self.addons.store.get(id) else { return (String::new(), 0, String::new()) };
+        let Some(record) = self.addons.record(id) else { return (String::new(), 0, String::new()) };
         if record.local_only {
             return ("Only on this PC".into(), 0, String::new());
         }
         if let Some(split) = self.share.memory.splits.get(id) {
             return (format!("Its settings changed here and on {} since they last matched: pick one below", split.pc), 2, split.pc.clone());
         }
-        let gone = self.addons.lines.iter().find(|l| l.id == id).is_some_and(|l| l.standing == Standing::Gone);
+        let gone = self.addons.lines().iter().find(|l| l.id == id).is_some_and(|l| l.standing == Standing::Gone);
         if gone && list.get(id).is_some_and(|e| !e.removed()) {
             return ("Its folder is gone here: it comes back at the next Play, as on the other PCs. Remove it to remove it everywhere".into(), 2, String::new());
         }
@@ -1233,13 +1219,13 @@ impl Worker {
         self.share
             .steps
             .iter()
-            .filter(|(id, step)| **step == Step::Follow && self.addons.store.get(id.as_str()).is_none())
+            .filter(|(id, step)| **step == Step::Follow && self.addons.record(id.as_str()).is_none())
             .filter_map(|(id, _)| {
                 let entry = list.get(id)?;
                 let release = entry.release.as_ref()?;
                 let own = entry.forge.is_some();
                 let (badge, badge_kind) = match entry.badge {
-                    Badge::Verified if self.addons.catalog.get(id).is_none() => super::addons::UNLISTED_BADGE,
+                    Badge::Verified if self.addons.catalog().get(id).is_none() => super::addons::UNLISTED_BADGE,
                     Badge::Verified => ("Discord Verified", 0),
                     _ if own => FORGE_BADGE,
                     Badge::Added => ("Added by you", 1),
@@ -1304,7 +1290,7 @@ impl Worker {
             .settings
             .iter()
             .filter(|(_, step)| **step == SettingsStep::Send)
-            .map(|(id, _)| self.addons.store.get(id).map_or(id.as_str(), |r| r.name.as_str()))
+            .map(|(id, _)| self.addons.record(id).map_or(id.as_str(), |r| r.name.as_str()))
             .collect();
         let waits = match unsent.as_slice() {
             _ if self.share.steps.values().any(|s| *s == Step::Send) => Some("This PC's addon changes go up at the next look".to_string()),

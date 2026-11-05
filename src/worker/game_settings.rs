@@ -48,7 +48,7 @@ impl Worker {
     /// The game's own settings, decided (the game closed): this PC's go up; the list's wait for
     /// Play; a question waits when both changed.
     pub(super) fn game_settings_look(&mut self, shared: &Shared, game: &GameAddons) {
-        let Some(list) = self.share.list.clone() else { return };
+        let Some(list) = self.share.list().cloned() else { return };
         let id = game_settings::ID;
         let set = match game_settings::read(&game.config) {
             Ok(set) => set,
@@ -122,7 +122,7 @@ impl Worker {
             let note = Some(format!("{pc}'s own settings from before it joined (version {n}), chosen"));
             let again = Bundle { newest: kept.written, ..own.clone() };
             let version = share::send_settings(shared, &mut list, game_settings::ID, &pc, &again, note, Utc::now()).map_err(|e| format!("{what}: {e}"))?;
-            self.share.list = Some(list);
+            self.share.set_list(list);
             (own, version)
         };
         // Sent: if the game started meanwhile, they come in at the next Play like any newer version.
@@ -163,7 +163,7 @@ impl Worker {
         if let Some(problem) = self.share.problem().or(self.game_settings.problem.as_ref()) {
             return GameSettingsLine { text: problem.clone(), kind: 2, ..Default::default() };
         }
-        let list = self.share.list.as_ref();
+        let list = self.share.list();
         let newest = list.and_then(|l| l.newest_settings(game_settings::ID));
         // A version sent again by the PC that chose it is named after the PC it came from.
         let from = |v: &share::SettingsVersion| -> String {
