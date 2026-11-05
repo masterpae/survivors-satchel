@@ -705,8 +705,8 @@ impl Worker {
             if zip_ready(&cache, &self.addons.ready, &want.id, &want.release).is_none() {
                 let (name, version) = (&want.name, shown(&want.release));
                 match self.addons.refused.get(&(want.id.clone(), want.release.tag.clone())).cloned() {
-                    Some(why) => self.card_line(&format!("{name} {version} wasn't downloaded: {why}"), false, true),
-                    None => self.card_line(&format!("{name} {version} is still downloading; it goes in next time"), false, false),
+                    Some(why) => self.feedback.card_line(&format!("{name} {version} wasn't downloaded: {why}"), false, true),
+                    None => self.feedback.card_line(&format!("{name} {version} is still downloading; it goes in next time"), false, false),
                 }
                 continue;
             }
@@ -715,15 +715,15 @@ impl Worker {
             match self.addons_install(&want) {
                 Ok(text) => {
                     changed = true;
-                    self.card_line(&text, true, false);
+                    self.feedback.card_line(&text, true, false);
                 }
                 // SurvivorsForge's word changed while it waited: it doesn't go in, and the line says why.
-                Err(Refused::Waits(text)) => self.card_line(&text, false, false),
-                Err(Refused::Never(text)) => self.card_line(&text, false, true),
+                Err(Refused::Waits(text)) => self.feedback.card_line(&text, false, false),
+                Err(Refused::Never(text)) => self.feedback.card_line(&text, false, true),
                 Err(Refused::Failed(e)) => {
                     log!("{} not updated before play: {e}", want.name);
                     let stays = from.map(|f| format!(" stays at {f}")).unwrap_or_else(|| " wasn't installed".into());
-                    self.card_line(&format!("{}{stays}: {e}", want.name), false, true);
+                    self.feedback.card_line(&format!("{}{stays}: {e}", want.name), false, true);
                 }
             }
         }
@@ -739,8 +739,8 @@ impl Worker {
             .count();
         match asks {
             0 => {}
-            1 => self.card_line("1 update waits for your OK (Addons)", false, false),
-            n => self.card_line(&format!("{n} updates wait for your OK (Addons)"), false, false),
+            1 => self.feedback.card_line("1 update waits for your OK (Addons)", false, false),
+            n => self.feedback.card_line(&format!("{n} updates wait for your OK (Addons)"), false, false),
         }
         if self.addons.looked.is_none_or(|t| Utc::now() - t >= LOOK_EVERY) {
             self.addons_look();

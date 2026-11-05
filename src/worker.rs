@@ -2,6 +2,7 @@
 //! Everything slow (the network share above all) happens here, never on the UI thread.
 
 mod addons;
+mod feedback;
 mod forge;
 mod game_news;
 mod playtime;
@@ -24,7 +25,7 @@ use satchel_core::paths;
 use satchel_core::playtime::format_minutes;
 use satchel_core::session::{Event, Tracker};
 use satchel_core::settings::{self as settings_rules, Settings, Theme};
-use satchel_core::shell::{self, Dot, NeedsYouFacts, Notice, WaitingOk};
+use satchel_core::shell::{self, Dot, NeedsYouFacts, WaitingOk};
 use satchel_core::game_news::card as news_card;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,9 +37,6 @@ const REFRESH_EVERY: Duration = Duration::from_secs(60);
 const RETRY_EVERY: Duration = Duration::from_secs(180);
 /// A write to the live save is checkpointed once it has been quiet this long.
 const SETTLE: Duration = Duration::from_secs(3);
-/// How long a one-off message (a notice) stays on the rail's progress line, and the progress
-/// question's own refusal in its overlay.
-const NOTICE_FOR: Duration = Duration::from_secs(60);
 /// The window's tabs, in order: Home, Addons, Settings.
 const TAB_SETTINGS: i32 = 2;
 
@@ -201,11 +199,6 @@ pub struct Worker {
     outlook: Option<Outlook>,
     offline: bool,
     offline_told: bool,
-    problem: Option<String>,
-    /// The problem the rail has been told of: a new one shows at once, as a notice.
-    problem_told: Option<String>,
-    notice: Option<Notice>,
-    notice_at: Option<Instant>,
     split: Option<u64>,
     needs_you_open: bool,
     /// Why the progress question's pick didn't go through (the game running, the folder not
@@ -221,11 +214,7 @@ pub struct Worker {
     gated: Option<String>,
     /// The loop ends after this step (an update started the new Satchel).
     quit: bool,
-    /// The Play card's question is the version check's: it offers Update now.
-    card_gate: bool,
-    card: Option<(Vec<(String, bool, bool)>, bool)>,
-    card_until: Option<Instant>,
-    busy: Option<String>,
+    feedback: feedback::Feedback,
     setup: Option<Setup>,
     lists: Lists,
     last_refresh: Option<Instant>,
@@ -369,10 +358,6 @@ impl Worker {
             outlook: None,
             offline: false,
             offline_told: false,
-            problem: None,
-            problem_told: None,
-            notice: None,
-            notice_at: None,
             needs_note: None,
             split: None,
             needs_you_open: false,
@@ -382,10 +367,7 @@ impl Worker {
             leftover_done: false,
             gated: None,
             quit: false,
-            card_gate: false,
-            card: None,
-            card_until: None,
-            busy: None,
+            feedback: feedback::Feedback::default(),
             setup: first_start.then(Setup::default),
             lists: Lists::default(),
             last_refresh: None,
@@ -428,8 +410,8 @@ impl Worker {
                 self.push();
             }));
             if step.is_err() {
-                self.busy = None;
-                self.warn("The Satchel hit an internal error and carried on; its log has the details.".into());
+                self.feedback.clear_busy();
+                self.feedback.warn("The Satchel hit an internal error and carried on; its log has the details.".into());
             }
             if self.quit {
                 break;
@@ -506,7 +488,7 @@ impl Worker {
             Command::CancelPlay => {
                 self.pending_play = false;
                 self.play_anyway = false;
-                self.card = None;
+                self.feedback.close_card();
             }
             Command::SyncNow => self.sync_now(),
             Command::BringBack(row) => self.bring_back(row),
@@ -537,7 +519,7 @@ impl Worker {
                 self.needs_you_open = false;
                 self.needs_note = None;
                 self.pending_play = false;
-                self.card = None;
+                self.feedback.close_card();
             }
             Command::Setting(key, value) => self.setting(&key, &value),
             Command::RestoreDefaults => self.restore_defaults(),
@@ -644,15 +626,8 @@ impl Worker {
         if self.tracker.in_session() {
             self.heartbeat();
         }
-        if self.notice_at.is_some_and(|t| t.elapsed() >= NOTICE_FOR) {
-            self.notice = None;
-            self.notice_at = None;
-        }
-        if self.card_until.is_some_and(|t| Instant::now() >= t) {
-            self.card = None;
-            self.card_until = None;
-        }
-        if !self.tracker.in_session() && self.busy.is_none() {
+        self.feedback.expire();
+        if !self.tracker.in_session() && self.feedback.busy().is_none() {
             let unsent = self.offline || self.engine.state.send_pending;
             if self.engine.shared().is_some() && unsent && due(self.last_retry, RETRY_EVERY) {
                 self.retry();
@@ -683,19 +658,19 @@ impl Worker {
                     self.share_look();
                 }
                 if updating {
-                    self.card_line("The game is updating itself. Waiting for it to restart…", false, false);
+                    self.feedback.card_line("The game is updating itself. Waiting for it to restart…", false, false);
                 }
             }
             Event::Updating => {
                 log!("the game's files changed after it closed: an update");
-                self.card_line("The game is updating itself. Waiting for it to restart…", false, false);
+                self.feedback.card_line("The game is updating itself. Waiting for it to restart…", false, false);
             }
             Event::Resumed => {
                 log!("the game started again inside the quiet window: the same session goes on");
                 self.files_stamp = self.game_dir().and_then(|d| game_files_stamp(&d));
-                if self.card.is_some() {
-                    self.card_line("Game restarted after its update", true, false);
-                    self.close_card_in(8);
+                if self.feedback.card_open() {
+                    self.feedback.card_line("Game restarted after its update", true, false);
+                    self.feedback.close_card_in(8);
                 }
             }
             Event::Over => self.session_over(now),
@@ -728,7 +703,7 @@ impl Worker {
         if let Ok(outlook) = self.engine.outlook(now) {
             if let Decision::BringIn(n) | Decision::Split { nas: n } = outlook.decision {
                 let from = outlook.index.get(n).map(|v| v.pc.clone()).unwrap_or_default();
-                self.warn(format!("{from} has newer progress: close the game and press Play to bring it in."));
+                self.feedback.warn(format!("{from} has newer progress: close the game and press Play to bring it in."));
                 self.notify(
                     "Newer progress in the network folder",
                     &format!("{from} has newer progress. Close the game and press Play to bring it in; if you keep playing, you'll pick one at the end."),
@@ -796,10 +771,9 @@ impl Worker {
     /// from shutting down.
     fn send_after_close(&mut self) {
         let _hold = win::Hold::start();
-        self.busy = Some("Sending your progress…".into());
-        self.push();
+        self.busy_push("Sending your progress…".into());
         let result = self.engine.send(Utc::now(), None, None, None);
-        self.busy = None;
+        self.feedback.clear_busy();
         match result {
             Ok(Some(version)) => {
                 self.offline = false;
@@ -818,7 +792,7 @@ impl Worker {
                 log!("send failed: {e}");
                 self.engine.state.send_pending = true;
                 let _ = self.engine.save_state();
-                self.problem = Some(format!("Sending failed: {e}. Your progress is safe on this PC."));
+                self.feedback.set_problem(format!("Sending failed: {e}. Your progress is safe on this PC."));
             }
         }
         // The cards show what was just sent, not what the NAS held before.
@@ -921,22 +895,21 @@ impl Worker {
 
     fn play(&mut self) {
         if self.tracker.game_running() {
-            self.open_card();
-            self.card_line("The game is already running", false, true);
-            self.close_card_in(6);
+            self.feedback.open_card();
+            self.feedback.card_line("The game is already running", false, true);
+            self.feedback.close_card_in(6);
             return;
         }
         let Some(dir) = self.game_dir() else {
-            self.problem = Some("The game wasn't found. Set its folder in Settings.".into());
+            self.feedback.set_problem("The game wasn't found. Set its folder in Settings.".into());
             self.ui.show(Some(TAB_SETTINGS));
             return;
         };
-        self.open_card();
+        self.feedback.open_card();
         if self.engine.shared().is_some() {
-            self.busy = Some("Checking the network folder…".into());
-            self.push();
+            self.busy_push("Checking the network folder…".into());
             let go_on = self.check_before_play(Utc::now());
-            self.busy = None;
+            self.feedback.clear_busy();
             if !go_on {
                 return;
             }
@@ -949,14 +922,14 @@ impl Worker {
             Ok(()) => {
                 log!("game launched");
                 self.launched = true;
-                self.problem = None;
-                self.card_line("Game started", true, false);
-                self.close_card_in(8);
+                self.feedback.clear_problem();
+                self.feedback.card_line("Game started", true, false);
+                self.feedback.close_card_in(8);
             }
             Err(e) => {
                 log!("the game didn't start: {e}");
-                self.card_line(&format!("The game didn't start: {e}"), false, true);
-                self.close_card_in(20);
+                self.feedback.card_line(&format!("The game didn't start: {e}"), false, true);
+                self.feedback.close_card_in(20);
             }
         }
     }
@@ -967,7 +940,7 @@ impl Worker {
             Ok(outlook) => outlook,
             Err(SyncError::Offline) => {
                 self.offline = true;
-                self.card_line("The network folder doesn't answer: you play with this PC's progress, sent when it's back", false, true);
+                self.feedback.card_line("The network folder doesn't answer: you play with this PC's progress, sent when it's back", false, true);
                 return true;
             }
             Err(SyncError::Io(e)) if gate::newer_satchel(&e).is_some() => {
@@ -979,20 +952,20 @@ impl Worker {
                         Some(offer) => format!(" Update now puts {} here and plays.", offer.version),
                         None => format!(" {}", self_update::update_hint()),
                     };
-                    self.card_ask(format!(
+                    self.feedback.card_ask(format!(
                         "Another PC uses Survivor's Satchel {newer} and this one is {}, so nothing syncs until it's updated. Playing now plays this PC's progress, synced after the update.{update}",
                         about::VERSION
                     ));
-                    self.card_gate = true;
+                    self.feedback.card_gate();
                     self.pending_play = true;
                     return false;
                 }
-                self.card_line(&format!("Not synced: this Satchel ({}) is older than {newer}", about::VERSION), false, true);
+                self.feedback.card_line(&format!("Not synced: this Satchel ({}) is older than {newer}", about::VERSION), false, true);
                 return true;
             }
             Err(e) => {
                 log!("check before play failed: {e}");
-                self.card_line(&format!("The network folder couldn't be checked ({e}): you play with this PC's progress"), false, true);
+                self.feedback.card_line(&format!("The network folder couldn't be checked ({e}): you play with this PC's progress"), false, true);
                 return true;
             }
         };
@@ -1002,8 +975,8 @@ impl Worker {
             for other in &stale {
                 let stopped = format!("{} stopped at {} during a session", other.marker.pc, clock(other.marker.heartbeat));
                 match self.engine.take_over_checkpoint(other, now) {
-                    Ok(Some(v)) => self.card_line(&format!("{stopped}; its last checkpoint is now version {}", v.n), true, false),
-                    Ok(None) => self.card_line(&format!("{stopped}; nothing newer was left"), true, false),
+                    Ok(Some(v)) => self.feedback.card_line(&format!("{stopped}; its last checkpoint is now version {}", v.n), true, false),
+                    Ok(None) => self.feedback.card_line(&format!("{stopped}; nothing newer was left"), true, false),
                     Err(e) => log!("checkpoint of {} not taken over: {e}", other.marker.pc),
                 }
             }
@@ -1017,7 +990,7 @@ impl Worker {
         }
         let anyway = std::mem::take(&mut self.play_anyway);
         if !anyway && let Some(other) = outlook.others.iter().find(|o| !o.stale) {
-            self.card_ask(format!(
+            self.feedback.card_ask(format!(
                 "The game looks open on {}: started {}, still active {}. If you play here too, the two will split and you'll pick one afterwards.",
                 other.marker.pc,
                 clock(other.marker.started),
@@ -1031,13 +1004,13 @@ impl Worker {
         if let Some(why) = outlook.local.as_ref().and_then(|l| l.problem.clone()) {
             self.outlook = Some(outlook);
             if !anyway {
-                self.card_ask(format!(
+                self.feedback.card_ask(format!(
                     "This PC's save {why}, so it isn't synced. To carry on from the network folder, cancel and bring back its newest version under Settings → Progress versions."
                 ));
                 self.pending_play = true;
                 return false;
             }
-            self.card_line("Playing with this PC's save as it is; it isn't synced", false, true);
+            self.feedback.card_line("Playing with this PC's save as it is; it isn't synced", false, true);
             return true;
         }
         let decision = outlook.decision.clone();
@@ -1048,25 +1021,25 @@ impl Worker {
                 if let Some(version) = adopt.and_then(|n| index.get(n)).cloned() {
                     let _ = self.engine.adopt(&version, now);
                 }
-                self.card_line("Network folder checked: you have the newest progress", true, false);
+                self.feedback.card_line("Network folder checked: you have the newest progress", true, false);
             }
             Decision::Send => match self.engine.send(now, None, None, None) {
                 Ok(Some(v)) => {
-                    self.card_line(&format!("Network folder checked; this PC's progress went up first (version {})", v.n), true, false);
+                    self.feedback.card_line(&format!("Network folder checked; this PC's progress went up first (version {})", v.n), true, false);
                     self.activity(Kind::Sync, &format!("Sent version {}", v.n));
                 }
-                Ok(None) => self.card_line("Network folder checked", true, false),
+                Ok(None) => self.feedback.card_line("Network folder checked", true, false),
                 Err(SyncError::MovedOn) => {
                     let newest = self.newest();
                     return self.split_found(newest);
                 }
                 Err(e) => {
                     log!("send before play failed: {e}");
-                    self.card_line(&format!("Sending first failed ({e}); you play with this PC's progress"), false, true);
+                    self.feedback.card_line(&format!("Sending first failed ({e}); you play with this PC's progress"), false, true);
                 }
             },
             Decision::BringIn(n) => {
-                self.card_line("Network folder checked", true, false);
+                self.feedback.card_line("Network folder checked", true, false);
                 return self.bring_in(n, now);
             }
             Decision::Split { nas } => return self.split_found(Some(nas)),
@@ -1078,21 +1051,20 @@ impl Worker {
         self.split = nas;
         self.needs_you_open = true;
         self.pending_play = true;
-        self.card_line("Two PCs moved on separately: pick one in the window", false, true);
-        self.close_card_in(10);
+        self.feedback.card_line("Two PCs moved on separately: pick one in the window", false, true);
+        self.feedback.close_card_in(10);
         self.ui.show(Some(0));
         false
     }
 
     /// Brings version `n` in. `true`: go on.
     fn bring_in(&mut self, n: u64, now: DateTime<Utc>) -> bool {
-        self.busy = Some(format!("Bringing in version {n}…"));
-        self.push();
+        self.busy_push(format!("Bringing in version {n}…"));
         let result = self.engine.bring_in(n, now);
-        self.busy = None;
+        self.feedback.clear_busy();
         match result {
             Ok(BroughtIn { version, safety }) => {
-                self.card_line(&format!("Progress from {} brought in (saved {})", version.pc, when(version.saved)), true, false);
+                self.feedback.card_line(&format!("Progress from {} brought in (saved {})", version.pc, when(version.saved)), true, false);
                 self.activity(Kind::Sync, &format!("Brought in version {} from {}", version.n, version.pc));
                 let kept = if safety.is_some() { " Yours is kept as a safety copy." } else { "" };
                 self.notify(&format!("Progress from {} brought in", version.pc), &format!("Saved {}.{kept}", when(version.saved)));
@@ -1101,7 +1073,7 @@ impl Worker {
             Err(SyncError::MovedOn) => self.split_found(Some(n)),
             Err(e) => {
                 log!("bring-in failed: {e}");
-                self.card_line(&format!("Bringing in failed ({e}); you play with this PC's progress"), false, true);
+                self.feedback.card_line(&format!("Bringing in failed ({e}); you play with this PC's progress"), false, true);
                 true
             }
         }
@@ -1112,8 +1084,7 @@ impl Worker {
             return;
         }
         let now = Utc::now();
-        self.busy = Some("Checking the network folder…".into());
-        self.push();
+        self.busy_push("Checking the network folder…".into());
         // The addons too: what changed here goes up, what changed elsewhere shows.
         self.share_look();
         let mut checked = self.engine.outlook(now);
@@ -1128,10 +1099,10 @@ impl Worker {
                 checked = self.engine.outlook(now);
             }
         }
-        self.busy = None;
+        self.feedback.clear_busy();
         match checked {
             Err(SyncError::Offline) => self.offline = true,
-            Err(e) => self.problem = Some(format!("The network folder can't be read: {e}")),
+            Err(e) => self.feedback.set_problem(format!("The network folder can't be read: {e}")),
             Ok(outlook) => {
                 self.offline = false;
                 match outlook.decision {
@@ -1146,7 +1117,7 @@ impl Worker {
                         if let Some(game) = self.game_settings_status() {
                             text.push_str(&format!(" {game}."));
                         }
-                        self.say(text);
+                        self.feedback.say(text);
                     }
                     Decision::Send => {
                         let _hold = win::Hold::start();
@@ -1154,16 +1125,16 @@ impl Worker {
                             Ok(Some(v)) => self.activity(Kind::Sync, &format!("Sent version {}", v.n)),
                             Ok(None) => {}
                             Err(SyncError::MovedOn) => self.split = self.newest(),
-                            Err(e) => self.problem = Some(format!("Sending failed: {e}")),
+                            Err(e) => self.feedback.set_problem(format!("Sending failed: {e}")),
                         }
                     }
                     Decision::BringIn(n) => {
                         if self.tracker.game_running() {
-                            self.warn(format!("Close the game to bring in version {n}."));
+                            self.feedback.warn(format!("Close the game to bring in version {n}."));
                         } else {
-                            self.open_card();
+                            self.feedback.open_card();
                             self.bring_in(n, now);
-                            self.close_card_in(8);
+                            self.feedback.close_card_in(8);
                         }
                     }
                     Decision::Split { nas } => {
@@ -1189,8 +1160,7 @@ impl Worker {
             return;
         }
         let now = Utc::now();
-        self.busy = Some("Saving your choice…".into());
-        self.push();
+        self.busy_push("Saving your choice…".into());
         let result = if keep_here {
             let note = Some("kept after two PCs moved on separately".to_string());
             self.engine
@@ -1201,13 +1171,13 @@ impl Worker {
                 .use_nas(&shown, now)
                 .map(|brought| Some(format!("Continued with version {} ({})", brought.version.n, brought.version.pc)))
         };
-        self.busy = None;
+        self.feedback.clear_busy();
         match result {
             Ok(text) => {
                 self.split = None;
                 self.needs_you_open = false;
                 self.needs_note = None;
-                self.problem = None;
+                self.feedback.clear_problem();
                 if let Some(text) = text {
                     self.activity(Kind::Sync, &text);
                 }
@@ -1228,7 +1198,7 @@ impl Worker {
                 log!("choice not saved: {e}");
                 let why = format!("Your choice couldn't be saved: {e}");
                 self.needs_note = Some((why.clone(), Instant::now()));
-                self.problem = Some(why);
+                self.feedback.set_problem(why);
             }
         }
         self.refresh();
@@ -1292,13 +1262,12 @@ impl Worker {
 
     fn bring_back(&mut self, index: usize) {
         if self.tracker.game_running() {
-            self.warn("Close the game first: a save is only brought in while the game is closed.".into());
+            self.feedback.warn("Close the game first: a save is only brought in while the game is closed.".into());
             return;
         }
         let Some(row) = self.lists.rows.get(index).cloned() else { return };
         let now = Utc::now();
-        self.busy = Some("Bringing it back…".into());
-        self.push();
+        self.busy_push("Bringing it back…".into());
         let result = match row {
             Row::Version(n) => self
                 .engine
@@ -1317,14 +1286,14 @@ impl Worker {
                 self.engine.restore_copy(&path, now).map(|_| format!("Brought back {name}"))
             }
         };
-        self.busy = None;
+        self.feedback.clear_busy();
         match result {
             Ok(text) => {
                 self.activity(Kind::Sync, &text);
-                self.say(format!("{text}. Your save from before is kept as a safety copy."));
+                self.feedback.say(format!("{text}. Your save from before is kept as a safety copy."));
             }
             Err(SyncError::Offline) => self.offline = true,
-            Err(e) => self.problem = Some(format!("It couldn't be brought back: {e}")),
+            Err(e) => self.feedback.set_problem(format!("It couldn't be brought back: {e}")),
         }
         self.refresh();
     }
@@ -1430,7 +1399,7 @@ impl Worker {
             self.offline = false;
         }
         self.engine.settings = next;
-        self.problem = None;
+        self.feedback.clear_problem();
         Ok(())
     }
 
@@ -1448,7 +1417,7 @@ impl Worker {
                 }
                 Err(e) => {
                     log!("defaults not saved: {e}");
-                    self.warn(format!("The defaults couldn't be saved: {e}"));
+                    self.feedback.warn(format!("The defaults couldn't be saved: {e}"));
                     self.answer_form(answered);
                     return;
                 }
@@ -1624,7 +1593,7 @@ impl Worker {
         if let Some(why) = problem {
             log!("sync left off at the first start: {why}");
             settings.sync.enabled = false;
-            self.warn(defaults_folder_line(&why));
+            self.feedback.warn(defaults_folder_line(&why));
         }
         if let Err(e) = settings.save(&self.engine.local.settings()) {
             log!("settings not saved: {e}");
@@ -1658,16 +1627,16 @@ impl Worker {
                         match self.engine.send(now, None, Some("first start".into()), None) {
                             Ok(Some(v)) => self.activity(Kind::Sync, &format!("Started the network folder with version {}", v.n)),
                             Ok(None) => {}
-                            Err(e) => self.problem = Some(format!("The first sync failed: {e}")),
+                            Err(e) => self.feedback.set_problem(format!("The first sync failed: {e}")),
                         }
                         if let Some(name) = export {
                             self.activity(Kind::Sync, &format!("Your export {name} is under Settings → Progress versions"));
                         }
                     }
                     Decision::BringIn(n) => {
-                        self.open_card();
+                        self.feedback.open_card();
                         self.bring_in(n, now);
-                        self.close_card_in(8);
+                        self.feedback.close_card_in(8);
                     }
                     Decision::InSync { adopt } => {
                         if let Some(version) = adopt.and_then(|n| outlook.index.get(n)).cloned() {
@@ -1680,7 +1649,7 @@ impl Worker {
                     self.engine.state.send_pending = true;
                     let _ = self.engine.save_state();
                 }
-                Err(e) => self.problem = Some(format!("The network folder can't be read: {e}")),
+                Err(e) => self.feedback.set_problem(format!("The network folder can't be read: {e}")),
             }
         }
         self.setup = None;
@@ -1702,7 +1671,7 @@ impl Worker {
             // Sync pauses (one-PC copies meanwhile) until another folder is chosen.
             self.outlook = None;
             self.split = None;
-            self.problem = Some(format!("Sync is paused: {why}. Choose another network folder in Settings."));
+            self.feedback.set_problem(format!("Sync is paused: {why}. Choose another network folder in Settings."));
         } else if self.engine.shared().is_some() {
             match self.engine.outlook(Utc::now()) {
                 Ok(mut outlook) => {
@@ -1729,7 +1698,7 @@ impl Worker {
                     if unsent
                         && !self.engine.state.send_pending
                         && !self.tracker.in_session()
-                        && self.busy.is_none()
+                        && self.feedback.busy().is_none()
                         && self.game_dir().is_some_and(|d| !self.scanner.game_running(&d))
                     {
                         let sent = {
@@ -1773,9 +1742,10 @@ impl Worker {
                             }
                         }
                     }
-                    self.problem = outlook.local.as_ref().and_then(|l| l.problem.as_ref()).map(|why| {
-                        format!("This PC's save {why}, so it isn't sent. To carry on from the network folder, bring back its newest version under Settings → Progress versions.")
-                    });
+                    match outlook.local.as_ref().and_then(|l| l.problem.as_ref()) {
+                        Some(why) => self.feedback.set_problem(format!("This PC's save {why}, so it isn't sent. To carry on from the network folder, bring back its newest version under Settings → Progress versions.")),
+                        None => self.feedback.clear_problem(),
+                    }
                     self.split = match outlook.decision {
                         Decision::Split { nas } => Some(nas),
                         _ => None,
@@ -1790,10 +1760,10 @@ impl Worker {
                     let newer = gate::newer_satchel(&e).map(|n| n.newer.clone()).unwrap_or_default();
                     self.offline = false;
                     self.outlook = None;
-                    self.problem = Some(format!("Nothing syncs until this Satchel ({}) is updated: another PC uses {newer}.", about::VERSION));
+                    self.feedback.set_problem(format!("Nothing syncs until this Satchel ({}) is updated: another PC uses {newer}.", about::VERSION));
                     self.gated = Some(newer);
                 }
-                Err(e) => self.problem = Some(format!("The network folder can't be read: {e}")),
+                Err(e) => self.feedback.set_problem(format!("The network folder can't be read: {e}")),
             }
         } else {
             self.outlook = None;
@@ -1924,9 +1894,9 @@ impl Worker {
         let sync_on = self.engine.shared().is_some();
         let (dark, system_dark) = self.theme_dark();
         let version_new = self.version_new();
-        let tray = if self.split.is_some() || self.problem.is_some() {
+        let tray = if self.split.is_some() || self.feedback.problem().is_some() {
             Tray::NeedsYou
-        } else if self.busy.is_some() {
+        } else if self.feedback.busy().is_some() {
             Tray::Busy
         } else if self.tracker.in_session() {
             Tray::Playing
@@ -1938,7 +1908,7 @@ impl Worker {
         let decision = self.outlook.as_ref().map(|o| &o.decision);
         let newest = self.outlook.as_ref().and_then(|o| o.index.newest_version());
         let (status, banner) = match tray {
-            Tray::NeedsYou => match self.problem.as_ref() {
+            Tray::NeedsYou => match self.feedback.problem() {
                 Some(text) => ("Needs you".to_string(), text.clone()),
                 None => (
                     "Needs you".into(),
@@ -1946,7 +1916,7 @@ impl Worker {
                 ),
             },
             Tray::Busy => {
-                let busy = self.busy.clone().unwrap_or_default();
+                let busy = self.feedback.busy().cloned().unwrap_or_default();
                 (busy.clone(), busy)
             }
             Tray::Playing if !self.tracker.game_running() => {
@@ -2004,7 +1974,7 @@ impl Worker {
         let last = if sync_on { self.lists.last_sync } else { self.lists.last_copy };
         let last = last.map(|t| shell::when_short(t, &local_now));
         // A notice, for its minute, comes first whatever the state.
-        let progress = shell::progress_line(dot, &banner, sync_on, last.as_deref(), self.lists.pc_count, self.notice.as_ref());
+        let progress = shell::progress_line(dot, &banner, sync_on, last.as_deref(), self.lists.pc_count, self.feedback.notice());
         let addons = self.addons_view();
         let addons_line = shell::addons_line(addons.rail);
         let playing = self.tracker.in_session();
@@ -2068,7 +2038,7 @@ impl Worker {
         };
         // The pick's refusal, under the overlay's buttons while it is open, for its minute.
         let needs_note = match (&needs_you, &self.needs_note) {
-            (Some(_), Some((why, at))) if at.elapsed() < NOTICE_FOR => why.clone(),
+            (Some(_), Some((why, at))) if at.elapsed() < feedback::NOTICE_FOR => why.clone(),
             _ => String::new(),
         };
 
@@ -2082,7 +2052,7 @@ impl Worker {
             tray,
             status,
             banner,
-            busy: self.busy.is_some(),
+            busy: self.feedback.busy().is_some(),
             sync_on,
             playing,
             rail,
@@ -2100,7 +2070,7 @@ impl Worker {
             saves_note,
             needs_you,
             needs_note,
-            card: self.card.clone(),
+            card: self.feedback.card(),
             setup: self.setup.as_ref().map(|_| self.setup_view()),
             addons,
             dark,
@@ -2112,7 +2082,7 @@ impl Worker {
             check_result: self.update.check_result(),
             checking: self.update.checking(),
             checks: self.update.checks(),
-            card_update: if self.card_gate { self.offer().map(|o| o.version.clone()).unwrap_or_default() } else { String::new() },
+            card_update: if self.feedback.card_gated() { self.offer().map(|o| o.version.clone()).unwrap_or_default() } else { String::new() },
             game_news: news,
         };
         (view, shown)
@@ -2121,11 +2091,8 @@ impl Worker {
     fn push(&mut self) {
         // A problem newly set is a notice too: it shows at once, ahead of an older one, and the
         // tray's needs-you state keeps it on the rail after its minute.
-        if self.problem != self.problem_told {
-            self.problem_told = self.problem.clone();
-            if let Some(problem) = self.problem.clone() {
-                self.warn(problem);
-            }
+        if let Some(problem) = self.feedback.problem_untold() {
+            self.feedback.warn(problem);
         }
         let (view, shown) = self.build_view();
         self.shown = shown;
@@ -2133,6 +2100,12 @@ impl Worker {
             self.last_view = Some(view.clone());
             self.ui.push(view);
         }
+    }
+
+    /// A long operation begins: the window says so now, before it runs.
+    fn busy_push(&mut self, text: String) {
+        self.feedback.set_busy(text);
+        self.push();
     }
 
     // Small helpers -----------------------------------------------------------------------------
@@ -2149,26 +2122,10 @@ impl Worker {
         }
     }
 
-    /// A one-off message, plain news: on the rail's progress line for a minute, whatever the
-    /// tray's state, in the text colour.
-    fn say(&mut self, text: String) {
-        self.tell(text, false);
-    }
-
-    /// A one-off problem: on the rail's progress line for a minute, in amber.
-    fn warn(&mut self, text: String) {
-        self.tell(text, true);
-    }
-
-    fn tell(&mut self, text: String, problem: bool) {
-        self.notice = Some(Notice { text, problem });
-        self.notice_at = Some(Instant::now());
-    }
-
     /// The progress question's pick refused: why, under its buttons, and on the rail.
     fn refuse_pick(&mut self, why: &str) {
         self.needs_note = Some((why.to_string(), Instant::now()));
-        self.warn(why.to_string());
+        self.feedback.warn(why.to_string());
     }
 
     /// Whether the window is dark, and whether Windows' apps are (the title bar is set again when
@@ -2187,7 +2144,7 @@ impl Worker {
     /// passes the check a folder typed in Settings does; Settings shows it.
     fn find_game(&mut self) {
         let Some(dir) = win::detect_game_dir() else {
-            self.warn("The game wasn't found in the usual folders. If it's installed, choose its folder in Settings.".into());
+            self.feedback.warn("The game wasn't found in the usual folders. If it's installed, choose its folder in Settings.".into());
             return;
         };
         let found = dir.display().to_string();
@@ -2196,18 +2153,18 @@ impl Worker {
             log!("found game not used: {}", refusal.why);
             let mut why = refusal.why.chars();
             let why = why.next().map(|first| first.to_lowercase().collect::<String>() + why.as_str()).unwrap_or_default();
-            self.warn(format!("The game was found in {found}, but {why}. See Settings."));
+            self.feedback.warn(format!("The game was found in {found}, but {why}. See Settings."));
             return;
         }
         if answer.applied.is_some()
             && let Err(e) = self.write_settings(answer.settings)
         {
-            self.problem = Some(format!("Settings couldn't be saved: {e}"));
+            self.feedback.set_problem(format!("Settings couldn't be saved: {e}"));
             return;
         }
         log!("game found at {found}");
         self.apply_windows_settings();
-        self.say(format!("The game was found in {found}"));
+        self.feedback.say(format!("The game was found in {found}"));
         self.answer_form(Answered { key: "game-dir".into(), typed: found, applied: answer.applied.is_some(), why: String::new() });
         self.refresh();
         self.addons_scan();
@@ -2226,38 +2183,6 @@ impl Worker {
         (fsx::fingerprint(&bytes) != local.sha256).then_some(export.name)
     }
 
-    fn open_card(&mut self) {
-        if self.card.is_none() {
-            self.card = Some((Vec::new(), false));
-        }
-        self.card_until = None;
-    }
-
-    /// A line on the Play card; on the rail too, for its minute (the card closes sooner), in amber
-    /// when it warns. The card's question (`card_ask`) is not a notice.
-    fn card_line(&mut self, text: &str, done: bool, warn: bool) {
-        self.tell(text.to_string(), warn);
-        if let Some((lines, asking)) = self.card.as_mut() {
-            *asking = false;
-            lines.push((text.into(), done, warn));
-            if lines.len() > 8 {
-                lines.remove(0);
-            }
-        }
-    }
-
-    fn card_ask(&mut self, text: String) {
-        self.card_gate = false;
-        self.open_card();
-        if let Some((lines, asking)) = self.card.as_mut() {
-            lines.push((text, false, true));
-            *asking = true;
-        }
-    }
-
-    fn close_card_in(&mut self, seconds: u64) {
-        self.card_until = Some(Instant::now() + Duration::from_secs(seconds));
-    }
 }
 
 /// What a Settings change is checked against, from this PC: the paths the network folder must

@@ -94,33 +94,32 @@ impl Worker {
     /// when asked from Play), and this one closes.
     pub(super) fn update_now(&mut self) {
         if self.game_dir().is_some_and(|d| self.scanner.game_running(&d)) {
-            self.warn("Close the game first: the Satchel updates while the game is closed.".into());
+            self.feedback.warn("Close the game first: the Satchel updates while the game is closed.".into());
             return;
         }
         // The session closes up to a few minutes after the game (playtime, this PC's in-use
         // marker): the update waits for that.
         if self.tracker.in_session() {
             self.update.update_after_session = true;
-            self.say("The update goes in as soon as this session has closed, within a few minutes.".into());
+            self.feedback.say("The update goes in as soon as this session has closed, within a few minutes.".into());
             return;
         }
         let Some(offer) = self.offer().cloned() else {
-            self.say("There's no newer Satchel to update from.".into());
+            self.feedback.say("There's no newer Satchel to update from.".into());
             return;
         };
         self.update.check_result = None;
-        self.busy = Some(format!("Updating to {}…", offer.version));
-        self.push();
+        self.busy_push(format!("Updating to {}…", offer.version));
         match update::install(&offer, self.pending_play) {
             Ok(()) => {
                 log!("updating to {}: the new Satchel starts, this one closes", offer.version);
                 self.quit = true;
             }
             Err(e) => {
-                self.busy = None;
+                self.feedback.clear_busy();
                 log!("the update to {} failed: {e}", offer.version);
                 let by_hand = about::repository_url().map(|url| format!("; the new one can also be downloaded from {url}/releases")).unwrap_or_default();
-                self.warn(format!("The Satchel didn't update ({e}). It goes on as it was{by_hand}."));
+                self.feedback.warn(format!("The Satchel didn't update ({e}). It goes on as it was{by_hand}."));
             }
         }
     }
@@ -157,7 +156,7 @@ impl Worker {
         };
         self.update.check_result = Some(text.clone());
         let failed = asks_github && !self.update.check_pending && self.offer().is_none();
-        self.tell(text, failed);
+        self.feedback.tell(text, failed);
     }
 
     /// In a build that knows its repository: the Satchel's newest GitHub release, on start and
@@ -212,7 +211,7 @@ impl Worker {
                 (None, None) => format!("Checked: you have the newest version ({})", about::VERSION),
             };
             self.update.check_result = Some(text.clone());
-            self.tell(text, problem);
+            self.feedback.tell(text, problem);
         }
     }
 

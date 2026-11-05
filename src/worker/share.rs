@@ -752,23 +752,23 @@ impl Worker {
         if let Some((shared, game)) = self.game_share_place() {
             if let Some(SettingsStep::BringIn { n, keep_mine }) = self.share.game.clone() {
                 if self.game_started_meanwhile() {
-                    self.card_line(started, false, true);
+                    self.feedback.card_line(started, false, true);
                     return;
                 }
                 match self.share_bring_settings(&shared, &game, game_settings::ID, n, keep_mine, now) {
                     Ok(text) => {
                         self.activity(Kind::Game, &text);
-                        self.card_line(&text, true, false);
+                        self.feedback.card_line(&text, true, false);
                     }
                     Err(text) => {
                         log!("{text}");
-                        self.card_line(&text, false, true);
+                        self.feedback.card_line(&text, false, true);
                     }
                 }
             }
             if let Some(split) = self.share.memory.splits.get(game_settings::ID) {
                 let text = format!("The game's settings changed here and on {}: pick one in Settings (this PC's stay for now)", split.pc);
-                self.card_line(&text, false, true);
+                self.feedback.card_line(&text, false, true);
             }
         }
         self.share_save();
@@ -784,7 +784,7 @@ impl Worker {
         let follow: Vec<String> = self.share.steps.iter().filter(|(_, s)| **s == Step::Follow).map(|(id, _)| id.clone()).collect();
         for id in follow {
             if self.game_started_meanwhile() {
-                self.card_line(started, false, true);
+                self.feedback.card_line(started, false, true);
                 return false;
             }
             let Some(entry) = list.get(&id) else { continue };
@@ -792,12 +792,12 @@ impl Worker {
                 Followed::Done(text) => {
                     changed = true;
                     self.activity(Kind::Addon, &text);
-                    self.card_line(&text, true, false);
+                    self.feedback.card_line(&text, true, false);
                 }
-                Followed::Waits(text) | Followed::Downloading(text) => self.card_line(&text, false, false),
+                Followed::Waits(text) | Followed::Downloading(text) => self.feedback.card_line(&text, false, false),
                 Followed::Failed(text) => {
                     log!("{text}");
-                    self.card_line(&text, false, true);
+                    self.feedback.card_line(&text, false, true);
                 }
                 Followed::Quiet => {}
             }
@@ -820,17 +820,17 @@ impl Worker {
             .collect();
         for (id, n, keep_mine) in bring {
             if self.game_started_meanwhile() {
-                self.card_line(started, false, true);
+                self.feedback.card_line(started, false, true);
                 break;
             }
             match self.share_bring_settings(&shared, &game, &id, n, keep_mine, now) {
                 Ok(text) => {
                     self.activity(Kind::Addon, &text);
-                    self.card_line(&text, true, false);
+                    self.feedback.card_line(&text, true, false);
                 }
                 Err(text) => {
                     log!("{text}");
-                    self.card_line(&text, false, true);
+                    self.feedback.card_line(&text, false, true);
                 }
             }
         }
@@ -846,7 +846,7 @@ impl Worker {
             })
             .collect();
         for text in asks {
-            self.card_line(&text, false, true);
+            self.feedback.card_line(&text, false, true);
         }
         true
     }
@@ -1241,7 +1241,7 @@ impl Worker {
     /// question was; `problem` when it didn't go through.
     fn game_say(&mut self, text: String, problem: bool) {
         self.share.game_note = Some((text.clone(), Instant::now()));
-        self.tell(text, problem);
+        self.feedback.tell(text, problem);
     }
 
     fn settings_choice(&mut self, shared: &Shared, game: &GameAddons, id: &str, keep_here: bool) {
