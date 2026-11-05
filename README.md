@@ -48,7 +48,7 @@ signature, see [Checking a download](#checking-a-download).
 | ✅ | 0.7.2 | Two more ways to browse (a list and a two-pane catalog), addon icons and screenshots, going back to any older version |
 | ✅ | 0.8 | The game's patch notes inside the app; Browse as a table in a 16:9 window, with an Install column, thumbnails and the Installed tab in columns |
 | ✅ | 0.9 | A new shape for every screen, dark by default: a Home page, the game and Play in a rail on every page, settings that apply as you change them, a one-screen first start; and a clearer page here |
-| 🔜 | 0.9.1 | Housekeeping inside: the app's code split into smaller parts and checked more strictly, with nothing new on screen |
+| ✅ | 0.9.1 | Housekeeping inside: the app's code split into smaller parts and checked more strictly, with nothing new on screen |
 | | 1.0 | A code-signed exe Windows can recognize, an option to archive old save versions, and a month of real use without surprises |
 
 Later, maybe: syncing through a cloud service, beside the network folder.
