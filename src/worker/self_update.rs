@@ -219,11 +219,9 @@ impl Worker {
     /// keeps this Satchel out.
     pub(super) fn update_line(&self) -> UpdateLine {
         match (self.sync.gated(), self.offer()) {
-            (gated, Some(offer)) => UpdateLine {
-                text: format!("Survivor's Satchel {}.", offer.ready()),
-                version: offer.version.clone(),
-                gated: gated.is_some(),
-            },
+            (gated, Some(offer)) => {
+                UpdateLine { text: format!("Survivor's Satchel {}.", offer.ready()), version: offer.version.clone(), gated: gated.is_some() }
+            }
             (Some(_), None) => UpdateLine { text: update_hint().into(), version: String::new(), gated: true },
             (None, None) => UpdateLine::default(),
         }

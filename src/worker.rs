@@ -198,10 +198,8 @@ fn game_files_stamp(dir: &Path) -> Option<SystemTime> {
     };
     if let Ok(entries) = fs::read_dir(dir) {
         for path in entries.flatten().map(|e| e.path()) {
-            let program = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| ["exe", "dll", "pak", "bin", "dat"].contains(&e.to_ascii_lowercase().as_str()));
+            let program =
+                path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["exe", "dll", "pak", "bin", "dat"].contains(&e.to_ascii_lowercase().as_str()));
             if program {
                 note(&path, &mut newest);
             }
@@ -655,5 +653,4 @@ impl Worker {
             log!("activity not recorded: {e}");
         }
     }
-
 }

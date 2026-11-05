@@ -333,11 +333,8 @@ fn finding_line(finding: &forge::Finding) -> String {
         (file, None) => format!(" · {file}"),
     };
     let message: String = finding.message.split_whitespace().collect::<Vec<_>>().join(" ");
-    let message = if message.chars().count() > FINDING_CHARS {
-        format!("{}…", message.chars().take(FINDING_CHARS).collect::<String>().trim_end())
-    } else {
-        message
-    };
+    let message =
+        if message.chars().count() > FINDING_CHARS { format!("{}…", message.chars().take(FINDING_CHARS).collect::<String>().trim_end()) } else { message };
     let message = if message.is_empty() { String::new() } else { format!(": {message}") };
     format!("{}{place}{message}", finding.rule.trim())
 }
@@ -397,8 +394,12 @@ impl Worker {
                 Ok(registry) => {
                     log!("SurvivorsForge's registry: {} addons", registry.addons.len());
                     // An icon anywhere but on SurvivorsForge's host or GitHub's is never fetched.
-                    let elsewhere: Vec<&str> =
-                        registry.addons.iter().filter(|a| a.icon_url.as_deref().is_some_and(|url| !forge::picture_url_ok(url.trim()))).map(|a| a.id.as_str()).collect();
+                    let elsewhere: Vec<&str> = registry
+                        .addons
+                        .iter()
+                        .filter(|a| a.icon_url.as_deref().is_some_and(|url| !forge::picture_url_ok(url.trim())))
+                        .map(|a| a.id.as_str())
+                        .collect();
                     if !elsewhere.is_empty() {
                         log!("SurvivorsForge's registry: the icons of {} are on another host, so they aren't fetched", elsewhere.join(", "));
                     }
@@ -536,10 +537,7 @@ impl Worker {
     /// yet.
     pub(super) fn forge_unknown(&self, slug: &str, tag: &str) -> bool {
         let view = self.forge_view();
-        view.entry(slug).is_some()
-            && view.online()
-            && view.word(slug, tag).is_none()
-            && !self.forge.follow_asked.contains(&(slug.to_string(), tag.to_string()))
+        view.entry(slug).is_some() && view.online() && view.word(slug, tag).is_none() && !self.forge.follow_asked.contains(&(slug.to_string(), tag.to_string()))
     }
 
     /// An addon of SurvivorsForge's own that another PC brings, in a version its cached word

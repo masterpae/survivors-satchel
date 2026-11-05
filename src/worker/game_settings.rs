@@ -7,8 +7,8 @@ use super::Worker;
 use crate::view::GameSettingsLine;
 use chrono::{DateTime, Utc};
 use satchel_core::activity::Kind;
-use satchel_core::addons::share::{self, Bundle, SettingsStep};
 use satchel_core::addons::GameAddons;
+use satchel_core::addons::share::{self, Bundle, SettingsStep};
 use satchel_core::game_settings;
 use satchel_core::log;
 use satchel_core::paths::Shared;
@@ -171,17 +171,19 @@ impl Worker {
                 .map_or_else(|| v.pc.clone(), |first| first.pc.clone())
         };
         let mut line = match (&self.game_settings.step, newest) {
-            (Some(SettingsStep::BringIn { .. }), Some(v)) => GameSettingsLine { text: format!("{}'s come in at the next Play", from(v)), kind: 1, ..Default::default() },
+            (Some(SettingsStep::BringIn { .. }), Some(v)) => {
+                GameSettingsLine { text: format!("{}'s come in at the next Play", from(v)), kind: 1, ..Default::default() }
+            }
             (Some(SettingsStep::InStep { .. }), Some(v)) => {
                 GameSettingsLine { text: format!("The same on every PC · {}'s, version {}", from(v), v.n), kind: 0, ..Default::default() }
             }
-            (Some(SettingsStep::Send), _) => GameSettingsLine { text: "This PC's go to the network folder at the next look".into(), kind: 0, ..Default::default() },
+            (Some(SettingsStep::Send), _) => {
+                GameSettingsLine { text: "This PC's go to the network folder at the next look".into(), kind: 0, ..Default::default() }
+            }
             _ => GameSettingsLine { text: "They go to the network folder when the game closes".into(), kind: 0, ..Default::default() },
         };
         if let Some(kept) = &self.share.memory().game_own_kept
-            && let Some(own) = list
-                .and_then(|l| l.settings_version(kept.n))
-                .filter(|v| v.addon == game_settings::ID && v.pc == self.engine.pc())
+            && let Some(own) = list.and_then(|l| l.settings_version(kept.n)).filter(|v| v.addon == game_settings::ID && v.pc == self.engine.pc())
         {
             let lacks = newest.is_some_and(|v| v.files.iter().any(|f| !own.files.iter().any(|o| o.eq_ignore_ascii_case(f))));
             line.own = format!(

@@ -38,7 +38,14 @@ pub(super) struct NewsState {
 
 impl NewsState {
     pub(super) fn new(dir: PathBuf) -> NewsState {
-        NewsState { cache: game_news::Cache::open(dir), state: game_news::State::default(), latest: None, notes: Vec::new(), latest_out: false, notes_out: false }
+        NewsState {
+            cache: game_news::Cache::open(dir),
+            state: game_news::State::default(),
+            latest: None,
+            notes: Vec::new(),
+            latest_out: false,
+            notes_out: false,
+        }
     }
 
     fn out(&mut self, feed: Feed) -> &mut bool {

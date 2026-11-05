@@ -80,7 +80,8 @@ impl PlaytimeState {
             per_pc: totals.week_per_pc.iter().map(|(pc, m)| (pc.clone(), format_long(*m), *m as f32 / most as f32)).collect(),
             sessions: sessions.iter().take(30).map(|s| (shell::day_long(s.start, local_now), s.pc.clone(), format_long(s.minutes))).collect(),
         };
-        self.pcs_week = format!("This week: {} · {} session{}", format_long(totals.week), totals.week_sessions, if totals.week_sessions == 1 { "" } else { "s" });
+        self.pcs_week =
+            format!("This week: {} · {} session{}", format_long(totals.week), totals.week_sessions, if totals.week_sessions == 1 { "" } else { "s" });
         self.last_session = sessions.first().map(|s| (shell::day_word(s.start, local_now), s.minutes, s.pc.clone()));
     }
 }

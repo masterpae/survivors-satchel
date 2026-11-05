@@ -669,13 +669,9 @@ impl Worker {
         self.busy_push("Saving your choice…".into());
         let result = if keep_here {
             let note = Some("kept after two PCs moved on separately".to_string());
-            self.engine
-                .send(now, None, note, Some(&shown))
-                .map(|v| v.map(|v| format!("Kept this PC's progress as version {}", v.n)))
+            self.engine.send(now, None, note, Some(&shown)).map(|v| v.map(|v| format!("Kept this PC's progress as version {}", v.n)))
         } else {
-            self.engine
-                .use_nas(&shown, now)
-                .map(|brought| Some(format!("Continued with version {} ({})", brought.version.n, brought.version.pc)))
+            self.engine.use_nas(&shown, now).map(|brought| Some(format!("Continued with version {} ({})", brought.version.n, brought.version.pc)))
         };
         self.feedback.clear_busy();
         match result {
@@ -1061,7 +1057,11 @@ impl Worker {
             let count = copies.len();
             lists.saves_summary = match copies.first() {
                 None => "No copies yet: one is kept after each session".into(),
-                Some(c) => format!("{count} cop{} · newest {}", if count == 1 { "y" } else { "ies" }, c.modified.map(|t| shell::when_short(t, local_now)).unwrap_or_default()),
+                Some(c) => format!(
+                    "{count} cop{} · newest {}",
+                    if count == 1 { "y" } else { "ies" },
+                    c.modified.map(|t| shell::when_short(t, local_now)).unwrap_or_default()
+                ),
             };
             for (i, copy) in copies.into_iter().enumerate() {
                 lists.saves.push(SaveLine {

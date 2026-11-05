@@ -551,17 +551,8 @@ impl Worker {
                     if let Some(old) = list.get(id).cloned() {
                         log!("addons: {} removed here, so on the other PCs too", old.name);
                         let pcs = old.pcs.iter().filter(|p| **p != pc).cloned().collect();
-                        let removed = Entry {
-                            release: None,
-                            on: false,
-                            pinned: false,
-                            settings_per_pc: false,
-                            keep_settings: keep,
-                            pcs,
-                            pc: pc.clone(),
-                            at: now,
-                            ..old
-                        };
+                        let removed =
+                            Entry { release: None, on: false, pinned: false, settings_per_pc: false, keep_settings: keep, pcs, pc: pc.clone(), at: now, ..old };
                         list.put(removed);
                     }
                     agreed.push((id.clone(), Agreed::removed()));
@@ -849,7 +840,9 @@ impl Worker {
                 let why = self.addons.refused(&id, &want.release.tag);
                 return match why {
                     Some(why) => Followed::Failed(format!("{} {} from {from} wasn't downloaded: {why}", entry.name, release.shown_version())),
-                    None => Followed::Downloading(format!("{} {} from {from} is still downloading; it comes in next time", entry.name, release.shown_version())),
+                    None => {
+                        Followed::Downloading(format!("{} {} from {from} is still downloading; it comes in next time", entry.name, release.shown_version()))
+                    }
                 };
             }
             match self.addons_install(&want) {
@@ -913,7 +906,15 @@ impl Worker {
     /// Puts version `n` of a settings set in place (the game closed): an addon's, or the game's
     /// own. With `keep_mine`, this PC's settings go up first as a version of their own, and the
     /// chosen ones after them, so the chosen ones stay the newest.
-    pub(super) fn share_bring_settings(&mut self, shared: &Shared, game: &GameAddons, id: &str, n: u64, keep_mine: bool, now: DateTime<Utc>) -> Result<String, String> {
+    pub(super) fn share_bring_settings(
+        &mut self,
+        shared: &Shared,
+        game: &GameAddons,
+        id: &str,
+        n: u64,
+        keep_mine: bool,
+        now: DateTime<Utc>,
+    ) -> Result<String, String> {
         let list = self.share.list.clone().ok_or("the shared list isn't read")?;
         let version = list.settings_version(n).cloned().ok_or_else(|| format!("settings version {n} is gone from the list"))?;
         let set = self.settings_set(id).ok_or_else(|| format!("{id} isn't installed here"))?;
@@ -973,7 +974,15 @@ impl Worker {
 
     /// Puts a settings set in place after a backup of this PC's; the 10 newest backups of that set
     /// are kept. The backup made when this PC joined is named apart and stays.
-    pub(super) fn place_settings(&mut self, set: &SettingsSet, bundle: &Bundle, game: &GameAddons, id: &str, now: DateTime<Utc>, joining: bool) -> io::Result<()> {
+    pub(super) fn place_settings(
+        &mut self,
+        set: &SettingsSet,
+        bundle: &Bundle,
+        game: &GameAddons,
+        id: &str,
+        now: DateTime<Utc>,
+        joining: bool,
+    ) -> io::Result<()> {
         let backups = self.engine.local.addon_backups();
         let suffix = format!(" {} settings", names::safe(id));
         let name = format!("{}{suffix}{}", names::stamp(now), if joining { " before joining" } else { "" });
@@ -1181,7 +1190,11 @@ impl Worker {
         }
         let gone = self.addons.lines().iter().find(|l| l.id == id).is_some_and(|l| l.standing == Standing::Gone);
         if gone && list.get(id).is_some_and(|e| !e.removed()) {
-            return ("Its folder is gone here: it comes back at the next Play, as on the other PCs. Remove it to remove it everywhere".into(), 2, String::new());
+            return (
+                "Its folder is gone here: it comes back at the next Play, as on the other PCs. Remove it to remove it everywhere".into(),
+                2,
+                String::new(),
+            );
         }
         if self.share.steps.get(id) == Some(&Step::Follow)
             && let Some(entry) = list.get(id)

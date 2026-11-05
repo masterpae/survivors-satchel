@@ -226,7 +226,12 @@ impl Worker {
             warning
         } else if let Some(outlook) = self.sync.outlook() {
             let pcs = outlook.index.pcs.len().max(1);
-            format!("✓ Folder answers · {pcs} PC{} seen · {} version{}", if pcs == 1 { "" } else { "s" }, outlook.index.versions.len(), if outlook.index.versions.len() == 1 { "" } else { "s" })
+            format!(
+                "✓ Folder answers · {pcs} PC{} seen · {} version{}",
+                if pcs == 1 { "" } else { "s" },
+                outlook.index.versions.len(),
+                if outlook.index.versions.len() == 1 { "" } else { "s" }
+            )
         } else {
             "✓ Versions go in its sync subfolder".into()
         };
@@ -272,8 +277,7 @@ impl Worker {
             return Some("⚠ The game's progress folder is a link to another place: if a cloud app syncs it, two syncs work on one file".into());
         }
         let folder = self.engine.settings.sync_folder()?;
-        paths::is_link(folder)
-            .then(|| "⚠ This folder is a link to another place: if that is a cloud folder, two syncs work on one file".into())
+        paths::is_link(folder).then(|| "⚠ This folder is a link to another place: if that is a cloud folder, two syncs work on one file".into())
     }
 
     /// First start: one screen. The game's folder comes from detection (or the defaults file

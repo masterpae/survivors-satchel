@@ -1,8 +1,8 @@
 //! The Addons tab, the worker's side. Everything that changes AddOns happens here, on the worker
 //! thread, and only with the game closed. The network thread fetches; nothing here waits for it.
 
-use super::forge::{Held, forge_badge, forge_level, row_reason};
 use super::Worker;
+use super::forge::{Held, forge_badge, forge_level, row_reason};
 use super::view_model::{ago, when};
 use crate::net::{Job, Lookup};
 use crate::view::{AddonLine, AddonsView, LinkView, OfferLine, RemovedLine, VersionLine, VersionsView};
@@ -242,7 +242,15 @@ impl AddonsState {
 
     /// Removes an addon as another PC did (`from`): its folders to the Recycle Bin, its settings
     /// too unless kept, the backup made.
-    pub(super) fn remove_as_on(&mut self, game: &GameAddons, local: &LocalPaths, id: &str, keep_settings: bool, from: &str, now: DateTime<Utc>) -> Result<Record, AddonError> {
+    pub(super) fn remove_as_on(
+        &mut self,
+        game: &GameAddons,
+        local: &LocalPaths,
+        id: &str,
+        keep_settings: bool,
+        from: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Record, AddonError> {
         let mut addons = Addons { game, local, store: &mut self.store };
         addons.remove(id, keep_settings, Some(from), now, win::recycle)
     }
@@ -301,10 +309,7 @@ pub(super) fn load_store(path: &Path) -> Store {
 fn stamp(game: &GameAddons) -> Vec<(String, Option<SystemTime>)> {
     let mut stamp: Vec<(String, Option<SystemTime>)> = fs::read_dir(&game.addons)
         .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .map(|e| (e.file_name().to_string_lossy().into_owned(), e.metadata().and_then(|m| m.modified()).ok()))
-                .collect()
+            entries.filter_map(Result::ok).map(|e| (e.file_name().to_string_lossy().into_owned(), e.metadata().and_then(|m| m.modified()).ok())).collect()
         })
         .unwrap_or_default();
     stamp.sort();
@@ -508,16 +513,7 @@ impl Worker {
         let forge_view = self.forge.view(self.engine.settings.addons.forge, Utc::now());
         let a = &mut self.addons;
         a.lines = overview::lines(
-            &Inputs {
-                catalog: &a.catalog,
-                store: &a.store,
-                found: &a.found,
-                prints: &a.prints,
-                enabled: &a.enabled,
-                newer: &a.newer,
-                auto,
-                avrt: a.avrt,
-            },
+            &Inputs { catalog: &a.catalog, store: &a.store, found: &a.found, prints: &a.prints, enabled: &a.enabled, newer: &a.newer, auto, avrt: a.avrt },
             &forge_view,
         );
         a.offers = overview::offers(&a.catalog, &a.store, &a.found, &forge_view);
@@ -574,11 +570,7 @@ impl Worker {
         wanted.extend(shared);
         for (id, release) in wanted {
             let key = (id.clone(), release.tag.clone());
-            if release.url.is_empty()
-                || zip_ready(&cache, &a.ready, &id, &release).is_some()
-                || a.fetching.contains(&key)
-                || a.refused.contains_key(&key)
-            {
+            if release.url.is_empty() || zip_ready(&cache, &a.ready, &id, &release).is_some() || a.fetching.contains(&key) || a.refused.contains_key(&key) {
                 continue;
             }
             a.fetching.insert(key);
@@ -686,9 +678,8 @@ impl Worker {
     /// The installs that waited for their downloads, now (the game is closed).
     fn install_waiting(&mut self) {
         let cache = self.engine.local.addon_cache();
-        let (ready, still): (Vec<Want>, Vec<Want>) = std::mem::take(&mut self.addons.waiting)
-            .into_iter()
-            .partition(|w| zip_ready(&cache, &self.addons.ready, &w.id, &w.release).is_some());
+        let (ready, still): (Vec<Want>, Vec<Want>) =
+            std::mem::take(&mut self.addons.waiting).into_iter().partition(|w| zip_ready(&cache, &self.addons.ready, &w.id, &w.release).is_some());
         self.addons.waiting = still;
         if ready.is_empty() {
             return;
@@ -872,12 +863,7 @@ impl Worker {
             self.addons_scan();
         }
         // Updates SurvivorsForge asks about first wait for the player's OK on their rows.
-        let asks = self
-            .addons
-            .lines
-            .iter()
-            .filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && matches!(l.verdict, Verdict::Ask(_)))
-            .count();
+        let asks = self.addons.lines.iter().filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && matches!(l.verdict, Verdict::Ask(_))).count();
         match asks {
             0 => {}
             1 => self.feedback.card_line("1 update waits for your OK (Addons)", false, false),
@@ -1010,13 +996,8 @@ impl Worker {
         }
         // A turned-off addon is left alone (its own row's Update now still updates it), and so is
         // one SurvivorsForge holds back: Update all takes only what it lets in.
-        let ids: Vec<String> = self
-            .addons
-            .lines
-            .iter()
-            .filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && l.verdict.is_go())
-            .map(|l| l.id.clone())
-            .collect();
+        let ids: Vec<String> =
+            self.addons.lines.iter().filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && l.verdict.is_go()).map(|l| l.id.clone()).collect();
         for id in ids {
             self.addon_update_as(&id, false, false);
         }
@@ -1592,8 +1573,7 @@ impl Worker {
     /// Imported zips are kept (they have no other source); other downloads go once nothing needs
     /// them and they're two weeks old.
     pub(super) fn addons_prune_cache(&self) {
-        let keep: BTreeSet<String> =
-            self.addons.store.addons.iter().filter(|r| r.badge == Badge::File).filter_map(|r| r.sha256.clone()).collect();
+        let keep: BTreeSet<String> = self.addons.store.addons.iter().filter(|r| r.badge == Badge::File).filter_map(|r| r.sha256.clone()).collect();
         let Ok(entries) = fs::read_dir(self.engine.local.addon_cache()) else { return };
         for entry in entries.filter_map(Result::ok) {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -1747,7 +1727,8 @@ impl Worker {
                 // SurvivorsForge's word, as its badges have it: one that lets a version in only while
                 // it answers.
                 let word = row.word.filter(|(word, _)| online || word.restricts());
-                let (badge, badge_kind) = word.map(|(word, _)| version_level(word)).map_or((String::new(), 0), |(level, kind)| (format!("SurvivorsForge · {level}"), kind));
+                let (badge, badge_kind) =
+                    word.map(|(word, _)| version_level(word)).map_or((String::new(), 0), |(level, kind)| (format!("SurvivorsForge · {level}"), kind));
                 if let Some((_, counts)) = word.filter(|(word, _)| *word != Word::Unscanned) {
                     detail.push(found_text(counts));
                 }
@@ -1760,14 +1741,18 @@ impl Worker {
                     // Nothing can be done with it here: the row says why, in SurvivorsForge's words.
                     VersionAction::Refused { why } => (0, String::new(), why.text(), 2),
                     VersionAction::Install { .. } if busy(&row.tag) => (4, row.tag.clone(), String::new(), 0),
-                    VersionAction::Install { release, forge } => match self.version_want(&id, release.clone(), row.published, slug.as_deref(), *forge).map(|w| self.want_verdict(&w)) {
-                        Some(Verdict::Go) => (2, row.tag.clone(), String::new(), 0),
-                        Some(Verdict::Ask(why)) => (3, row.tag.clone(), format!("Waits for your OK: {}", why.text()), 1),
-                        Some(Verdict::No(why)) => (0, String::new(), why.text(), 2),
-                        None => (0, String::new(), String::new(), 0),
-                    },
+                    VersionAction::Install { release, forge } => {
+                        match self.version_want(&id, release.clone(), row.published, slug.as_deref(), *forge).map(|w| self.want_verdict(&w)) {
+                            Some(Verdict::Go) => (2, row.tag.clone(), String::new(), 0),
+                            Some(Verdict::Ask(why)) => (3, row.tag.clone(), format!("Waits for your OK: {}", why.text()), 1),
+                            Some(Verdict::No(why)) => (0, String::new(), why.text(), 2),
+                            None => (0, String::new(), String::new(), 0),
+                        }
+                    }
                 };
-                VersionLine { version: row.version, marks: marks.join(" · "), detail: detail.join(" · "), badge, badge_kind, action, key, reason, reason_kind }
+                VersionLine {
+                    version: row.version, marks: marks.join(" · "), detail: detail.join(" · "), badge, badge_kind, action, key, reason, reason_kind
+                }
             })
             .collect();
         Some(VersionsView { id, name, rows, loading: slug.as_deref().is_some_and(|s| self.forge_versions_loading(s)) })
@@ -1811,9 +1796,7 @@ impl Worker {
                 let ours = line.badge == Some(Badge::Verified) || own;
                 let (mut update, mut state, mut state_kind) = match &line.standing {
                     Standing::Current => (String::new(), String::new(), 0),
-                    Standing::Update { to, by_itself: true } if downloaded(to) => {
-                        (shown(to), "Goes in when you press Play".into(), 1)
-                    }
+                    Standing::Update { to, by_itself: true } if downloaded(to) => (shown(to), "Goes in when you press Play".into(), 1),
                     Standing::Update { to, by_itself: true } => (shown(to), "Downloading; it goes in at a Play once it's here".into(), 1),
                     Standing::Update { to, by_itself: false } => {
                         let why = if ours && !to.sha256.is_empty() && auto && line.off {
@@ -1936,7 +1919,8 @@ impl Worker {
         // The addons another PC brings: their Safety and Status columns, from their own lines.
         rows.extend(self.share_incoming().into_iter().map(|mut row| {
             let level = row.badges.iter().find_map(|(text, kind)| text.strip_prefix("SurvivorsForge · ").map(|level| (level.to_string(), *kind)));
-            let ours = row.badges.iter().find(|(text, _)| !text.starts_with("SurvivorsForge · ")).cloned().unwrap_or_else(|| (row.badge.clone(), row.badge_kind));
+            let ours =
+                row.badges.iter().find(|(text, _)| !text.starts_with("SurvivorsForge · ")).cloned().unwrap_or_else(|| (row.badge.clone(), row.badge_kind));
             // "SurvivorsForge · verified (v1.2)": the level alone.
             let level = level.map(|(level, kind)| (level.split(" (").next().unwrap_or_default().to_string(), kind));
             row.safety = overview::safety_cell(Some((ours.0.as_str(), ours.1)), level.as_ref().map(|(l, k)| (l.as_str(), *k)));
@@ -2045,7 +2029,8 @@ impl Worker {
                 let badges: Vec<(String, i32)> =
                     ours.into_iter().chain(forge_badge(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref())).collect();
                 // Its level alone, for the table's Safety column and its filters.
-                let (trust, trust_kind) = forge_level(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref()).map_or((String::new(), 0), |(level, kind, _)| (level.to_string(), kind));
+                let (trust, trust_kind) = forge_level(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref())
+                    .map_or((String::new(), 0), |(level, kind, _)| (level.to_string(), kind));
                 // Who vouches for it: SurvivorsForge's level, else our list, else SurvivorsForge for
                 // one of its own while it gives no level.
                 let vouch = if o.origin == 2 { FORGE_BADGE } else { ("Discord Verified", 0) };
@@ -2129,9 +2114,7 @@ impl Worker {
                 let (note, warn) = match (warning, verified) {
                     (Some(w), _) => (w.clone(), true),
                     (None, Some(_)) => ("This is a Discord Verified addon: it installs as one and updates by itself.".into(), false),
-                    (None, None) => {
-                        ("Not reviewed by the game's devs. Addon code can't reach your PC, and it asks before each update.".into(), false)
-                    }
+                    (None, None) => ("Not reviewed by the game's devs. Addon code can't reach your PC, and it asks before each update.".into(), false),
                 };
                 LinkView { state: 2, message: String::new(), owner, release, goes_into: goes, note, warn, installing: false }
             }

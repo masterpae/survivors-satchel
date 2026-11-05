@@ -67,9 +67,7 @@ pub(super) fn size(bytes: u64) -> String {
 
 /// "released today", from this version's CHANGELOG heading; empty when it has no date.
 fn released_text() -> String {
-    about::released()
-        .map(|day| satchel_core::addons::overview::released_ago((Local::now().date_naive() - day).num_days()))
-        .unwrap_or_default()
+    about::released().map(|day| satchel_core::addons::overview::released_ago((Local::now().date_naive() - day).num_days())).unwrap_or_default()
 }
 
 impl Worker {
@@ -116,10 +114,7 @@ impl Worker {
         let (status, banner) = match tray {
             Tray::NeedsYou => match self.feedback.problem() {
                 Some(text) => ("Needs you".to_string(), text.clone()),
-                None => (
-                    "Needs you".into(),
-                    "Needs you: two PCs moved on separately. Press Play or Sync now to pick one; both are kept.".into(),
-                ),
+                None => ("Needs you".into(), "Needs you: two PCs moved on separately. Press Play or Sync now to pick one; both are kept.".into()),
             },
             Tray::Busy => {
                 let busy = self.feedback.busy().cloned().unwrap_or_default();
