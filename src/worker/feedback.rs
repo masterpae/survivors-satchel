@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 /// question's own refusal in its overlay.
 pub(super) const NOTICE_FOR: Duration = Duration::from_secs(60);
 
+/// The Play card: its lines (the text, done or not, a warning or not) and whether it asks.
+pub(super) type Card = (Vec<(String, bool, bool)>, bool);
+
 #[derive(Default)]
 pub(super) struct Feedback {
     notice: Option<Notice>,
@@ -18,7 +21,7 @@ pub(super) struct Feedback {
     problem_told: Option<String>,
     /// The Play card's question is the version check's: it offers Update now.
     card_gate: bool,
-    card: Option<(Vec<(String, bool, bool)>, bool)>,
+    card: Option<Card>,
     card_until: Option<Instant>,
     busy: Option<String>,
 }
@@ -125,7 +128,7 @@ impl Feedback {
     }
 
     /// The Play card's lines (each done or not, a warning or not) and whether it asks.
-    pub(super) fn card(&self) -> Option<(Vec<(String, bool, bool)>, bool)> {
+    pub(super) fn card(&self) -> Option<Card> {
         self.card.clone()
     }
 

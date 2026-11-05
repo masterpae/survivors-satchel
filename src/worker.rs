@@ -32,6 +32,9 @@ const REFRESH_EVERY: Duration = Duration::from_secs(60);
 /// The window's tabs, in order: Home, Addons, Settings.
 const TAB_SETTINGS: i32 = 2;
 
+// Sent one at a time over the worker's channel and handled at once: the network thread's answer
+// makes it wide, which costs nothing here.
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     Play,
     PlayAnyway,

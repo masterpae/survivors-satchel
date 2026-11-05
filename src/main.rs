@@ -4,6 +4,10 @@
 mod about;
 mod net;
 mod update;
+// The window's side stays as it is until its own split: not formatted, and three findings (a doc
+// list's indentation, the Play card's tuple type, a `% 3 == 0`) wait for then.
+#[rustfmt::skip]
+#[allow(clippy::doc_lazy_continuation, clippy::type_complexity, clippy::manual_is_multiple_of)]
 mod view;
 mod win;
 mod worker;

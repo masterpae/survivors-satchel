@@ -35,6 +35,9 @@ const MESSAGE_FOR: Duration = Duration::from_secs(60);
 const MAX_IMPORT: u64 = 128 << 20;
 
 /// "Add from a link", where it stands.
+// One at a time, in the addons' state: what was found about a repository makes it wide, and that
+// costs nothing.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum Link {
     Idle,
     Looking,
@@ -375,7 +378,7 @@ fn downloads_text(n: u64) -> String {
     let digits = n.to_string();
     let mut grouped = String::new();
     for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             grouped.push(',');
         }
         grouped.push(digit);

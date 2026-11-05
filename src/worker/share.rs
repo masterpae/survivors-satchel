@@ -132,6 +132,10 @@ pub(super) fn load_memory(path: &Path) -> Memory {
     })
 }
 
+/// What a look decided: what goes up, each with the list's state it was decided on; what this PC
+/// keeps to itself now; what it has that the list doesn't count it for.
+type Decided = (Vec<(String, Option<Agreed>)>, Vec<String>, Vec<String>);
+
 /// What following the list did for one addon.
 enum Followed {
     Done(String),
@@ -427,7 +431,7 @@ impl Worker {
     /// Decides every addon against `list`: what this PC follows is kept for Play; returns what goes
     /// up, with the list's state it was decided on (sent only if that's still so), what this PC
     /// keeps to itself now and what it has that the list doesn't count it for.
-    fn share_decide(&mut self, list: &List) -> (Vec<(String, Option<Agreed>)>, Vec<String>, Vec<String>) {
+    fn share_decide(&mut self, list: &List) -> Decided {
         let pc = self.engine.pc().to_string();
         // Installed again: an older removal or opt-out no longer speaks for it.
         let addons = &self.addons;

@@ -86,6 +86,9 @@ pub enum Job {
     GameNews { feed: Feed, etag: Option<String> },
 }
 
+// Sent once over the worker's channel and handled at once: a picture's pixels and the Satchel's
+// own offer make it wide, which costs nothing here.
+#[allow(clippy::large_enum_variant)]
 pub enum Answer {
     /// Per addon: a release newer than the ones known (or none), or why it couldn't be looked up.
     Looked(Vec<(String, Result<Option<Release>, String>)>),
@@ -487,7 +490,7 @@ impl Net {
             return Ok(None);
         };
         let Some(tag) = github::latest_tag(&watch.repo, &location) else { return Ok(None) };
-        if watch.known.iter().any(|k| *k == tag) {
+        if watch.known.contains(&tag) {
             return Ok(None);
         }
         let page = self.text(&format!("https://github.com/{}/releases/expanded_assets/{}", watch.repo, segment(&tag)))?;
