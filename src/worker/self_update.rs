@@ -99,7 +99,7 @@ impl Worker {
         }
         // The session closes up to a few minutes after the game (playtime, this PC's in-use
         // marker): the update waits for that.
-        if self.tracker.in_session() {
+        if self.sync.in_session() {
             self.update.update_after_session = true;
             self.feedback.say("The update goes in as soon as this session has closed, within a few minutes.".into());
             return;
@@ -110,7 +110,7 @@ impl Worker {
         };
         self.update.check_result = None;
         self.busy_push(format!("Updating to {}…", offer.version));
-        match update::install(&offer, self.pending_play) {
+        match update::install(&offer, self.sync.pending_play()) {
             Ok(()) => {
                 log!("updating to {}: the new Satchel starts, this one closes", offer.version);
                 self.quit = true;
@@ -168,7 +168,7 @@ impl Worker {
         if about::REPOSITORY.is_empty() {
             return false;
         }
-        let want = self.gated.clone().filter(|newer| self.offer().is_none_or(|o| gate::is_newer(newer, &o.version)));
+        let want = self.sync.gated().map(str::to_string).filter(|newer| self.offer().is_none_or(|o| gate::is_newer(newer, &o.version)));
         let every = match (&want, self.update.satchel_failed) {
             (Some(_), _) => SATCHEL_GATED_EVERY,
             (None, true) => SATCHEL_RETRY_EVERY,
@@ -218,7 +218,7 @@ impl Worker {
     /// The Play tab's update line; the banner says why nothing syncs when the version check
     /// keeps this Satchel out.
     pub(super) fn update_line(&self) -> UpdateLine {
-        match (&self.gated, self.offer()) {
+        match (self.sync.gated(), self.offer()) {
             (gated, Some(offer)) => UpdateLine {
                 text: format!("Survivor's Satchel {}.", offer.ready()),
                 version: offer.version.clone(),

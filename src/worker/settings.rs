@@ -207,7 +207,7 @@ impl Worker {
         if std::iter::once(&self.engine.settings.pc_name).chain(&self.engine.state.pc_names).any(|n| same(n)) {
             return None;
         }
-        let index = self.outlook.iter().flat_map(|o| &o.index.pcs);
+        let index = self.sync.pc_names();
         let list = self.share.list.iter().flat_map(|l| &l.addons).flat_map(|e| &e.pcs);
         index.chain(list).find(|pc| same(pc)).cloned()
     }
@@ -220,11 +220,11 @@ impl Worker {
             "Paste the network folder (a mapped drive like F:\\ is stored as its network path).".into()
         } else if let Some(why) = self.engine.folder_problem() {
             format!("✗ Can't be used: {why}")
-        } else if self.offline {
+        } else if self.sync.offline() {
             "✗ Not answering right now".into()
         } else if let Some(warning) = self.link_warning() {
             warning
-        } else if let Some(outlook) = &self.outlook {
+        } else if let Some(outlook) = self.sync.outlook() {
             let pcs = outlook.index.pcs.len().max(1);
             format!("✓ Folder answers · {pcs} PC{} seen · {} version{}", if pcs == 1 { "" } else { "s" }, outlook.index.versions.len(), if outlook.index.versions.len() == 1 { "" } else { "s" })
         } else {

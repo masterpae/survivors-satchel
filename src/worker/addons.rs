@@ -552,11 +552,11 @@ impl Worker {
             }
         }
         // During a session they wait for its end (the game may be restarting itself).
-        if !self.tracker.in_session() && !self.addons.waiting.is_empty() {
+        if !self.sync.in_session() && !self.addons.waiting.is_empty() {
             self.install_waiting();
         }
         // An incoming addon the player OK'd comes in once its download is here.
-        if !self.tracker.in_session() {
+        if !self.sync.in_session() {
             self.share_follow_now(true);
         }
     }
@@ -812,7 +812,7 @@ impl Worker {
             self.addons_say("Set the game's folder in Settings first.".into());
             return true;
         }
-        if self.tracker.game_running() {
+        if self.sync.game_running() {
             self.addons_say("Close the game first: addons change only while it's closed.".into());
             return true;
         }
@@ -1687,7 +1687,7 @@ impl Worker {
         let auto = self.engine.settings.addons.update_by_themselves;
         let forge_view = self.forge_view();
         let cache = self.engine.local.addon_cache();
-        let running = self.tracker.game_running();
+        let running = self.sync.game_running();
         // An install waiting for its download, or for SurvivorsForge's word on its version, shows
         // as under way.
         let waiting = |id: &str| a.waiting.iter().any(|w| w.id == id) || self.forge.holds(id);

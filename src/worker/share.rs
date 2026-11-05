@@ -393,7 +393,7 @@ impl Worker {
             Err(e) => {
                 log!("the shared addon list wasn't read: {e}");
                 if let Some(newer) = gate::newer_satchel(&e) {
-                    self.gated = Some(newer.newer.clone());
+                    self.sync.set_gated(newer.newer.clone());
                 }
                 self.share.problem = Some(format!("The shared addon list can't be read ({e}). Nothing changes until it can."));
                 return;
@@ -415,7 +415,7 @@ impl Worker {
         }
         self.share.memory.rev = list.rev;
         self.share.list = Some(list);
-        if !self.tracker.game_running() {
+        if !self.sync.game_running() {
             if let Some((shared, folders)) = &addons {
                 self.share_settings(shared, folders);
             }
@@ -1079,7 +1079,7 @@ impl Worker {
     /// closed, their downloads here. One still downloading stays asked for; one that came in, that
     /// asks first again (said when `announce`), or that SurvivorsForge says No to, is done with.
     pub(super) fn share_follow_now(&mut self, announce: bool) {
-        if self.share.follow_now.is_empty() || self.tracker.game_running() {
+        if self.share.follow_now.is_empty() || self.sync.game_running() {
             return;
         }
         let (Some((shared, game)), Some(list)) = (self.share_place(), self.share.list.clone()) else { return };
@@ -1519,7 +1519,7 @@ impl Worker {
         }
         // They're compared only with the game closed: while it runs, the last look may be old.
         Some(match &self.share.game {
-            _ if self.tracker.game_running() => "The game's settings go to the network folder when the game closes".into(),
+            _ if self.sync.game_running() => "The game's settings go to the network folder when the game closes".into(),
             None => "The game's settings are compared at the next look".into(),
             Some(SettingsStep::BringIn { .. }) => "The game's settings from another PC come in at the next Play".into(),
             Some(SettingsStep::Send) => "This PC's game settings go to the network folder at the next look".into(),
