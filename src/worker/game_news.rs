@@ -5,7 +5,8 @@
 //! the two (`game_news::merge`). The network thread asks; nothing here waits for it. The window
 //! only shows what is built here: nothing is parsed on the UI thread.
 
-use super::{Worker, clock, when};
+use super::Worker;
+use super::view_model::{clock, when};
 use crate::net::{Job, NewsAnswer};
 use crate::view::{GameNewsView, GameNote};
 use chrono::{DateTime, Local, Utc};

@@ -6,7 +6,8 @@
 //! while the game writes.
 
 use super::feedback::NOTICE_FOR;
-use super::{Worker, ago, clock, due, playtime, self_update, size, when};
+use super::view_model::{ago, clock, size, when};
+use super::{Worker, due, playtime, self_update};
 use crate::about;
 use crate::view::{PcLine, SaveLine};
 use crate::win;

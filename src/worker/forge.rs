@@ -7,7 +7,8 @@
 //! a screenshot when the viewer shows it: one picture at a time, behind whatever already waits for
 //! the network thread. The network thread asks; nothing here waits for it.
 
-use super::{Worker, clock, when};
+use super::Worker;
+use super::view_model::{clock, when};
 use crate::net::{ForgeAnswer, Job};
 use crate::view::{PanelLine, PictureLine};
 use crate::win;

@@ -2,7 +2,8 @@
 //! thread, and only with the game closed. The network thread fetches; nothing here waits for it.
 
 use super::forge::{Held, forge_badge, forge_level, row_reason};
-use super::{Worker, ago, when};
+use super::Worker;
+use super::view_model::{ago, when};
 use crate::net::{Job, Lookup};
 use crate::view::{AddonLine, AddonsView, LinkView, OfferLine, RemovedLine, VersionLine, VersionsView};
 use crate::win;
