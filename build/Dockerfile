@@ -18,6 +18,10 @@ RUN apt-get update \
  && apt-get install --no-install-recommends -y fonts-dejavu-core libfontconfig-dev pkg-config \
  && rm -rf /var/lib/apt/lists/*
 
+# clippy and rustfmt, for the two lint checks (`build.sh clippy`, `build.sh fmt`): they run with the
+# toolchain that builds the exe.
+RUN rustup component add clippy rustfmt
+
 # Everything that grows (crates, the Windows SDK, build output) lives in the /cache mount.
 ENV XWIN_ARCH=x86_64 \
     XWIN_CACHE_DIR=/cache/xwin \

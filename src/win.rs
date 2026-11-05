@@ -8,40 +8,29 @@ use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use tauri_winrt_notification::{Duration as ToastDuration, Toast};
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, GetLastError, HWND, LPARAM, LRESULT, RECT,
-    WPARAM,
-};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
-use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile,
+use windows::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, VS_FIXEDFILEINFO, VerQueryValueW,
 };
-use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
-};
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile};
+use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
 use windows::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
-use windows::Win32::Storage::FileSystem::{
-    GetFileVersionInfoSizeW, GetFileVersionInfoW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, VS_FIXEDFILEINFO,
-    VerQueryValueW,
-};
 use windows::Win32::System::Threading::{
-    CreateMutexW, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    QueryFullProcessImageNameW, WaitForSingleObject,
+    CreateMutexW, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{FOLDERID_Desktop, IShellLinkW, KF_FLAG_DEFAULT, SHGetKnownFolderPath, ShellLink};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId,
-    HWND_BROADCAST, MSG, PostMessageW, RegisterClassW,
-    RegisterWindowMessageW, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
-    TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_ENDSESSION, WM_KEYDOWN, WM_KEYUP, WM_QUERYENDSESSION, WNDCLASSW,
-    WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, HWND_BROADCAST, MSG, PostMessageW,
+    RegisterClassW, RegisterWindowMessageW, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, TranslateMessage, WINDOW_EX_STYLE,
+    WM_APP, WM_ENDSESSION, WM_KEYDOWN, WM_KEYUP, WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
 };
 use windows::core::{HSTRING, IUnknown, Interface, PCWSTR, PWSTR, w};
 
@@ -117,36 +106,14 @@ const WM_RELEASE: u32 = WM_APP + 2;
 /// Starts the hidden top-level window that hears Windows shutting down, and a second Satchel
 /// asking for the window or for Play.
 pub fn start_message_window(show: impl Fn() + Send + Sync + 'static, play: impl Fn() + Send + Sync + 'static) {
-    let _ = HANDLERS.set(Handlers {
-        show: Box::new(show),
-        play: Box::new(play),
-        show_id: show_message(),
-        play_id: play_message(),
-    });
+    let _ = HANDLERS.set(Handlers { show: Box::new(show), play: Box::new(play), show_id: show_message(), play_id: play_message() });
     std::thread::spawn(|| unsafe {
         let Ok(module) = GetModuleHandleW(PCWSTR::null()) else { return };
         let class = w!("SurvivorsSatchelMessages");
-        let window_class = WNDCLASSW {
-            lpfnWndProc: Some(window_proc),
-            hInstance: module.into(),
-            lpszClassName: class,
-            ..Default::default()
-        };
+        let window_class = WNDCLASSW { lpfnWndProc: Some(window_proc), hInstance: module.into(), lpszClassName: class, ..Default::default() };
         RegisterClassW(&window_class);
-        let created = CreateWindowExW(
-            WINDOW_EX_STYLE::default(),
-            class,
-            w!("Survivor's Satchel"),
-            WS_OVERLAPPED,
-            0,
-            0,
-            0,
-            0,
-            None,
-            None,
-            Some(module.into()),
-            None,
-        );
+        let created =
+            CreateWindowExW(WINDOW_EX_STYLE::default(), class, w!("Survivor's Satchel"), WS_OVERLAPPED, 0, 0, 0, 0, None, None, Some(module.into()), None);
         let Ok(hwnd) = created else {
             log!("the message window could not be created: shutdown hold and second starts won't work");
             return;
@@ -369,8 +336,7 @@ fn away_loop(game: &Mutex<Option<PathBuf>>) {
             unsafe { GetWindowThreadProcessId(window, Some(&mut pid as *mut u32)) };
         }
         let folder = folder_key(&dir);
-        let is_game = pid != 0
-            && *ours.entry(pid).or_insert_with(|| image_path(pid).is_some_and(|path| folder_key(&path).starts_with(&folder)));
+        let is_game = pid != 0 && *ours.entry(pid).or_insert_with(|| image_path(pid).is_some_and(|path| folder_key(&path).starts_with(&folder)));
         if is_game {
             front = Some(window);
         } else if let Some(left) = front.take() {
@@ -443,9 +409,7 @@ pub fn exe_version(path: &Path) -> Option<String> {
         let mut value: *mut c_void = std::ptr::null_mut();
         let mut len = 0u32;
         // The string keeps a pre-release tag the numbers can't.
-        if VerQueryValueW(data.as_ptr().cast(), w!("\\StringFileInfo\\040904b0\\ProductVersion"), &mut value, &mut len).as_bool()
-            && !value.is_null()
-            && len > 0
+        if VerQueryValueW(data.as_ptr().cast(), w!("\\StringFileInfo\\040904b0\\ProductVersion"), &mut value, &mut len).as_bool() && !value.is_null() && len > 0
         {
             let text = String::from_utf16_lossy(std::slice::from_raw_parts(value as *const u16, len as usize));
             let text = text.trim_end_matches('\0').trim();
@@ -473,7 +437,8 @@ pub fn swap_in_exe(me: &Path, new: &Path, aside: &Path) -> io::Result<()> {
     let (me_w, new_w, aside_w) = (wide(me.as_os_str()), wide(new.as_os_str()), wide(aside.as_os_str()));
     let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
     unsafe {
-        MoveFileExW(PCWSTR(me_w.as_ptr()), PCWSTR(aside_w.as_ptr()), flags).map_err(|e| io::Error::other(format!("the running Satchel couldn't be moved aside: {e}")))?;
+        MoveFileExW(PCWSTR(me_w.as_ptr()), PCWSTR(aside_w.as_ptr()), flags)
+            .map_err(|e| io::Error::other(format!("the running Satchel couldn't be moved aside: {e}")))?;
         if let Err(e) = MoveFileExW(PCWSTR(new_w.as_ptr()), PCWSTR(me_w.as_ptr()), flags) {
             if let Err(back) = MoveFileExW(PCWSTR(aside_w.as_ptr()), PCWSTR(me_w.as_ptr()), flags) {
                 log!("the Satchel couldn't be put back from {}: {back}", aside.display());
@@ -520,14 +485,7 @@ pub fn set_start_with_windows(on: bool) -> io::Result<()> {
         if on {
             let exe = std::env::current_exe()?;
             let command = wide(OsStr::new(&format!("\"{}\" --tray", exe.display())));
-            win32_result(RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                key,
-                name,
-                REG_SZ.0,
-                Some(command.as_ptr() as *const c_void),
-                (command.len() * 2) as u32,
-            ))
+            win32_result(RegSetKeyValueW(HKEY_CURRENT_USER, key, name, REG_SZ.0, Some(command.as_ptr() as *const c_void), (command.len() * 2) as u32))
         } else {
             match RegDeleteKeyValueW(HKEY_CURRENT_USER, key, name) {
                 status if status == ERROR_FILE_NOT_FOUND => Ok(()),
@@ -557,13 +515,10 @@ pub fn set_play_shortcut(on: bool, icon_from: Option<&Path>) -> io::Result<()> {
     }
     let exe = std::env::current_exe()?;
     unsafe {
-        let shell_link: IShellLinkW =
-            CoCreateInstance(&ShellLink, None::<&IUnknown>, CLSCTX_INPROC_SERVER).map_err(io::Error::other)?;
+        let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None::<&IUnknown>, CLSCTX_INPROC_SERVER).map_err(io::Error::other)?;
         shell_link.SetPath(&HSTRING::from(exe.as_path())).map_err(io::Error::other)?;
         shell_link.SetArguments(w!("--play")).map_err(io::Error::other)?;
-        shell_link
-            .SetDescription(w!("Brings in your newest progress, starts the game, sends it back after"))
-            .map_err(io::Error::other)?;
+        shell_link.SetDescription(w!("Brings in your newest progress, starts the game, sends it back after")).map_err(io::Error::other)?;
         if let Some(dir) = exe.parent() {
             shell_link.SetWorkingDirectory(&HSTRING::from(dir)).map_err(io::Error::other)?;
         }
@@ -629,13 +584,7 @@ pub fn network_path(path: &Path) -> PathBuf {
 pub fn work_area() -> Option<(i32, i32, i32, i32)> {
     let mut rect = RECT::default();
     unsafe {
-        SystemParametersInfoW(
-            SPI_GETWORKAREA,
-            0,
-            Some(&mut rect as *mut RECT as *mut c_void),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-        .ok()?;
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut rect as *mut RECT as *mut c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).ok()?;
     }
     Some((rect.left, rect.top, rect.right, rect.bottom))
 }
@@ -669,9 +618,7 @@ pub fn computer_name() -> String {
 
 /// Moves a file or folder to the Recycle Bin, without asking (the Satchel asked already).
 pub fn recycle(path: &Path) -> io::Result<()> {
-    use windows::Win32::UI::Shell::{
-        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW, SHFileOperationW,
-    };
+    use windows::Win32::UI::Shell::{FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW, SHFileOperationW};
     // A list of paths, each ending in a NUL, the list in one more.
     let mut from: Vec<u16> = path.as_os_str().encode_wide().collect();
     from.extend([0, 0]);
@@ -775,8 +722,7 @@ pub fn pick_folder(owner: Option<isize>, title: &str) -> Option<PathBuf> {
 /// relaunch command).
 pub fn app_identity(handle: &slint::WindowHandle) {
     use windows::Win32::Storage::EnhancedStorage::{
-        PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand, PKEY_AppUserModel_RelaunchDisplayNameResource,
-        PKEY_AppUserModel_RelaunchIconResource,
+        PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand, PKEY_AppUserModel_RelaunchDisplayNameResource, PKEY_AppUserModel_RelaunchIconResource,
     };
     use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
     let Some(hwnd) = native_handle(handle) else { return };
@@ -838,17 +784,12 @@ pub fn native_handle(handle: &slint::WindowHandle) -> Option<isize> {
 /// Windows' file picker for an addon zip, in front of the Satchel's window (`owner`). Blocks
 /// until the player picks or cancels, so it runs on a thread of its own.
 pub fn pick_zip(owner: Option<isize>) -> Option<PathBuf> {
-    use windows::Win32::UI::Controls::Dialogs::{
-        GetOpenFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
-    };
+    use windows::Win32::UI::Controls::Dialogs::{GetOpenFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW};
     com_init();
     let mut file = vec![0u16; 4096];
     // Pairs of a label and a pattern, each ending in a NUL, the list in one more.
-    let filter: Vec<u16> = ["Addon zip files (*.zip)", "*.zip", "All files", "*.*"]
-        .iter()
-        .flat_map(|part| OsStr::new(part).encode_wide().chain(Some(0)))
-        .chain(Some(0))
-        .collect();
+    let filter: Vec<u16> =
+        ["Addon zip files (*.zip)", "*.zip", "All files", "*.*"].iter().flat_map(|part| OsStr::new(part).encode_wide().chain(Some(0))).chain(Some(0)).collect();
     let title = wide(OsStr::new("Import an addon zip file"));
     let mut dialog = OPENFILENAMEW {
         lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,

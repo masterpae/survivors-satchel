@@ -4,6 +4,10 @@
 mod about;
 mod net;
 mod update;
+// The window's side stays as it is until its own split: not formatted, and three findings (a doc
+// list's indentation, the Play card's tuple type, a `% 3 == 0`) wait for then.
+#[rustfmt::skip]
+#[allow(clippy::doc_lazy_continuation, clippy::type_complexity, clippy::manual_is_multiple_of)]
 mod view;
 mod win;
 mod worker;
@@ -136,11 +140,7 @@ fn main() {
 
     let Some(appdata) = std::env::var_os("APPDATA").map(PathBuf::from) else { return };
     let local_appdata = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| appdata.clone());
-    let local = Local {
-        save_dir: appdata.join("wenilla-rogue"),
-        app_dir: appdata.join("SurvivorsSatchel"),
-        local_dir: local_appdata.join("SurvivorsSatchel"),
-    };
+    let local = Local { save_dir: appdata.join("wenilla-rogue"), app_dir: appdata.join("SurvivorsSatchel"), local_dir: local_appdata.join("SurvivorsSatchel") };
     start_log(&local.logs_dir());
     std::panic::set_hook(Box::new(|info| log!("panic: {info}")));
     if let Some(pid) = replaced {
@@ -577,10 +577,7 @@ fn main() {
 
     let ui = view::Ui { window: window.as_weak(), tray: tray.as_weak(), card: card.as_weak(), maximised: remember_maximised };
     let worker = worker::Worker::new(engine, ui, first_start, tx.clone());
-    std::thread::Builder::new()
-        .name("satchel-worker".into())
-        .spawn(move || worker.run(rx))
-        .expect("the worker thread could not start");
+    std::thread::Builder::new().name("satchel-worker".into()).spawn(move || worker.run(rx)).expect("the worker thread could not start");
 
     if play && !first_start {
         let _ = tx.send(Command::Play);

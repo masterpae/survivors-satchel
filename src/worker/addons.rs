@@ -1,9 +1,10 @@
 //! The Addons tab, the worker's side. Everything that changes AddOns happens here, on the worker
 //! thread, and only with the game closed. The network thread fetches; nothing here waits for it.
 
+use super::Worker;
 use super::forge::{Held, forge_badge, forge_level, row_reason};
-use super::{Worker, ago, when};
-use crate::net::{Answer, Job, Lookup};
+use super::view_model::{ago, when};
+use crate::net::{Job, Lookup};
 use crate::view::{AddonLine, AddonsView, LinkView, OfferLine, RemovedLine, VersionLine, VersionsView};
 use crate::win;
 use chrono::{DateTime, Local, TimeDelta, Utc};
@@ -12,16 +13,16 @@ use satchel_core::addons::catalog::{self, Catalog, Release};
 use satchel_core::addons::enabled::EnableList;
 use satchel_core::addons::forge::{self, Verdict, Why, Word};
 use satchel_core::addons::github;
-use satchel_core::addons::install::{Addons, Incoming};
+use satchel_core::addons::install::{AddonError, Addons, Incoming};
 use satchel_core::addons::overview::{self, Inputs, Line, Offer, Standing, VersionAction, initials};
 use satchel_core::addons::store::{Badge, Gone, Record, Store};
 use satchel_core::addons::{Found, GameAddons, package, scan, toc, tree};
-use satchel_core::{fsx, gate, log, names};
+use satchel_core::paths::Local as LocalPaths;
+use satchel_core::{fsx, log, names};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant, SystemTime};
 
 /// At Play, a look for new releases when the last one is older than this.
@@ -34,6 +35,9 @@ const MESSAGE_FOR: Duration = Duration::from_secs(60);
 const MAX_IMPORT: u64 = 128 << 20;
 
 /// "Add from a link", where it stands.
+// One at a time, in the addons' state: what was found about a repository makes it wide, and that
+// costs nothing.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum Link {
     Idle,
     Looking,
@@ -103,23 +107,23 @@ impl From<&str> for Refused {
 }
 
 pub(super) struct AddonsState {
-    pub(super) catalog: Catalog,
-    pub(super) store: Store,
-    pub(super) found: Vec<Found>,
+    catalog: Catalog,
+    store: Store,
+    found: Vec<Found>,
     /// Each managed folder's fingerprint now.
     prints: BTreeMap<String, String>,
-    pub(super) enabled: EnableList,
-    pub(super) lines: Vec<Line>,
-    pub(super) offers: Vec<Offer>,
+    enabled: EnableList,
+    lines: Vec<Line>,
+    offers: Vec<Offer>,
     /// Releases newer than the catalog or the record knows, from GitHub's pages, by addon id.
-    pub(super) newer: BTreeMap<String, Release>,
+    newer: BTreeMap<String, Release>,
     /// Downloaded zips: (addon id, release tag) → checksum.
-    pub(super) ready: BTreeMap<(String, String), String>,
-    pub(super) fetching: BTreeSet<(String, String)>,
+    ready: BTreeMap<(String, String), String>,
+    fetching: BTreeSet<(String, String)>,
     /// Downloads that failed, with why; tried again after the next look or "Check now".
-    pub(super) refused: BTreeMap<(String, String), String>,
+    refused: BTreeMap<(String, String), String>,
     /// Installs waiting for their download (or for the game to close).
-    pub(super) waiting: Vec<Want>,
+    waiting: Vec<Want>,
     /// Addons installed again from the Removed list, by id: once one is in, its switches are set
     /// as they were, and its settings come back from the removal's backup when they went with it.
     restore: BTreeMap<String, Gone>,
@@ -136,12 +140,11 @@ pub(super) struct AddonsState {
     adopted_note: Option<String>,
     message: Option<(String, Instant)>,
     /// The addon whose Versions… is open (its id), until it closes.
-    pub(super) versions_open: Option<String>,
-    pub(super) net: Sender<Job>,
+    versions_open: Option<String>,
 }
 
 impl AddonsState {
-    pub(super) fn new(store: Store, net: Sender<Job>) -> AddonsState {
+    pub(super) fn new(store: Store) -> AddonsState {
         AddonsState {
             catalog: Catalog::builtin(),
             store,
@@ -166,8 +169,130 @@ impl AddonsState {
             adopted_note: None,
             message: None,
             versions_open: None,
-            net,
         }
+    }
+}
+
+impl AddonsState {
+    /// Our list of verified addons, built in.
+    pub(super) fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    /// The Installed list as last built.
+    pub(super) fn lines(&self) -> &[Line] {
+        &self.lines
+    }
+
+    /// Browse's offers as last built.
+    pub(super) fn offers(&self) -> &[Offer] {
+        &self.offers
+    }
+
+    /// A release newer than the catalog or the record knows, from GitHub's page, for an addon.
+    pub(super) fn newer(&self, id: &str) -> Option<&Release> {
+        self.newer.get(id)
+    }
+
+    /// Whether an install of `id` waits for its download (or for the game to close).
+    pub(super) fn waits_for(&self, id: &str) -> bool {
+        self.waiting.iter().any(|w| w.id == id)
+    }
+
+    /// Every release newer than the catalog or the record knows, from GitHub's pages, by addon id.
+    pub(super) fn newer_releases(&self) -> &BTreeMap<String, Release> {
+        &self.newer
+    }
+
+    /// The record of an installed addon (or one recognised in AddOns).
+    pub(super) fn record(&self, id: &str) -> Option<&Record> {
+        self.store.get(id)
+    }
+
+    /// Every record, as addons.json holds them.
+    pub(super) fn records(&self) -> &[Record] {
+        &self.store.addons
+    }
+
+    /// The downloaded zip for this release, when it's in the cache.
+    pub(super) fn downloaded(&self, cache: &Path, id: &str, release: &Release) -> Option<(PathBuf, String)> {
+        zip_ready(cache, &self.ready, id, release)
+    }
+
+    /// Why a release's download failed, when it did.
+    pub(super) fn refused(&self, id: &str, tag: &str) -> Option<String> {
+        self.refused.get(&(id.to_string(), tag.to_string())).cloned()
+    }
+
+    /// A folder whose `.toc` says `DefaultState: disabled`: off unless the game's list says on.
+    pub(super) fn default_off(&self, folder: &str) -> bool {
+        self.found.iter().find(|f| f.folder.eq_ignore_ascii_case(folder)).and_then(|f| f.toc.as_ref()).is_some_and(|t| t.default_disabled)
+    }
+
+    /// The record's folders the game doesn't load, as the game names them.
+    pub(super) fn folders_off(&self, record: &Record) -> Vec<String> {
+        record.folders.keys().filter(|f| !self.enabled.is_on(f, self.default_off(f))).cloned().collect()
+    }
+
+    /// A zip that came another way than a download (from the network folder, a file): the
+    /// release is judged and installed as that file.
+    pub(super) fn mark_ready(&mut self, id: String, tag: String, sha256: String) {
+        self.ready.insert((id, tag), sha256);
+    }
+
+    /// Removes an addon as another PC did (`from`): its folders to the Recycle Bin, its settings
+    /// too unless kept, the backup made.
+    pub(super) fn remove_as_on(
+        &mut self,
+        game: &GameAddons,
+        local: &LocalPaths,
+        id: &str,
+        keep_settings: bool,
+        from: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Record, AddonError> {
+        let mut addons = Addons { game, local, store: &mut self.store };
+        addons.remove(id, keep_settings, Some(from), now, win::recycle)
+    }
+
+    /// The switches another PC set, taken over where they differ: what changed, in words, and
+    /// the record's folders; `None` for an addon not recorded here. Saved by the caller.
+    pub(super) fn apply_followed_switches(&mut self, id: &str, pinned: bool, settings_per_pc: bool) -> Option<(Vec<String>, Vec<String>)> {
+        let record = self.store.get_mut(id)?;
+        let mut switches: Vec<String> = Vec::new();
+        if record.pinned != pinned {
+            record.pinned = pinned;
+            switches.push(if pinned { "kept at this version" } else { "updates again" }.into());
+        }
+        if record.settings_per_pc != settings_per_pc {
+            record.settings_per_pc = settings_per_pc;
+            switches.push(if settings_per_pc { "keeps its settings per PC" } else { "shares its settings" }.into());
+        }
+        Some((switches, record.folders.keys().cloned().collect()))
+    }
+
+    /// "Only on this PC" on or off; the addon's name, for what is said. Saved by the caller.
+    pub(super) fn set_local_only(&mut self, id: &str, on: bool) -> Option<String> {
+        let record = self.store.get_mut(id)?;
+        record.local_only = on;
+        Some(record.name.clone())
+    }
+
+    /// "Settings per PC" on or off; the addon's name, for what is said. Saved by the caller.
+    pub(super) fn set_settings_per_pc(&mut self, id: &str, on: bool) -> Option<String> {
+        let record = self.store.get_mut(id)?;
+        record.settings_per_pc = on;
+        Some(record.name.clone())
+    }
+
+    /// addons.json written.
+    pub(super) fn save_store(&self, path: &Path) -> io::Result<()> {
+        self.store.save(path)
+    }
+
+    /// Versions… closed.
+    pub(super) fn versions_close(&mut self) {
+        self.versions_open = None;
     }
 }
 
@@ -184,10 +309,7 @@ pub(super) fn load_store(path: &Path) -> Store {
 fn stamp(game: &GameAddons) -> Vec<(String, Option<SystemTime>)> {
     let mut stamp: Vec<(String, Option<SystemTime>)> = fs::read_dir(&game.addons)
         .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .map(|e| (e.file_name().to_string_lossy().into_owned(), e.metadata().and_then(|m| m.modified()).ok()))
-                .collect()
+            entries.filter_map(Result::ok).map(|e| (e.file_name().to_string_lossy().into_owned(), e.metadata().and_then(|m| m.modified()).ok())).collect()
         })
         .unwrap_or_default();
     stamp.sort();
@@ -261,7 +383,7 @@ fn downloads_text(n: u64) -> String {
     let digits = n.to_string();
     let mut grouped = String::new();
     for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             grouped.push(',');
         }
         grouped.push(digit);
@@ -391,16 +513,7 @@ impl Worker {
         let forge_view = self.forge.view(self.engine.settings.addons.forge, Utc::now());
         let a = &mut self.addons;
         a.lines = overview::lines(
-            &Inputs {
-                catalog: &a.catalog,
-                store: &a.store,
-                found: &a.found,
-                prints: &a.prints,
-                enabled: &a.enabled,
-                newer: &a.newer,
-                auto,
-                avrt: a.avrt,
-            },
+            &Inputs { catalog: &a.catalog, store: &a.store, found: &a.found, prints: &a.prints, enabled: &a.enabled, newer: &a.newer, auto, avrt: a.avrt },
             &forge_view,
         );
         a.offers = overview::offers(&a.catalog, &a.store, &a.found, &forge_view);
@@ -434,7 +547,7 @@ impl Worker {
             return;
         }
         self.addons.looking = true;
-        let _ = self.addons.net.send(Job::Look(watches));
+        let _ = self.net.send(Job::Look(watches));
     }
 
     /// Downloads for every update shown (a turned-off addon's waits until it's on, and one
@@ -457,127 +570,94 @@ impl Worker {
         wanted.extend(shared);
         for (id, release) in wanted {
             let key = (id.clone(), release.tag.clone());
-            if release.url.is_empty()
-                || zip_ready(&cache, &a.ready, &id, &release).is_some()
-                || a.fetching.contains(&key)
-                || a.refused.contains_key(&key)
-            {
+            if release.url.is_empty() || zip_ready(&cache, &a.ready, &id, &release).is_some() || a.fetching.contains(&key) || a.refused.contains_key(&key) {
                 continue;
             }
             a.fetching.insert(key);
             let sha256 = (!release.sha256.is_empty()).then(|| release.sha256.clone());
-            let _ = a.net.send(Job::Fetch { id, tag: release.tag.clone(), url: release.url.clone(), sha256 });
+            let _ = self.net.send(Job::Fetch { id, tag: release.tag.clone(), url: release.url.clone(), sha256 });
         }
     }
 
-    /// In a build that knows its repository: the Satchel's newest GitHub release, on start and
-    /// every few hours (sooner after a failed look). A newer one is downloaded, checked and its
-    /// signature verified, then offered (Update now). When a newer Satchel keeps this one out and nothing
-    /// offers it yet, that very release is looked for, every few minutes. True when a look was
-    /// handed to the network thread just now.
-    pub(super) fn satchel_look(&mut self) -> bool {
-        if crate::about::REPOSITORY.is_empty() {
-            return false;
+    /// GitHub's answer about the installed addons' releases: what's new, by addon id.
+    pub(super) fn addons_looked(&mut self, results: Vec<(String, Result<Option<Release>, String>)>) {
+        let a = &mut self.addons;
+        for (id, result) in results {
+            match result {
+                Ok(Some(release)) => {
+                    log!("{id}: {} is out on GitHub", release.tag);
+                    a.unreachable.remove(&id);
+                    a.newer.insert(id, release);
+                }
+                Ok(None) => {
+                    a.unreachable.remove(&id);
+                    a.newer.remove(&id);
+                }
+                Err(e) => {
+                    log!("{id}: not looked up: {e}");
+                    a.unreachable.insert(id, e);
+                }
+            }
         }
-        let want = self.gated.clone().filter(|newer| self.offer().is_none_or(|o| gate::is_newer(newer, &o.version)));
-        let every = match (&want, self.satchel_failed) {
-            (Some(_), _) => super::SATCHEL_GATED_EVERY,
-            (None, true) => super::SATCHEL_RETRY_EVERY,
-            (None, false) => super::SATCHEL_LOOK_EVERY,
+        a.looked = Some(Utc::now());
+        a.looking = false;
+        a.refused.clear();
+        // A release downloaded before (an earlier run) is named from its zip now.
+        let cache = self.engine.local.addon_cache();
+        let named: Vec<(String, String, String)> = self
+            .addons
+            .newer
+            .iter()
+            .filter(|(_, r)| r.interface == 0)
+            .filter_map(|(id, r)| zip_ready(&cache, &self.addons.ready, id, r).map(|(_, sha)| (id.clone(), r.tag.clone(), sha)))
+            .collect();
+        for (id, tag, sha) in named {
+            self.name_from_zip(&id, &tag, &sha);
+        }
+        self.addons_lines();
+    }
+
+    /// A download finished (or failed): the installs waiting for it go in, the game closed.
+    pub(super) fn addons_fetched(&mut self, id: String, tag: String, sha256: Result<String, String>) {
+        let key = (id.clone(), tag.clone());
+        self.addons.fetching.remove(&key);
+        match sha256 {
+            Ok(sha) => {
+                self.name_from_zip(&id, &tag, &sha);
+                self.addons.ready.insert(key, sha);
+            }
+            Err(e) => {
+                log!("{id} {tag} not downloaded: {e}");
+                self.addons.refused.insert(key, e.clone());
+                let gone: Vec<Want> = self.addons.waiting.iter().filter(|w| w.id == id && w.release.tag == tag).cloned().collect();
+                self.addons.waiting.retain(|w| !(w.id == id && w.release.tag == tag));
+                for want in gone {
+                    self.addons_say(format!("{} wasn't downloaded: {e}", want.name));
+                }
+            }
+        }
+        // During a session they wait for its end (the game may be restarting itself).
+        if !self.sync.in_session() && !self.addons.waiting.is_empty() {
+            self.install_waiting();
+        }
+        // An incoming addon the player OK'd comes in once its download is here.
+        if !self.sync.in_session() {
+            self.share_follow_now(true);
+        }
+    }
+
+    /// "Add from a link": what GitHub says about the repository typed.
+    pub(super) fn addons_looked_up(&mut self, result: Result<Lookup, String>) {
+        let catalog = &self.addons.catalog;
+        self.addons.link = match result {
+            Ok(lookup) => {
+                let verified = catalog.addons.iter().find(|e| e.repo.eq_ignore_ascii_case(&lookup.repo)).map(|e| e.id.clone());
+                let name = lookup.title.clone().unwrap_or_else(|| lookup.repo.split('/').nth(1).unwrap_or_default().to_string());
+                let warning = if verified.is_some() { None } else { overview::look_alike(catalog, &lookup.repo, &name, &lookup.folders) };
+                Link::Found { lookup, warning, verified }
+            }
+            Err(e) => Link::Failed(e),
         };
-        if !super::due(self.satchel_looked, every) {
-            return false;
-        }
-        self.satchel_looked = Some(Instant::now());
-        self.addons.net.send(Job::Satchel { repo: crate::about::REPOSITORY.into(), dir: self.engine.local.satchel_download(), want }).is_ok()
-    }
-
-    /// An answer from the network thread.
-    pub(super) fn addons_answer(&mut self, answer: Answer) {
-        match answer {
-            Answer::Looked(results) => {
-                let a = &mut self.addons;
-                for (id, result) in results {
-                    match result {
-                        Ok(Some(release)) => {
-                            log!("{id}: {} is out on GitHub", release.tag);
-                            a.unreachable.remove(&id);
-                            a.newer.insert(id, release);
-                        }
-                        Ok(None) => {
-                            a.unreachable.remove(&id);
-                            a.newer.remove(&id);
-                        }
-                        Err(e) => {
-                            log!("{id}: not looked up: {e}");
-                            a.unreachable.insert(id, e);
-                        }
-                    }
-                }
-                a.looked = Some(Utc::now());
-                a.looking = false;
-                a.refused.clear();
-                // A release downloaded before (an earlier run) is named from its zip now.
-                let cache = self.engine.local.addon_cache();
-                let named: Vec<(String, String, String)> = self
-                    .addons
-                    .newer
-                    .iter()
-                    .filter(|(_, r)| r.interface == 0)
-                    .filter_map(|(id, r)| zip_ready(&cache, &self.addons.ready, id, r).map(|(_, sha)| (id.clone(), r.tag.clone(), sha)))
-                    .collect();
-                for (id, tag, sha) in named {
-                    self.name_from_zip(&id, &tag, &sha);
-                }
-                self.addons_lines();
-            }
-            Answer::Fetched { id, tag, sha256 } => {
-                let key = (id.clone(), tag.clone());
-                self.addons.fetching.remove(&key);
-                match sha256 {
-                    Ok(sha) => {
-                        self.name_from_zip(&id, &tag, &sha);
-                        self.addons.ready.insert(key, sha);
-                    }
-                    Err(e) => {
-                        log!("{id} {tag} not downloaded: {e}");
-                        self.addons.refused.insert(key, e.clone());
-                        let gone: Vec<Want> = self.addons.waiting.iter().filter(|w| w.id == id && w.release.tag == tag).cloned().collect();
-                        self.addons.waiting.retain(|w| !(w.id == id && w.release.tag == tag));
-                        for want in gone {
-                            self.addons_say(format!("{} wasn't downloaded: {e}", want.name));
-                        }
-                    }
-                }
-                // During a session they wait for its end (the game may be restarting itself).
-                if !self.tracker.in_session() && !self.addons.waiting.is_empty() {
-                    self.install_waiting();
-                }
-                // An incoming addon the player OK'd comes in once its download is here.
-                if !self.tracker.in_session() {
-                    self.share_follow_now(true);
-                }
-            }
-            Answer::Picture { url, kind, pixels } => self.forge_picture_answer(&url, kind, pixels),
-            Answer::Satchel(result) => self.satchel_answer(result),
-            Answer::ForgeRegistry(answer) => self.forge_registry_answer(answer),
-            Answer::ForgeDetails { slug, answer } => self.forge_details_answer(&slug, answer),
-            Answer::ForgeVersions { slug, answer } => self.forge_versions_answer(&slug, answer),
-            Answer::ForgeFindings { slug, tag, answer } => self.forge_findings_answer(&slug, &tag, answer),
-            Answer::GameNews { feed, answer } => self.news_answer(feed, answer),
-            Answer::LookedUp(result) => {
-                let catalog = &self.addons.catalog;
-                self.addons.link = match result {
-                    Ok(lookup) => {
-                        let verified = catalog.addons.iter().find(|e| e.repo.eq_ignore_ascii_case(&lookup.repo)).map(|e| e.id.clone());
-                        let name = lookup.title.clone().unwrap_or_else(|| lookup.repo.split('/').nth(1).unwrap_or_default().to_string());
-                        let warning = if verified.is_some() { None } else { overview::look_alike(catalog, &lookup.repo, &name, &lookup.folders) };
-                        Link::Found { lookup, warning, verified }
-                    }
-                    Err(e) => Link::Failed(e),
-                };
-            }
-        }
     }
 
     /// A release seen only on GitHub's page has no version name there (DragonUI's tags are
@@ -598,9 +678,8 @@ impl Worker {
     /// The installs that waited for their downloads, now (the game is closed).
     fn install_waiting(&mut self) {
         let cache = self.engine.local.addon_cache();
-        let (ready, still): (Vec<Want>, Vec<Want>) = std::mem::take(&mut self.addons.waiting)
-            .into_iter()
-            .partition(|w| zip_ready(&cache, &self.addons.ready, &w.id, &w.release).is_some());
+        let (ready, still): (Vec<Want>, Vec<Want>) =
+            std::mem::take(&mut self.addons.waiting).into_iter().partition(|w| zip_ready(&cache, &self.addons.ready, &w.id, &w.release).is_some());
         self.addons.waiting = still;
         if ready.is_empty() {
             return;
@@ -681,6 +760,27 @@ impl Worker {
         Ok(text)
     }
 
+    /// The installs that waited for SurvivorsForge's versions of an addon, decided now with what
+    /// came (`forge_versions_answer`): an answer that failed counts as nothing known. What went in
+    /// goes to the other PCs.
+    pub(super) fn install_held(&mut self, held: Vec<(String, String, Held)>) {
+        if held.is_empty() {
+            return;
+        }
+        for (slug, tag, held) in held {
+            let key = (slug, tag);
+            self.forge.deciding(key.clone());
+            match held {
+                Held::Install { id, anyway } => self.browse_install_with(&id, anyway),
+                Held::Update { id, anyway } => self.addon_update_as(&id, anyway, true),
+                Held::Again { id, anyway } => self.install_again_as(&id, anyway, true),
+                Held::Version { id, tag, anyway } => self.version_install_as(&id, &tag, anyway, true),
+            }
+            self.forge.decided(&key);
+        }
+        self.share_look();
+    }
+
     /// Installs now when the download is here, else as soon as it is.
     fn install_or_wait(&mut self, want: Want) {
         let cache = self.engine.local.addon_cache();
@@ -737,8 +837,8 @@ impl Worker {
             if zip_ready(&cache, &self.addons.ready, &want.id, &want.release).is_none() {
                 let (name, version) = (&want.name, shown(&want.release));
                 match self.addons.refused.get(&(want.id.clone(), want.release.tag.clone())).cloned() {
-                    Some(why) => self.card_line(&format!("{name} {version} wasn't downloaded: {why}"), false, true),
-                    None => self.card_line(&format!("{name} {version} is still downloading; it goes in next time"), false, false),
+                    Some(why) => self.feedback.card_line(&format!("{name} {version} wasn't downloaded: {why}"), false, true),
+                    None => self.feedback.card_line(&format!("{name} {version} is still downloading; it goes in next time"), false, false),
                 }
                 continue;
             }
@@ -747,15 +847,15 @@ impl Worker {
             match self.addons_install(&want) {
                 Ok(text) => {
                     changed = true;
-                    self.card_line(&text, true, false);
+                    self.feedback.card_line(&text, true, false);
                 }
                 // SurvivorsForge's word changed while it waited: it doesn't go in, and the line says why.
-                Err(Refused::Waits(text)) => self.card_line(&text, false, false),
-                Err(Refused::Never(text)) => self.card_line(&text, false, true),
+                Err(Refused::Waits(text)) => self.feedback.card_line(&text, false, false),
+                Err(Refused::Never(text)) => self.feedback.card_line(&text, false, true),
                 Err(Refused::Failed(e)) => {
                     log!("{} not updated before play: {e}", want.name);
                     let stays = from.map(|f| format!(" stays at {f}")).unwrap_or_else(|| " wasn't installed".into());
-                    self.card_line(&format!("{}{stays}: {e}", want.name), false, true);
+                    self.feedback.card_line(&format!("{}{stays}: {e}", want.name), false, true);
                 }
             }
         }
@@ -763,16 +863,11 @@ impl Worker {
             self.addons_scan();
         }
         // Updates SurvivorsForge asks about first wait for the player's OK on their rows.
-        let asks = self
-            .addons
-            .lines
-            .iter()
-            .filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && matches!(l.verdict, Verdict::Ask(_)))
-            .count();
+        let asks = self.addons.lines.iter().filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && matches!(l.verdict, Verdict::Ask(_))).count();
         match asks {
             0 => {}
-            1 => self.card_line("1 update waits for your OK (Addons)", false, false),
-            n => self.card_line(&format!("{n} updates wait for your OK (Addons)"), false, false),
+            1 => self.feedback.card_line("1 update waits for your OK (Addons)", false, false),
+            n => self.feedback.card_line(&format!("{n} updates wait for your OK (Addons)"), false, false),
         }
         if self.addons.looked.is_none_or(|t| Utc::now() - t >= LOOK_EVERY) {
             self.addons_look();
@@ -796,7 +891,7 @@ impl Worker {
             self.addons_say("Set the game's folder in Settings first.".into());
             return true;
         }
-        if self.tracker.game_running() {
+        if self.sync.game_running() {
             self.addons_say("Close the game first: addons change only while it's closed.".into());
             return true;
         }
@@ -901,13 +996,8 @@ impl Worker {
         }
         // A turned-off addon is left alone (its own row's Update now still updates it), and so is
         // one SurvivorsForge holds back: Update all takes only what it lets in.
-        let ids: Vec<String> = self
-            .addons
-            .lines
-            .iter()
-            .filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && l.verdict.is_go())
-            .map(|l| l.id.clone())
-            .collect();
+        let ids: Vec<String> =
+            self.addons.lines.iter().filter(|l| matches!(l.standing, Standing::Update { .. }) && !l.off && l.verdict.is_go()).map(|l| l.id.clone()).collect();
         for id in ids {
             self.addon_update_as(&id, false, false);
         }
@@ -1322,7 +1412,7 @@ impl Worker {
             return;
         }
         self.addons.link = Link::Looking;
-        let _ = self.addons.net.send(Job::Lookup(text));
+        let _ = self.net.send(Job::Lookup(text));
     }
 
     pub(super) fn link_clear(&mut self) {
@@ -1483,8 +1573,7 @@ impl Worker {
     /// Imported zips are kept (they have no other source); other downloads go once nothing needs
     /// them and they're two weeks old.
     pub(super) fn addons_prune_cache(&self) {
-        let keep: BTreeSet<String> =
-            self.addons.store.addons.iter().filter(|r| r.badge == Badge::File).filter_map(|r| r.sha256.clone()).collect();
+        let keep: BTreeSet<String> = self.addons.store.addons.iter().filter(|r| r.badge == Badge::File).filter_map(|r| r.sha256.clone()).collect();
         let Ok(entries) = fs::read_dir(self.engine.local.addon_cache()) else { return };
         for entry in entries.filter_map(Result::ok) {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -1524,8 +1613,8 @@ impl Worker {
             Some(own) => view.switch_on.then(|| own.to_string()),
             None => catalog.and_then(|e| view.slug_for(None, Some(e.id.as_str()), Some(e.repo.as_str()))),
         };
-        let listed = slug.as_deref().filter(|_| view.switch_on).and_then(|s| self.forge.registry.as_ref()?.get(s));
-        let versions = slug.as_deref().filter(|_| listed.is_some()).and_then(|s| self.forge.versions.get(s)).map(Vec::as_slice);
+        let listed = slug.as_deref().filter(|_| view.switch_on).and_then(|s| self.forge.listed(s));
+        let versions = slug.as_deref().filter(|_| listed.is_some()).and_then(|s| self.forge.versions(s));
         (overview::VersionsOf { record, catalog, listed, versions }, slug)
     }
 
@@ -1638,7 +1727,8 @@ impl Worker {
                 // SurvivorsForge's word, as its badges have it: one that lets a version in only while
                 // it answers.
                 let word = row.word.filter(|(word, _)| online || word.restricts());
-                let (badge, badge_kind) = word.map(|(word, _)| version_level(word)).map_or((String::new(), 0), |(level, kind)| (format!("SurvivorsForge · {level}"), kind));
+                let (badge, badge_kind) =
+                    word.map(|(word, _)| version_level(word)).map_or((String::new(), 0), |(level, kind)| (format!("SurvivorsForge · {level}"), kind));
                 if let Some((_, counts)) = word.filter(|(word, _)| *word != Word::Unscanned) {
                     detail.push(found_text(counts));
                 }
@@ -1651,14 +1741,18 @@ impl Worker {
                     // Nothing can be done with it here: the row says why, in SurvivorsForge's words.
                     VersionAction::Refused { why } => (0, String::new(), why.text(), 2),
                     VersionAction::Install { .. } if busy(&row.tag) => (4, row.tag.clone(), String::new(), 0),
-                    VersionAction::Install { release, forge } => match self.version_want(&id, release.clone(), row.published, slug.as_deref(), *forge).map(|w| self.want_verdict(&w)) {
-                        Some(Verdict::Go) => (2, row.tag.clone(), String::new(), 0),
-                        Some(Verdict::Ask(why)) => (3, row.tag.clone(), format!("Waits for your OK: {}", why.text()), 1),
-                        Some(Verdict::No(why)) => (0, String::new(), why.text(), 2),
-                        None => (0, String::new(), String::new(), 0),
-                    },
+                    VersionAction::Install { release, forge } => {
+                        match self.version_want(&id, release.clone(), row.published, slug.as_deref(), *forge).map(|w| self.want_verdict(&w)) {
+                            Some(Verdict::Go) => (2, row.tag.clone(), String::new(), 0),
+                            Some(Verdict::Ask(why)) => (3, row.tag.clone(), format!("Waits for your OK: {}", why.text()), 1),
+                            Some(Verdict::No(why)) => (0, String::new(), why.text(), 2),
+                            None => (0, String::new(), String::new(), 0),
+                        }
+                    }
                 };
-                VersionLine { version: row.version, marks: marks.join(" · "), detail: detail.join(" · "), badge, badge_kind, action, key, reason, reason_kind }
+                VersionLine {
+                    version: row.version, marks: marks.join(" · "), detail: detail.join(" · "), badge, badge_kind, action, key, reason, reason_kind
+                }
             })
             .collect();
         Some(VersionsView { id, name, rows, loading: slug.as_deref().is_some_and(|s| self.forge_versions_loading(s)) })
@@ -1671,7 +1765,7 @@ impl Worker {
         let auto = self.engine.settings.addons.update_by_themselves;
         let forge_view = self.forge_view();
         let cache = self.engine.local.addon_cache();
-        let running = self.tracker.game_running();
+        let running = self.sync.game_running();
         // An install waiting for its download, or for SurvivorsForge's word on its version, shows
         // as under way.
         let waiting = |id: &str| a.waiting.iter().any(|w| w.id == id) || self.forge.holds(id);
@@ -1702,9 +1796,7 @@ impl Worker {
                 let ours = line.badge == Some(Badge::Verified) || own;
                 let (mut update, mut state, mut state_kind) = match &line.standing {
                     Standing::Current => (String::new(), String::new(), 0),
-                    Standing::Update { to, by_itself: true } if downloaded(to) => {
-                        (shown(to), "Goes in when you press Play".into(), 1)
-                    }
+                    Standing::Update { to, by_itself: true } if downloaded(to) => (shown(to), "Goes in when you press Play".into(), 1),
                     Standing::Update { to, by_itself: true } => (shown(to), "Downloading; it goes in at a Play once it's here".into(), 1),
                     Standing::Update { to, by_itself: false } => {
                         let why = if ours && !to.sha256.is_empty() && auto && line.off {
@@ -1827,7 +1919,8 @@ impl Worker {
         // The addons another PC brings: their Safety and Status columns, from their own lines.
         rows.extend(self.share_incoming().into_iter().map(|mut row| {
             let level = row.badges.iter().find_map(|(text, kind)| text.strip_prefix("SurvivorsForge · ").map(|level| (level.to_string(), *kind)));
-            let ours = row.badges.iter().find(|(text, _)| !text.starts_with("SurvivorsForge · ")).cloned().unwrap_or_else(|| (row.badge.clone(), row.badge_kind));
+            let ours =
+                row.badges.iter().find(|(text, _)| !text.starts_with("SurvivorsForge · ")).cloned().unwrap_or_else(|| (row.badge.clone(), row.badge_kind));
             // "SurvivorsForge · verified (v1.2)": the level alone.
             let level = level.map(|(level, kind)| (level.split(" (").next().unwrap_or_default().to_string(), kind));
             row.safety = overview::safety_cell(Some((ours.0.as_str(), ours.1)), level.as_ref().map(|(l, k)| (l.as_str(), *k)));
@@ -1936,7 +2029,8 @@ impl Worker {
                 let badges: Vec<(String, i32)> =
                     ours.into_iter().chain(forge_badge(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref())).collect();
                 // Its level alone, for the table's Safety column and its filters.
-                let (trust, trust_kind) = forge_level(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref()).map_or((String::new(), 0), |(level, kind, _)| (level.to_string(), kind));
+                let (trust, trust_kind) = forge_level(&forge_view, o.forge_slug.as_deref(), &o.verdict, offered.as_deref())
+                    .map_or((String::new(), 0), |(level, kind, _)| (level.to_string(), kind));
                 // Who vouches for it: SurvivorsForge's level, else our list, else SurvivorsForge for
                 // one of its own while it gives no level.
                 let vouch = if o.origin == 2 { FORGE_BADGE } else { ("Discord Verified", 0) };
@@ -2020,9 +2114,7 @@ impl Worker {
                 let (note, warn) = match (warning, verified) {
                     (Some(w), _) => (w.clone(), true),
                     (None, Some(_)) => ("This is a Discord Verified addon: it installs as one and updates by itself.".into(), false),
-                    (None, None) => {
-                        ("Not reviewed by the game's devs. Addon code can't reach your PC, and it asks before each update.".into(), false)
-                    }
+                    (None, None) => ("Not reviewed by the game's devs. Addon code can't reach your PC, and it asks before each update.".into(), false),
                 };
                 LinkView { state: 2, message: String::new(), owner, release, goes_into: goes, note, warn, installing: false }
             }

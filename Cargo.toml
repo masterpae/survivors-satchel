@@ -3,7 +3,7 @@ members = ["crates/satchel-core", "tools/catalog", "tools/ui-preview"]
 
 [package]
 name = "survivors-satchel"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2024"
 rust-version = "1.99"
 description = "A Windows launcher for Azeroth Survivors: the same progress on every PC, playtime, addons."

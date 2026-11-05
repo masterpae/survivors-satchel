@@ -1,5 +1,5 @@
-# Every push to main and every pull request: the core tests, and the Windows exe built. A push to
-# main keeps its exe for a week as the run's artifact.
+# Every push to main and every pull request: the core tests, the Windows exe built, and the app's
+# own code linted and format-checked. A push to main keeps its exe for a week as the run's artifact.
 name: Check
 
 on:
@@ -33,6 +33,22 @@ jobs:
           name: SurvivorsSatchel-${{ github.sha }}
           path: dist/SurvivorsSatchel.exe
           retention-days: 7
+
+  # The app's own code, linted for the Windows target it ships on and checked against rustfmt.toml,
+  # in the build container: the toolchain that builds the exe. A job of its own, so a lint never
+  # hides whether the tests pass and the exe builds.
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Clippy
+        run: SATCHEL_LOCKED=1 sh build/build.sh clippy
+
+      - name: Rustfmt
+        run: sh build/build.sh fmt
 
   # Cargo.lock against RustSec's advisories. cargo-audit is the prebuilt binary from its GitHub
   # release, checked against the SHA-256 GitHub lists for that file before it runs. Dependabot

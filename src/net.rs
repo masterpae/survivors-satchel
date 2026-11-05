@@ -86,23 +86,47 @@ pub enum Job {
     GameNews { feed: Feed, etag: Option<String> },
 }
 
+// Sent once over the worker's channel and handled at once: a picture's pixels and the Satchel's
+// own offer make it wide, which costs nothing here.
+#[allow(clippy::large_enum_variant)]
 pub enum Answer {
     /// Per addon: a release newer than the ones known (or none), or why it couldn't be looked up.
     Looked(Vec<(String, Result<Option<Release>, String>)>),
     /// The file is in the cache under its checksum, or why not.
-    Fetched { id: String, tag: String, sha256: Result<String, String> },
+    Fetched {
+        id: String,
+        tag: String,
+        sha256: Result<String, String>,
+    },
     LookedUp(Result<Lookup, String>),
     /// A newer Satchel from GitHub, downloaded and checked; `None` when there's none.
     Satchel(Result<Option<Offer>, String>),
     ForgeRegistry(ForgeAnswer),
-    ForgeDetails { slug: String, answer: ForgeAnswer },
-    ForgeVersions { slug: String, answer: ForgeAnswer },
-    ForgeFindings { slug: String, tag: String, answer: ForgeAnswer },
+    ForgeDetails {
+        slug: String,
+        answer: ForgeAnswer,
+    },
+    ForgeVersions {
+        slug: String,
+        answer: ForgeAnswer,
+    },
+    ForgeFindings {
+        slug: String,
+        tag: String,
+        answer: ForgeAnswer,
+    },
     /// A picture decoded into RGBA pixels, scaled down to its use (`PictureKind::side`: an icon to
     /// `forge::ICON_SIDE`, a thumbnail to `forge::THUMB_SIDE`, a screenshot to `forge::SHOT_SIDE`),
     /// or why not, for the log.
-    Picture { url: String, kind: PictureKind, pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String> },
-    GameNews { feed: Feed, answer: NewsAnswer },
+    Picture {
+        url: String,
+        kind: PictureKind,
+        pixels: Result<SharedPixelBuffer<Rgba8Pixel>, String>,
+    },
+    GameNews {
+        feed: Feed,
+        answer: NewsAnswer,
+    },
 }
 
 /// How one of the game's patch-note sources answered, in `ForgeAnswer`'s shape with the
@@ -251,9 +275,7 @@ fn no_answer(url: &str, e: impl std::fmt::Display) -> String {
 
 /// A URL path segment: anything but letters, digits and `-._~` percent-encoded.
 fn segment(text: &str) -> String {
-    text.bytes()
-        .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
-        .collect()
+    text.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 /// An address on SurvivorsForge's API: its own host and a path made here, nothing else.
@@ -300,9 +322,7 @@ impl Net {
     fn location(&self, url: &str) -> Result<Option<String>, String> {
         let response = self.agent.get(url).config().max_redirects(0).build().call().map_err(|e| no_answer(url, e))?;
         match response.status().as_u16() {
-            301 | 302 | 303 | 307 | 308 => {
-                Ok(response.headers().get("location").and_then(|v| v.to_str().ok()).map(str::to_string))
-            }
+            301 | 302 | 303 | 307 | 308 => Ok(response.headers().get("location").and_then(|v| v.to_str().ok()).map(str::to_string)),
             404 => Err("its GitHub repository isn't there anymore".into()),
             200 => Ok(None),
             status => Err(format!("GitHub answered {status}")),
@@ -471,8 +491,7 @@ impl Net {
 
     /// A file of at most `limit` bytes, counted as they stream in.
     fn download_limited(&self, url: &str, limit: u64) -> Result<Vec<u8>, String> {
-        let mut response =
-            self.agent.get(url).config().timeout_global(Some(FILE_TIME)).build().call().map_err(|e| no_answer(url, e))?;
+        let mut response = self.agent.get(url).config().timeout_global(Some(FILE_TIME)).build().call().map_err(|e| no_answer(url, e))?;
         match response.status().as_u16() {
             200 => response.body_mut().with_config().limit(limit).read_to_vec().map_err(|e| no_answer(url, e)),
             status => Err(format!("GitHub answered {status}")),
@@ -487,7 +506,7 @@ impl Net {
             return Ok(None);
         };
         let Some(tag) = github::latest_tag(&watch.repo, &location) else { return Ok(None) };
-        if watch.known.iter().any(|k| *k == tag) {
+        if watch.known.contains(&tag) {
             return Ok(None);
         }
         let page = self.text(&format!("https://github.com/{}/releases/expanded_assets/{}", watch.repo, segment(&tag)))?;
@@ -535,10 +554,8 @@ impl Net {
         let expected = file.sha256.as_deref().ok_or_else(|| format!("GitHub published no checksum for the exe of {tag}"))?;
         // From 0.7.0 every release carries the maintainer's signature over the exe. A release
         // without one isn't offered, and its exe isn't even downloaded.
-        let signed = files
-            .iter()
-            .find(|f| f.name.eq_ignore_ascii_case(signing::SIGNATURE_NAME))
-            .ok_or_else(|| format!("its release {tag} carries no signature"))?;
+        let signed =
+            files.iter().find(|f| f.name.eq_ignore_ascii_case(signing::SIGNATURE_NAME)).ok_or_else(|| format!("its release {tag} carries no signature"))?;
         let path = dir.join(format!("SurvivorsSatchel-{}.exe", segment(&version)));
         let held = fsx::read_optional(&path).ok().flatten().is_some_and(|bytes| fsx::fingerprint(&bytes) == expected);
         if !held {

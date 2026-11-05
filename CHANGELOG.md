@@ -3,6 +3,15 @@
 What changed in each version of Survivor's Satchel, newest first. Every release gets a section
 here before it is built; changes on their way to the next release collect under **Unreleased**.
 
+## 0.9.1 (2026-11-05)
+
+Housekeeping, nothing new to see.
+
+### Changed
+- The app's insides are reorganised by concern (progress sync, addons, SurvivorsForge, the game's
+  notes, settings, the window), with no change in what the app does.
+- The code checks now also run clippy and rustfmt, so later changes stay tidy.
+
 ## 0.9.0 (2026-11-04)
 
 The design pass: a new shape for every screen, dark by default.

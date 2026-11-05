@@ -5,7 +5,8 @@
 //! the two (`game_news::merge`). The network thread asks; nothing here waits for it. The window
 //! only shows what is built here: nothing is parsed on the UI thread.
 
-use super::{Worker, clock, when};
+use super::Worker;
+use super::view_model::{clock, when};
 use crate::net::{Job, NewsAnswer};
 use crate::view::{GameNewsView, GameNote};
 use chrono::{DateTime, Local, Utc};
@@ -37,7 +38,14 @@ pub(super) struct NewsState {
 
 impl NewsState {
     pub(super) fn new(dir: PathBuf) -> NewsState {
-        NewsState { cache: game_news::Cache::open(dir), state: game_news::State::default(), latest: None, notes: Vec::new(), latest_out: false, notes_out: false }
+        NewsState {
+            cache: game_news::Cache::open(dir),
+            state: game_news::State::default(),
+            latest: None,
+            notes: Vec::new(),
+            latest_out: false,
+            notes_out: false,
+        }
     }
 
     fn out(&mut self, feed: Feed) -> &mut bool {
@@ -100,7 +108,7 @@ impl Worker {
             // The ETag only while the copy it names is still on disk.
             self.news.reread();
             let etag = self.news.state.source(feed).etag.clone();
-            let sent = self.addons.net.send(Job::GameNews { feed, etag }).is_ok();
+            let sent = self.net.send(Job::GameNews { feed, etag }).is_ok();
             *self.news.out(feed) = sent;
         }
     }
