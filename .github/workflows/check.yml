@@ -21,17 +21,13 @@ jobs:
       - name: Tests
         run: SATCHEL_LOCKED=1 sh build/build.sh test
 
-      # The app's own code, linted for the Windows target it ships on, with the toolchain the
-      # build container uses. The workspace's other crates are compiled for it, not linted.
+      # The app's own code, linted for the Windows target it ships on and checked against
+      # rustfmt.toml, in the build container: the toolchain that builds the exe.
       - name: Clippy
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal --component clippy --target x86_64-pc-windows-msvc
-          cargo +1.99.1 clippy --locked --no-deps --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+        run: SATCHEL_LOCKED=1 sh build/build.sh clippy
 
       - name: Rustfmt
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal --component rustfmt
-          cargo +1.99.1 fmt -p survivors-satchel -- --check
+        run: sh build/build.sh fmt
 
       - name: The exe
         env:

@@ -5,6 +5,8 @@
 #   sh build/build.sh preview   renders the screens to dist/preview/*.ppm (Linux, natively)
 #   sh build/build.sh catalog   refreshes catalog/catalog.json from catalog/sources.toml and GitHub;
 #                               the addon files it reads are downloaded inside the container only
+#   sh build/build.sh clippy    lints the app's own code for Windows; any warning fails
+#   sh build/build.sh fmt       checks the app's own code against rustfmt.toml; rewrites nothing
 # Environment:
 #   SATCHEL_BUILD_CACHE   host folder for crates, the Windows SDK and build output (default ./.build-cache)
 #   SATCHEL_DOCKER_ARGS   extra `docker run` arguments, e.g. "--cpus 6 --memory 16g"
@@ -50,13 +52,21 @@ case "${1:-exe}" in
         rm -rf dist/preview
         run cargo run --release $locked -p ui-preview -- dist/preview
         ;;
+    clippy)
+        # The app's own code, for the target it ships on. The workspace's other crates are compiled
+        # for it, not linted.
+        run cargo clippy $locked --no-deps --all-targets --target "$target" -- -D warnings
+        ;;
+    fmt)
+        run cargo fmt -p survivors-satchel -- --check
+        ;;
     exe)
         run cargo xwin build --release $locked --target "$target"
         cp "$cache/target/$target/release/SurvivorsSatchel.exe" dist/
         echo "dist/SurvivorsSatchel.exe"
         ;;
     *)
-        echo "usage: build.sh [exe|test|preview|catalog]" >&2
+        echo "usage: build.sh [exe|test|preview|catalog|clippy|fmt]" >&2
         exit 2
         ;;
 esac
