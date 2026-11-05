@@ -67,13 +67,13 @@ pub(super) struct ForgeState {
     cache: forge::Cache,
     /// What this PC remembers (the ETag, the last answer and try, the slugs listed, deleted and
     /// blocked), as of the cache's last change.
-    pub(super) state: forge::State,
+    state: forge::State,
     /// The registry as last received.
-    pub(super) registry: Option<forge::Registry>,
+    registry: Option<forge::Registry>,
     /// Our catalog's ids → their slugs.
-    pub(super) join: BTreeMap<String, String>,
+    join: BTreeMap<String, String>,
     /// Each slug's versions, as cached under its registry entry as it stands now.
-    pub(super) versions: BTreeMap<String, Vec<forge::Version>>,
+    versions: BTreeMap<String, Vec<forge::Version>>,
     /// The registry request is on its way.
     asking: bool,
     /// Requests on their way: details and versions by slug, findings by slug and tag.
@@ -162,6 +162,33 @@ impl ForgeState {
     /// Versions…' install of version `tag` of `id` waits for SurvivorsForge's word on it.
     pub(super) fn holds_version(&self, id: &str, tag: &str) -> bool {
         self.held.iter().any(|(_, _, held)| matches!(held, Held::Version { id: i, tag: t, .. } if i == id && t == tag))
+    }
+
+    /// The registry's entry for `slug`, as last received.
+    pub(super) fn listed(&self, slug: &str) -> Option<&forge::ForgeAddon> {
+        self.registry.as_ref()?.get(slug)
+    }
+
+    /// `slug`'s versions, as cached under its registry entry as it stands now.
+    pub(super) fn versions(&self, slug: &str) -> Option<&[forge::Version]> {
+        self.versions.get(slug).map(Vec::as_slice)
+    }
+
+    /// The installs that waited for `slug`'s versions, taken out to be decided with what came.
+    fn take_held(&mut self, slug: &str) -> Vec<(String, String, Held)> {
+        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held).into_iter().partition(|(s, _, _)| s.as_str() == slug);
+        self.held = rest;
+        mine
+    }
+
+    /// A version just asked about is decided with what is known: while it is, `forge_ask_first`
+    /// doesn't ask again.
+    pub(super) fn deciding(&mut self, key: (String, String)) {
+        self.asked.insert(key);
+    }
+
+    pub(super) fn decided(&mut self, key: &(String, String)) {
+        self.asked.remove(key);
     }
 
     /// The cache's state again, after it changed.
@@ -339,7 +366,7 @@ impl Worker {
     pub(super) fn forge_load(&mut self) {
         let f = &mut self.forge;
         f.registry = f.cache.registry().map(|(registry, _)| registry);
-        f.join = f.registry.as_ref().map(|registry| forge::join(&self.addons.catalog, registry)).unwrap_or_default();
+        f.join = f.registry.as_ref().map(|registry| forge::join(self.addons.catalog(), registry)).unwrap_or_default();
         f.reload_versions();
     }
 
@@ -358,8 +385,8 @@ impl Worker {
     }
 
     /// The registry's answer, kept with its bookkeeping: a 304 keeps what is there, and anything
-    /// but an answer counts as a try (the next one waits its 30 minutes). Then the lists again:
-    /// verdicts, badges and SurvivorsForge's own offers follow it.
+    /// but an answer counts as a try (the next one waits its 30 minutes). The lists go again after
+    /// it (the caller's part): verdicts, badges and SurvivorsForge's own offers follow it.
     pub(super) fn forge_registry_answer(&mut self, answer: ForgeAnswer) {
         let now = Utc::now();
         let f = &mut self.forge;
@@ -374,7 +401,7 @@ impl Worker {
                     if !elsewhere.is_empty() {
                         log!("SurvivorsForge's registry: the icons of {} are on another host, so they aren't fetched", elsewhere.join(", "));
                     }
-                    f.join = forge::join(&self.addons.catalog, &registry);
+                    f.join = forge::join(self.addons.catalog(), &registry);
                     f.registry = Some(registry);
                     // What was fetched under an entry that changed is stale: it is asked for again
                     // at the next open or install.
@@ -398,12 +425,12 @@ impl Worker {
             self.forge.keep_details(&slug, details);
         }
         self.forge.reread();
-        self.addons_lines();
     }
 
     /// An addon's details (its panel opened, or a dropped addon's check), kept; a blocked addon is
     /// remembered as blocked (the cache sees to it). A dropped addon's 404 means it was deleted
-    /// there, so our rule applies to it again.
+    /// there, so our rule applies to it again. The lists go again after it, then the open addon's
+    /// pictures, now known (`forge_thumbs_again`): the caller's part.
     pub(super) fn forge_details_answer(&mut self, slug: &str, answer: ForgeAnswer) {
         let f = &mut self.forge;
         f.details_out.remove(slug);
@@ -433,14 +460,12 @@ impl Worker {
             }
         }
         f.reread();
-        self.addons_lines();
-        // The open addon's pictures are known now: the frames shown get their thumbnails.
-        self.forge_thumbs_again();
     }
 
-    /// An addon's versions (its panel opened, or an install asked about its version), kept; then
-    /// the lists again, and the installs that waited for them decided.
-    pub(super) fn forge_versions_answer(&mut self, slug: &str, answer: ForgeAnswer) {
+    /// An addon's versions (its panel opened, or an install asked about its version), kept. The
+    /// installs that waited for them are returned, to be decided with what came once the lists
+    /// have gone again (`install_held`, the caller's part).
+    pub(super) fn forge_versions_answer(&mut self, slug: &str, answer: ForgeAnswer) -> Vec<(String, String, Held)> {
         let f = &mut self.forge;
         f.versions_out.remove(slug);
         match answer {
@@ -456,10 +481,7 @@ impl Worker {
             }
         }
         f.reload_versions();
-        self.addons_lines();
-        self.forge_release_held(slug);
-        // An incoming addon OK'd while its version's word was asked for comes in now, if it may.
-        self.share_follow_now(false);
+        self.forge.take_held(slug)
     }
 
     /// A version's findings, asked for by "Show what it found": kept, for the panel.
@@ -508,28 +530,6 @@ impl Worker {
         true
     }
 
-    /// The installs that waited for `slug`'s versions, decided now with what came: an answer that
-    /// failed counts as nothing known. What went in goes to the other PCs.
-    fn forge_release_held(&mut self, slug: &str) {
-        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.forge.held).into_iter().partition(|(s, _, _)| s.as_str() == slug);
-        self.forge.held = rest;
-        if mine.is_empty() {
-            return;
-        }
-        for (slug, tag, held) in mine {
-            let key = (slug, tag);
-            self.forge.asked.insert(key.clone());
-            match held {
-                Held::Install { id, anyway } => self.browse_install_with(&id, anyway),
-                Held::Update { id, anyway } => self.addon_update_as(&id, anyway, true),
-                Held::Again { id, anyway } => self.install_again_as(&id, anyway, true),
-                Held::Version { id, tag, anyway } => self.version_install_as(&id, &tag, anyway, true),
-            }
-            self.forge.asked.remove(&key);
-        }
-        self.share_look();
-    }
-
     /// SurvivorsForge's word on version `tag` of its own addon `slug` isn't cached, and it can be
     /// asked about it for an addon another PC brings: switch on, listed now, answering, not asked
     /// yet.
@@ -562,7 +562,7 @@ impl Worker {
         match forge::slug_in(id) {
             Some(slug) => view.switch_on.then(|| slug.to_string()),
             None => {
-                let entry = self.addons.catalog.get(id)?;
+                let entry = self.addons.catalog().get(id)?;
                 view.slug_for(None, Some(entry.id.as_str()), Some(entry.repo.as_str()))
             }
         }
@@ -574,8 +574,8 @@ impl Worker {
         if let Some(slug) = forge::slug_in(id) {
             return self.forge.registry.as_ref()?.get(slug)?.latest.as_ref().map(|l| l.tag.clone());
         }
-        let entry = self.addons.catalog.get(id)?;
-        Some(self.addons.newer.get(id).map_or_else(|| entry.latest.tag.clone(), |r| r.tag.clone()))
+        let entry = self.addons.catalog().get(id)?;
+        Some(self.addons.newer(id).map_or_else(|| entry.latest.tag.clone(), |r| r.tag.clone()))
     }
 
     /// The repository of an addon only on SurvivorsForge (`forge:<slug>`), as listed now or before.
@@ -596,7 +596,7 @@ impl Worker {
     /// SurvivorsForge's for the slug it lists the addon under: its registry's latest, or one of its
     /// versions (cached).
     pub(super) fn forge_published(&self, id: &str, slug: Option<&str>, tag: &str) -> Option<DateTime<Utc>> {
-        self.addons.catalog.published(id, tag).or_else(|| {
+        self.addons.catalog().published(id, tag).or_else(|| {
             let slug = slug?;
             let latest = self.forge.registry.as_ref().and_then(|r| r.get(slug)).and_then(|e| e.latest.as_ref()).filter(|l| l.tag == tag);
             latest.and_then(|l| l.published_at).or_else(|| self.forge.versions.get(slug)?.iter().find(|v| v.tag == tag)?.published_at)
@@ -638,8 +638,8 @@ impl Worker {
         self.forge.shown = page;
         if self.forge_icons_allowed() {
             let urls: Vec<String> = match page {
-                0 => self.addons.lines.iter().filter_map(|l| l.icon_url.clone()).collect(),
-                1 => self.addons.offers.iter().filter_map(|o| o.icon_url.clone()).collect(),
+                0 => self.addons.lines().iter().filter_map(|l| l.icon_url.clone()).collect(),
+                1 => self.addons.offers().iter().filter_map(|o| o.icon_url.clone()).collect(),
                 _ => Vec::new(),
             };
             for url in urls {
@@ -675,7 +675,7 @@ impl Worker {
 
     /// The thumbnails of the frames shown, asked for again where they may be (after the details
     /// came, Browse shown again); where they may not, what waits is dropped.
-    fn forge_thumbs_again(&mut self) {
+    pub(super) fn forge_thumbs_again(&mut self) {
         if self.forge_thumbs_allowed()
             && let Some((id, frames)) = self.forge.thumbs_for.clone()
         {
@@ -909,17 +909,16 @@ impl Worker {
     /// are the shown version's, its downloads per version, the scan, the folders and the action.
     pub(super) fn forge_panel(&self) -> Option<PanelLine> {
         let id = self.forge.open.as_deref()?;
-        let a = &self.addons;
-        let offer = a.offers.iter().find(|o| o.id == id)?;
+        let offer = self.addons.offers().iter().find(|o| o.id == id)?;
         let view = self.forge_view();
         let online = view.online();
         let slug = offer.forge_slug.as_deref();
         let listed = slug.and_then(|s| view.entry(s));
         let details = slug.and_then(|s| self.forge.details.get(s));
-        let catalog = a.catalog.get(id);
+        let catalog = self.addons.catalog().get(id);
         let tag = self.offer_tag(id).unwrap_or_default();
         // Our notes are our catalog's latest's: shown only under that version.
-        let (notes_title, notes) = match catalog.filter(|_| !a.newer.contains_key(id)).and_then(|e| e.latest.notes.as_deref().map(|n| (e, n))) {
+        let (notes_title, notes) = match catalog.filter(|_| self.addons.newer(id).is_none()).and_then(|e| e.latest.notes.as_deref().map(|n| (e, n))) {
             Some((entry, notes)) => (format!("What's new in {}", entry.latest.shown_version()), overview::plain_notes(notes, 700)),
             None => (String::new(), String::new()),
         };
@@ -973,17 +972,16 @@ impl Worker {
         }
         let folders = match forge::slug_in(&offer.id) {
             Some(slug) => self.forge_folders(Some(slug)).unwrap_or_default(),
-            None => self.addons.catalog.get(&offer.id).map(|e| e.folders.clone()).unwrap_or_default(),
+            None => self.addons.catalog().get(&offer.id).map(|e| e.folders.clone()).unwrap_or_default(),
         };
-        overview::installed_line(&offer.id, &offer.repo, &folders, &self.addons.lines)
+        overview::installed_line(&offer.id, &offer.repo, &folders, self.addons.lines())
     }
 
     /// An offer's button, and the reason above it, in its pane and on its table row: Install;
     /// Install anyway when SurvivorsForge asks first; Installing…; Installed; or, for an installed
     /// addon with a newer version, Update or Update anyway.
     pub(super) fn panel_action(&self, offer: &Offer) -> (i32, String) {
-        let a = &self.addons;
-        let busy = a.waiting.iter().any(|w| w.id == offer.id) || self.forge.holds(&offer.id);
+        let busy = self.addons.waits_for(&offer.id) || self.forge.holds(&offer.id);
         if busy {
             return (2, String::new());
         }
@@ -993,7 +991,7 @@ impl Worker {
                 _ => (0, String::new()),
             };
         }
-        let line = a.lines.iter().find(|l| l.id == offer.id);
+        let line = self.addons.lines().iter().find(|l| l.id == offer.id);
         let update = line.is_some_and(|l| matches!(l.standing, Standing::Update { .. } | Standing::Kept { newer: Some(_) }));
         match line.map(|l| &l.verdict) {
             Some(Verdict::Go) if update => (4, String::new()),

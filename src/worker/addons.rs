@@ -168,6 +168,33 @@ impl AddonsState {
     }
 }
 
+impl AddonsState {
+    /// Our list of verified addons, built in.
+    pub(super) fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    /// The Installed list as last built.
+    pub(super) fn lines(&self) -> &[Line] {
+        &self.lines
+    }
+
+    /// Browse's offers as last built.
+    pub(super) fn offers(&self) -> &[Offer] {
+        &self.offers
+    }
+
+    /// A release newer than the catalog or the record knows, from GitHub's page, for an addon.
+    pub(super) fn newer(&self, id: &str) -> Option<&Release> {
+        self.newer.get(id)
+    }
+
+    /// Whether an install of `id` waits for its download (or for the game to close).
+    pub(super) fn waits_for(&self, id: &str) -> bool {
+        self.waiting.iter().any(|w| w.id == id)
+    }
+}
+
 /// The record store, or an empty one when it can't be read (kept aside as `addons.json.broken`):
 /// the addons in AddOns are then recognised again from their files.
 pub(super) fn load_store(path: &Path) -> Store {
@@ -647,6 +674,27 @@ impl Worker {
         }
         self.activity(Kind::Addon, &text);
         Ok(text)
+    }
+
+    /// The installs that waited for SurvivorsForge's versions of an addon, decided now with what
+    /// came (`forge_versions_answer`): an answer that failed counts as nothing known. What went in
+    /// goes to the other PCs.
+    pub(super) fn install_held(&mut self, held: Vec<(String, String, Held)>) {
+        if held.is_empty() {
+            return;
+        }
+        for (slug, tag, held) in held {
+            let key = (slug, tag);
+            self.forge.deciding(key.clone());
+            match held {
+                Held::Install { id, anyway } => self.browse_install_with(&id, anyway),
+                Held::Update { id, anyway } => self.addon_update_as(&id, anyway, true),
+                Held::Again { id, anyway } => self.install_again_as(&id, anyway, true),
+                Held::Version { id, tag, anyway } => self.version_install_as(&id, &tag, anyway, true),
+            }
+            self.forge.decided(&key);
+        }
+        self.share_look();
     }
 
     /// Installs now when the download is here, else as soon as it is.
@@ -1492,8 +1540,8 @@ impl Worker {
             Some(own) => view.switch_on.then(|| own.to_string()),
             None => catalog.and_then(|e| view.slug_for(None, Some(e.id.as_str()), Some(e.repo.as_str()))),
         };
-        let listed = slug.as_deref().filter(|_| view.switch_on).and_then(|s| self.forge.registry.as_ref()?.get(s));
-        let versions = slug.as_deref().filter(|_| listed.is_some()).and_then(|s| self.forge.versions.get(s)).map(Vec::as_slice);
+        let listed = slug.as_deref().filter(|_| view.switch_on).and_then(|s| self.forge.listed(s));
+        let versions = slug.as_deref().filter(|_| listed.is_some()).and_then(|s| self.forge.versions(s));
         (overview::VersionsOf { record, catalog, listed, versions }, slug)
     }
 

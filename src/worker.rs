@@ -587,9 +587,24 @@ impl Worker {
             Answer::Fetched { id, tag, sha256 } => self.addons_fetched(id, tag, sha256),
             Answer::Picture { url, kind, pixels } => self.forge_picture_answer(&url, kind, pixels),
             Answer::Satchel(result) => self.satchel_answer(result),
-            Answer::ForgeRegistry(answer) => self.forge_registry_answer(answer),
-            Answer::ForgeDetails { slug, answer } => self.forge_details_answer(&slug, answer),
-            Answer::ForgeVersions { slug, answer } => self.forge_versions_answer(&slug, answer),
+            // The lists follow what SurvivorsForge says: verdicts, badges and its own offers.
+            Answer::ForgeRegistry(answer) => {
+                self.forge_registry_answer(answer);
+                self.addons_lines();
+            }
+            Answer::ForgeDetails { slug, answer } => {
+                self.forge_details_answer(&slug, answer);
+                self.addons_lines();
+                // The open addon's pictures are known now: the frames shown get their thumbnails.
+                self.forge_thumbs_again();
+            }
+            Answer::ForgeVersions { slug, answer } => {
+                let held = self.forge_versions_answer(&slug, answer);
+                self.addons_lines();
+                self.install_held(held);
+                // An incoming addon OK'd while its version's word was asked for comes in now, if it may.
+                self.share_follow_now(false);
+            }
             Answer::ForgeFindings { slug, tag, answer } => self.forge_findings_answer(&slug, &tag, answer),
             Answer::GameNews { feed, answer } => self.news_answer(feed, answer),
             Answer::LookedUp(result) => self.addons_looked_up(result),
