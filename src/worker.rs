@@ -4,12 +4,12 @@
 mod addons;
 mod forge;
 mod game_news;
+mod self_update;
 mod share;
 
 use crate::net::{self, Answer, Job};
 use crate::about;
-use crate::update;
-use crate::view::{Answered, Form, FormView, PcLine, Pill, PlaytimeView, RailView, Recent, SaveLine, Setup, Tray, Ui, UpdateLine, View};
+use crate::view::{Answered, Form, FormView, PcLine, Pill, PlaytimeView, RailView, Recent, SaveLine, Setup, Tray, Ui, View};
 use crate::win;
 use chrono::{DateTime, Datelike, Local, Utc};
 use satchel_core::activity::{self, Kind};
@@ -33,11 +33,6 @@ use std::time::{Duration, Instant, SystemTime};
 const TICK: Duration = Duration::from_secs(2);
 const REFRESH_EVERY: Duration = Duration::from_secs(60);
 const RETRY_EVERY: Duration = Duration::from_secs(180);
-/// How often the Satchel's own GitHub releases are looked at, in a build that knows its
-/// repository; sooner after a look that failed, and soon when a newer Satchel keeps this one out.
-const SATCHEL_LOOK_EVERY: Duration = Duration::from_secs(6 * 3600);
-const SATCHEL_RETRY_EVERY: Duration = Duration::from_secs(20 * 60);
-const SATCHEL_GATED_EVERY: Duration = Duration::from_secs(10 * 60);
 /// A write to the live save is checkpointed once it has been quiet this long.
 const SETTLE: Duration = Duration::from_secs(3);
 /// How long a one-off message (a notice) stays on the rail's progress line, and the progress
@@ -228,24 +223,9 @@ pub struct Worker {
     play_anyway: bool,
     /// This PC's own in-use marker from an earlier run has been dealt with (or there was none).
     leftover_done: bool,
-    /// A newer Satchel from its GitHub release: downloaded, checked against its checksum and the
-    /// version it calls itself, its signature verified. The only update there is: since 0.7.0
-    /// nothing is taken from the network folder.
-    github_offer: Option<update::Offer>,
-    satchel_looked: Option<Instant>,
-    satchel_failed: bool,
-    /// Check for updates asked GitHub: its answer finishes the check.
-    check_pending: bool,
-    /// What Check for updates found, shown in About until the next check or an update.
-    check_result: Option<String>,
-    /// How many times Check for updates was taken up: the window shows "Checking…" from the
-    /// click until a view counts it (and, while `check_pending`, after that too).
-    checks: u32,
     gated: Option<String>,
     /// The loop ends after this step (an update started the new Satchel).
     quit: bool,
-    /// Update now was pressed while a session was closing: it goes in when the session is over.
-    update_after_session: bool,
     /// The Play card's question is the version check's: it offers Update now.
     card_gate: bool,
     card: Option<(Vec<(String, bool, bool)>, bool)>,
@@ -258,20 +238,11 @@ pub struct Worker {
     last_view: Option<View>,
     /// The one channel to the network thread; it answers on the worker's own (`Command::Net`).
     net: Sender<Job>,
+    update: self_update::UpdateState,
     addons: addons::AddonsState,
     share: share::ShareState,
     forge: forge::ForgeState,
     news: game_news::NewsState,
-}
-
-/// How a Satchel that a newer one keeps out gets the new one while none is on offer: from GitHub,
-/// the only place updates come from.
-fn update_hint() -> &'static str {
-    if about::REPOSITORY.is_empty() {
-        "Get the new Satchel from its GitHub releases to update this one."
-    } else {
-        "Update now shows here once the new Satchel has downloaded from GitHub."
-    }
 }
 
 fn due(last: Option<Instant>, every: Duration) -> bool {
@@ -379,6 +350,7 @@ impl Worker {
         let news = game_news::NewsState::new(engine.local.game_news_dir());
         Worker {
             net,
+            update: self_update::UpdateState::default(),
             addons: addons::AddonsState::new(store),
             share: share::ShareState::new(memory),
             forge,
@@ -413,15 +385,8 @@ impl Worker {
             pending_play: false,
             play_anyway: false,
             leftover_done: false,
-            github_offer: None,
-            satchel_looked: None,
-            satchel_failed: false,
-            check_pending: false,
-            check_result: None,
-            checks: 0,
             gated: None,
             quit: false,
-            update_after_session: false,
             card_gate: false,
             card: None,
             card_until: None,
@@ -961,9 +926,7 @@ impl Worker {
         }
         self.refresh();
         self.addons_after_session();
-        if std::mem::take(&mut self.update_after_session) {
-            self.update_now();
-        }
+        self.update_on_session_over();
     }
 
     // Play, sync, choices ---------------------------------------------------------------------
@@ -1026,7 +989,7 @@ impl Worker {
                 if !std::mem::take(&mut self.play_anyway) {
                     let update = match self.offer() {
                         Some(offer) => format!(" Update now puts {} here and plays.", offer.version),
-                        None => format!(" {}", update_hint()),
+                        None => format!(" {}", self_update::update_hint()),
                     };
                     self.card_ask(format!(
                         "Another PC uses Survivor's Satchel {newer} and this one is {}, so nothing syncs until it's updated. Playing now plays this PC's progress, synced after the update.{update}",
@@ -2186,9 +2149,9 @@ impl Worker {
             game_found: self.game_dir().is_some(),
             game_settings,
             update,
-            check_result: self.check_result.clone().unwrap_or_default(),
-            checking: self.check_pending,
-            checks: self.checks,
+            check_result: self.update.check_result(),
+            checking: self.update.checking(),
+            checks: self.update.checks(),
             card_update: if self.card_gate { self.offer().map(|o| o.version.clone()).unwrap_or_default() } else { String::new() },
             game_news: news,
         };
@@ -2260,23 +2223,6 @@ impl Worker {
         (dark, system)
     }
 
-    /// After an update, the top bar's pill says "Updated to …" until this version's What's new is
-    /// opened: a PC that ran an earlier Satchel (its first start done) and hasn't opened it; a new
-    /// install sets the version at its first start.
-    fn version_new(&self) -> bool {
-        let state = &self.engine.state;
-        state.setup_done && state.seen_version.as_deref() != Some(about::VERSION)
-    }
-
-    fn whats_new_seen(&mut self) {
-        if self.engine.state.seen_version.as_deref() != Some(about::VERSION) {
-            self.engine.state.seen_version = Some(about::VERSION.into());
-            if let Err(e) = self.engine.save_state() {
-                log!("state not saved: {e}");
-            }
-        }
-    }
-
     /// The no-game panel's Find it: the game looked for in the usual folders, and kept when it
     /// passes the check a folder typed in Settings does; Settings shows it.
     fn find_game(&mut self) {
@@ -2318,144 +2264,6 @@ impl Worker {
         let export = self.engine.exports().ok()?.into_iter().next()?;
         let bytes = fs::read(&export.path).ok()?;
         (fsx::fingerprint(&bytes) != local.sha256).then_some(export.name)
-    }
-
-    /// Update now: the Satchel downloaded from GitHub takes this one's place and starts (playing,
-    /// when asked from Play), and this one closes.
-    fn update_now(&mut self) {
-        if self.game_dir().is_some_and(|d| self.scanner.game_running(&d)) {
-            self.warn("Close the game first: the Satchel updates while the game is closed.".into());
-            return;
-        }
-        // The session closes up to a few minutes after the game (playtime, this PC's in-use
-        // marker): the update waits for that.
-        if self.tracker.in_session() {
-            self.update_after_session = true;
-            self.say("The update goes in as soon as this session has closed, within a few minutes.".into());
-            return;
-        }
-        let Some(offer) = self.offer().cloned() else {
-            self.say("There's no newer Satchel to update from.".into());
-            return;
-        };
-        self.check_result = None;
-        self.busy = Some(format!("Updating to {}…", offer.version));
-        self.push();
-        match update::install(&offer, self.pending_play) {
-            Ok(()) => {
-                log!("updating to {}: the new Satchel starts, this one closes", offer.version);
-                self.quit = true;
-            }
-            Err(e) => {
-                self.busy = None;
-                log!("the update to {} failed: {e}", offer.version);
-                let by_hand = about::repository_url().map(|url| format!("; the new one can also be downloaded from {url}/releases")).unwrap_or_default();
-                self.warn(format!("The Satchel didn't update ({e}). It goes on as it was{by_hand}."));
-            }
-        }
-    }
-
-    /// About's Check for updates: in a build that knows its repository, GitHub is asked now
-    /// instead of at the next look, and its answer finishes the check (`satchel_answer`). What was
-    /// found shows under the button and in the banner.
-    fn check_updates(&mut self) {
-        // Counted first: whatever happens below, the next view ends the window's own "Checking…"
-        // (a check that asks GitHub goes on showing it until the answer).
-        self.checks += 1;
-        // Pending only once the question is on its way to the network thread: a hand-off that
-        // failed would otherwise keep "Checking…" up until the Satchel restarts.
-        let asks_github = !about::REPOSITORY.is_empty();
-        if asks_github {
-            self.satchel_looked = None;
-            self.check_pending = self.satchel_look();
-        }
-        let text = if self.check_pending {
-            "Checking GitHub…".to_string()
-        } else if let Some(offer) = self.offer() {
-            format!("Checked: {}", offer.ready())
-        } else if asks_github {
-            "Checked: GitHub couldn't be asked".into()
-        } else {
-            "Checked: this build doesn't look on GitHub for updates".into()
-        };
-        self.check_result = Some(text.clone());
-        let failed = asks_github && !self.check_pending && self.offer().is_none();
-        self.tell(text, failed);
-    }
-
-    /// The newer Satchel on offer: downloaded from GitHub, checked and verified.
-    fn offer(&self) -> Option<&update::Offer> {
-        self.github_offer.as_ref()
-    }
-
-    /// In a build that knows its repository: the Satchel's newest GitHub release, on start and
-    /// every few hours (sooner after a failed look). A newer one is downloaded, checked and its
-    /// signature verified, then offered (Update now). When a newer Satchel keeps this one out and nothing
-    /// offers it yet, that very release is looked for, every few minutes. True when a look was
-    /// handed to the network thread just now.
-    fn satchel_look(&mut self) -> bool {
-        if about::REPOSITORY.is_empty() {
-            return false;
-        }
-        let want = self.gated.clone().filter(|newer| self.offer().is_none_or(|o| gate::is_newer(newer, &o.version)));
-        let every = match (&want, self.satchel_failed) {
-            (Some(_), _) => SATCHEL_GATED_EVERY,
-            (None, true) => SATCHEL_RETRY_EVERY,
-            (None, false) => SATCHEL_LOOK_EVERY,
-        };
-        if !due(self.satchel_looked, every) {
-            return false;
-        }
-        self.satchel_looked = Some(Instant::now());
-        self.net.send(Job::Satchel { repo: about::REPOSITORY.into(), dir: self.engine.local.satchel_download(), want }).is_ok()
-    }
-
-    fn satchel_answer(&mut self, result: Result<Option<update::Offer>, String>) {
-        self.satchel_failed = result.is_err();
-        let failed = match result {
-            Ok(offer) => {
-                self.github_offer = offer;
-                None
-            }
-            Err(e) => {
-                log!("the Satchel's GitHub release not taken: {e}");
-                // An offer stays only while its files do: a refused release takes everything
-                // downloaded with it.
-                if self.github_offer.as_ref().is_some_and(|o| !o.source.is_file() || !o.signature.is_file()) {
-                    self.github_offer = None;
-                }
-                Some(e)
-            }
-        };
-        // The answer Check for updates waits for.
-        if std::mem::take(&mut self.check_pending) {
-            // GitHub not answering, or a release refused, is a problem; anything else news.
-            let problem = failed.is_some() && self.offer().is_none();
-            let text = match (self.offer(), failed) {
-                (Some(offer), _) => format!("Checked: {}", offer.ready()),
-                // No answer says so itself ("GitHub didn't answer (…)"); else a release was refused
-                // (no checksum, a wrong one, another version inside, no signature or a wrong one).
-                (None, Some(e)) if e.starts_with(net::NO_ANSWER) => format!("Checked: {e}"),
-                (None, Some(e)) => format!("Checked: nothing could be taken from GitHub ({e})"),
-                (None, None) => format!("Checked: you have the newest version ({})", about::VERSION),
-            };
-            self.check_result = Some(text.clone());
-            self.tell(text, problem);
-        }
-    }
-
-    /// The Play tab's update line; the banner says why nothing syncs when the version check
-    /// keeps this Satchel out.
-    fn update_line(&self) -> UpdateLine {
-        match (&self.gated, self.offer()) {
-            (gated, Some(offer)) => UpdateLine {
-                text: format!("Survivor's Satchel {}.", offer.ready()),
-                version: offer.version.clone(),
-                gated: gated.is_some(),
-            },
-            (Some(_), None) => UpdateLine { text: update_hint().into(), version: String::new(), gated: true },
-            (None, None) => UpdateLine::default(),
-        }
     }
 
     fn open_card(&mut self) {
