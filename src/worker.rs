@@ -5,6 +5,7 @@ mod addons;
 mod feedback;
 mod forge;
 mod game_news;
+mod game_settings;
 mod playtime;
 mod self_update;
 mod settings;
@@ -158,6 +159,7 @@ pub struct Worker {
     /// The loop ends after this step (an update started the new Satchel).
     quit: bool,
     sync: sync::SyncState,
+    game_settings: game_settings::GameSettingsState,
     feedback: feedback::Feedback,
     settings: settings::SettingsState,
     view: view_model::ViewState,
@@ -251,6 +253,7 @@ impl Worker {
             epoch: Instant::now(),
             quit: false,
             sync: sync::SyncState::default(),
+            game_settings: game_settings::GameSettingsState::default(),
             feedback: feedback::Feedback::default(),
             settings: settings::SettingsState::new(first_start),
             view: view_model::ViewState::default(),
