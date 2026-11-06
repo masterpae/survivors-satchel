@@ -42,7 +42,7 @@ tauri-winrt-notification = "0.8.1"
 # alone leaves it out, and every https call panics); that feature also builds in a root list,
 # which the agent never uses (RootCerts::PlatformVerifier). Pinned to a release with weeks in use
 # (29 Oct 2026); its own dependencies are held by Cargo.lock.
-ureq = { version = "=3.4.2", default-features = false, features = ["native-tls"] }
+ureq = { version = "=3.5.0", default-features = false, features = ["native-tls"] }
 serde = "1.0.229"
 serde_json = "1.0.154"
 windows = { version = "0.62", features = [
