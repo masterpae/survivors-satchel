@@ -23,7 +23,7 @@ toml = "1.1.8"
 # reading code is read against ours. 9.0.4 (16 Oct 2026) changed: names are fallible and read as
 # UTF-8 whenever they are valid UTF-8; an entry made on MS-DOS has no Unix mode (package.rs judges
 # the raw bits for links); a read past the declared size fails; a bad Unicode-path field is ignored.
-zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
