@@ -16,4 +16,4 @@ toml = "1.1.8"
 # Runs on Linux only (the build host, later a robot on GitHub): rustls with its own root
 # certificates. Pinned to a release with weeks in use (3.4.3 and 3.5.0 were 8 days old on
 # 29 Oct 2026).
-ureq = "=3.4.2"
+ureq = "=3.5.0"
