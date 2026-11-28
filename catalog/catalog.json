@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "generated": "2026-11-27T13:55:46.246602600Z",
+  "generated": "2026-11-28T13:02:19.321785845Z",
   "discord_checked": "2026-11-04",
   "addons": [
     {
@@ -31,7 +31,7 @@
           "AetherHUD": "76669716061d7adbc522392b792d5c9c0b03da2abd9e25e0c7c0a907e650af9d"
         },
         "notes": "Boss warnings, run records with personal bests, and pointers to downed party members.\n\n## New\n\n- **Boss warnings:** the last 10 seconds before each boss show as a big countdown over your hero, with the boss's name (red, or gold for the final boss) and the raid-warning sound as it starts. A boss that turns enraged flashes ENRAGED for a moment.\n- **Run records:** when a run ends, a record opens with the result and 12 numbers: time, level, kills, damage per second, damage, gold, bosses, elites, guardians, caches, damage taken and magnets. Under each is your best for that zone and class, or a gold **NEW BEST** where you beat it. Time counts the fastest win, or in a run you lost, the longest you lasted. Your last 30 runs are listed on the right. `/aether runs` opens it any time.\n- **Downed allies (co-op):** when a party member goes down, a plate names them with how far they are (in reach, close, in sight, far) or how far along your revive is. A pulsing red gem on the minimap's ring and a small compass on their party frame point to where they lie (north-up, like the minimap).\n- `/aether` has two more switches: the boss-warning sound, and whether the run record opens by itself when a run ends. There's also a **Run records** button.\n\n## Notes\n\n- Bests are kept per zone and class (endless runs separately), shared by every hero on your account, and saved when you leave the world.\n- Every new part can be switched off in `/aether`, and moved with `/aether unlock`.\n\n## Install\n\n1. Download `AetherHUD.zip` below.\n2. Delete the old `AetherHUD` folder from `benilla-config/AddOns/`, then unzip the new one there, so you end up with `benilla-config/AddOns/AetherHUD/AetherHUD.toc`.\n   **Browser:** Options → AddOns → install the zip.\n\nYour settings and frame positions carry over.\n\nSHA-256 of `AetherHUD.zip`: `11f2955a1706b84bb427f148de792d27d305b78a52a9190b089cf00a3481265e`",
-        "downloads": 1429
+        "downloads": 1435
       },
       "earlier": [
         {
@@ -69,7 +69,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1476
+      "downloads": 1482
     },
     {
       "id": "blackwell-ui",
@@ -99,7 +99,7 @@
           "BlackwellUI": "f5e227e4370609ca8c662d2a1d2f7410606e56c09ec0172a477b17e915fec783"
         },
         "notes": "Two requests from the Discord, thanks for the feedback!\n\n## Raid markers from the unit frames\n\n- **Right click** the hero, target, pet or party frames to open the game's unit menu, including **Raid Target Icon**.\n- **Left click** targets the unit (target of target is clickable too).\n- Raid target icons now show on the hero, target and party frames.\n\n## Revive bar\n\n- New round bar for party revives: how far a friend is bringing you back, or how far you are bringing a friend back, in the game's own wording for your language.\n- It replaces the game's revive bar while it is on. Switch it off, set its width and colour under `/bw` → Cast Bar → Revive bar. Move it with `/bw unlock`.\n\n## Install\n\nDownload `BlackwellUI.zip` below and extract it to `AzerothSurvivors\\benilla-config\\AddOns\\` (replace the old `BlackwellUI` folder). Your settings are kept.",
-        "downloads": 867
+        "downloads": 871
       },
       "earlier": [
         {
@@ -116,7 +116,7 @@
             "BlackwellUI": "7c2a991d46fdfb7f60421bd8c1b2720bda90071c8691d456b4c8227579b0f6c2"
           },
           "notes": "![BlackwellUI 2.8](https://raw.githubusercontent.com/Blackwellcode/BlackwellUI/main/media/screenshots/hero-round.jpg)\n\n## The new round look\n\nEvery frame is redrawn: panels, bars, buttons, tooltips, the character window and the control center now have rounded corners and a calmer, modern layout. Prefer the old look? `/bw` → Appearance → Interface style → **Sharp (classic)**. Both styles share every setting.\n\n## Highlights\n\n- **Unit frames:** one full health bar per frame, in the classic proportions, with name, level or status and health text inside.\n- **Enemy colours:** bosses red, rare guardians yellow, elites blue, normal enemies violet, the final boss crimson, the same on target frame, elites & bosses list and nameplates. All adjustable.\n- **200+ settings:** every module has its own page with size, opacity and visibility (always, in combat, out of combat, faded until mouse-over) and its own options.\n- **14 languages**, detected from the game automatically.\n- **Thicker XP line** above the data bar (2 to 12 px).\n- **Welcome line** in your language at login (can be switched off).\n- **`/bw selftest`** and **`/bw layoutcheck`** for bug reports.\n\n## Fixes\n\n- The global UI scale applies to all frames again.\n- Bars reach the full width at 100 %.\n- Hover highlights only show under the mouse.\n- Preview mode fills the damage meter.\n- The unused ammo slot no longer shows in the character window.\n\n## Install\n\nDownload `BlackwellUI.zip` below and extract it to `AzerothSurvivors\\benilla-config\\AddOns\\` (replace the old `BlackwellUI` folder). Your settings are kept.",
-          "downloads": 469
+          "downloads": 470
         },
         {
           "tag": "v2.7.2-azs",
@@ -148,7 +148,7 @@
             "BlackwellUI": "e3e5f9b3a0a3227249bbdf761805ab04dd66d26c68fcd941dcad3bdfbff1919a"
           },
           "notes": "## BlackwellUI v2.7.1-azs\n\nMaintenance release on top of v2.7.0.\n\n### Changed\n- Removed leftover compatibility aliases and unused legacy code paths.\n- Legacy slash command aliases were removed. `/bw`, `/bui`, `/blackwell` and `/blackwellui` work as before.\n- The TOC now credits Pierre (Blackwellcode).\n\nNo settings change; existing profiles load as before. Tested in-game on the Windows client.\n\n### Install / update\nDownload **BlackwellUI.zip** below and replace the `AzerothSurvivors\\benilla-config\\AddOns\\BlackwellUI` folder. Browser client: install the zip through the in-game AddOns dialog.\n\nAll v2.7.0 changes (redesigned control center, safe game settings, stability fixes) are included: see [v2.7.0-azs](https://github.com/Blackwellcode/BlackwellUI/releases/tag/v2.7.0-azs).\n\nIf BlackwellUI makes your runs better: [buy me a coffee](https://buymeacoffee.com/blackwellcode) · Bugs: [open an issue](https://github.com/Blackwellcode/BlackwellUI/issues/new/choose)",
-          "downloads": 27
+          "downloads": 29
         },
         {
           "tag": "v2.7.0-azs",
@@ -180,7 +180,7 @@
             "BlackwellUI": "1741b1d3706dd36ffae141007286b8677dbdecff4d8b1d84cae68e1b03a0a6dc"
           },
           "notes": "### Release v2.6.7-azs\n- **Hotfix for Core.lua Tick Update Call**:\n  - Implemented `mod:Update(state)` in `Pins.lua` forwarding to `mod:UpdateRadar()`.\n  - Added defensive `type(mod.Update) == function` check in `Core.lua:Tick()` to prevent runtime nil-method Lua errors on any module.",
-          "downloads": 173
+          "downloads": 175
         },
         {
           "tag": "v2.6.6-azs",
@@ -212,7 +212,7 @@
             "BlackwellUI": "14c042959703c3db6226253f9583a10f36b704efed4b50ac648ebad9540a5b14"
           },
           "notes": "### Changes in v2.6.5-azs\n- **Fix Black Health Bar on WebGPU (Mac/WASM):** Patched TGA header descriptor on `melli.tga`, `blank.tga`, and `lightspark-border.TGA` to set alpha bits to 8 (`desc = 0x28`), resolving the engine panic: `depth less alpha bits must be 24`.\n- **Dual BLP2 + TGA Support:** Generated native DXT1 `melli.blp` alongside TGA.\n- **Cross-Platform Numeric Class Resolution:** Added `CLASS_ID_MAP` (1=Warrior, 2=Paladin, 3=Hunter, 4=Rogue, 5=Priest, 7=Shaman, 8=Mage, 9=Warlock, 11=Druid) in `ResolveClassColor` and `GetClassColor`.\n- **Lobby/Preview Full Bar Fallback:** Prevented empty 0-width black bar when out of combat / in lobby when `hp <= 0`.",
-          "downloads": 1014
+          "downloads": 1015
         },
         {
           "tag": "v2.6.3-azs",
@@ -228,7 +228,7 @@
             "BlackwellUI": "49996e671d892ab6234b82c2fc868b4252461680e9dab5fc0485e50101ca3ba0"
           },
           "notes": "### Release v2.6.3-azs\n- **Damage Share % Column Fixed**: Resolved math floor rounding bug where abilities under 50% total damage share displayed as 0%. Accurately displays true damage share (e.g. 34%, 24%, 4.2%).\n- **Relative Bar Scaling**: Row statusbar fills now scale relative to the top #1 ability (d / maxVal), restoring intuitive visual ranking like Details/Skada.\n- **Legendary Neck & Proc Merging [M]**:\n  - Added new **[M]** header button and Options menu toggle to automatically merge compound item procs (e.g. \\Amulet of the Inferno: Consecration\\) into their parent spell.\n  - Hovering over merged spells displays a full breakdown with direct casts vs proc damage and item sources.\n  - Quick toggle between compact merged view and detailed separated view anytime.",
-          "downloads": 157
+          "downloads": 159
         },
         {
           "tag": "v2.6.2-azs",
@@ -275,7 +275,7 @@
           "folders": {
             "BlackwellUI": "0950549f61e3e4fd84ddf5e8d140d2ca7e52a2e26fb077d99645b2635f53045f"
           },
-          "downloads": 575
+          "downloads": 578
         },
         {
           "tag": "v2.4.2-azs",
@@ -290,7 +290,7 @@
           "folders": {
             "BlackwellUI": "eedbb25806dcc638d28a904689321ac5b5fca03339f88ddb1cb12028b051cb45"
           },
-          "downloads": 86
+          "downloads": 87
         },
         {
           "tag": "v2.3.1-azs",
@@ -305,7 +305,7 @@
           "folders": {
             "BlackwellUI": "a23535e9f0db491fa5a1d02b1bb3f9ba5927c834328cce4df5a8fbd824cfeacf"
           },
-          "downloads": 130
+          "downloads": 132
         },
         {
           "tag": "v2.3.0-azs",
@@ -335,7 +335,7 @@
           "folders": {
             "BlackwellUI": "ee8f36764181b276c37d206f8232199066f73e09c3713a88a430dca61fdd935d"
           },
-          "downloads": 29
+          "downloads": 31
         },
         {
           "tag": "v2.1.0-azs",
@@ -355,7 +355,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 4006
+      "downloads": 4026
     },
     {
       "id": "keijin-ui",
@@ -385,7 +385,7 @@
           "KeijinUI": "03ba5bc202d35b17f7b5878e38af261bde408169ae1ad69feba4664522631f6f"
         },
         "notes": "# KeijinUI 5.0.5\n\n## English\n\n* Fixed-position and fallback combat text animations sleep when idle and reuse animation scratch records. Native hit processing reads shared settings once per frame with new hits. Statistics reuse sorting records and skip unchanged text; periodic redraws remain limited to once per 0.25 seconds.\n* Player and target frames skip unchanged text, colours and debuff icons while retaining fallback polling for native run data.\n* Shared update work: unchanged HUD text and colours are skipped, layout traversal and row records are reused, viewport reads are shared within each clamp pass, and panel renderers refresh once per settings change. The profiler separates HUD, statistics and the final layout check.\n* Cache and guardian markers reuse navigation records and skip unchanged positions, textures and text. Minimap movement smoothing is included in `/kui perf`.\n* Fixed a nameplate error on the Lua 5.0 client when plates appear, disappear or are reenabled.\n* Optional performance diagnostics: `/kui perf 10` samples calls and approximate memory growth per module for 10 seconds. `/kui perf log on` saves the last five runs with a snapshot after 30 seconds and minute averages for FPS, memory and combat density. Long runs are compacted while preserving their beginning; `/kui perf log show` displays a summary in three minute groups. Both tools are off by default.\n\n## Deutsch\n\n* Animationen fester und klassischer Schadenszahlen pausieren im Leerlauf und verwenden Hilfsdaten erneut. Die native Trefferverarbeitung liest gemeinsame Einstellungen einmal je Frame mit neuen Treffern. Statistiken verwenden Sortierdatensätze erneut und überspringen unveränderte Texte; regelmäßige Aktualisierungen bleiben auf einmal je 0,25 Sekunden begrenzt.\n* Spieler und Zielanzeigen überspringen unveränderte Texte, Farben und Debuffsymbole. Die regelmäßige Prüfung der nativen Rundendaten bleibt erhalten.\n…",
-        "downloads": 784
+        "downloads": 794
       },
       "earlier": [
         {
@@ -1157,7 +1157,7 @@
         "KeijinAchievements"
       ],
       "notes": [],
-      "downloads": 10772
+      "downloads": 10782
     },
     {
       "id": "survivor-ui",
@@ -1189,7 +1189,7 @@
           "SurvivorUI": "e759c62200d36a70b3c2ba2f0c6f30509550c81abb5389e1e2eb2d9919d086cf"
         },
         "notes": "**A hotfix for the Jewelry Collection.**\n\n#### Hotfixes\n\n- **Jewelry Collection:** a class amulet with no spell in its name, such as Winter's Embrace or The Legionlord's Medallion, now sits with its own class's amulets and no longer shows among the common amulets or to other classes. The ones already found move on their own; one the collection cannot place comes back the next time you wear it.\n\nUnzip `SurvivorUI-v3.0.68.zip` into the game's AddOns folder, or let the launcher do it: `SurvivorUI-Installer.zip`, below (launcher 1.12.1; a launcher from 1.6.1 takes it by itself).",
-        "downloads": 3095
+        "downloads": 3231
       },
       "earlier": [
         {
@@ -1520,7 +1520,7 @@
             "SurvivorPlates": "7cad83aa2ab22cc0a6bbeae6f65e8a15df548af641c212694d265d0d01d733b3",
             "SurvivorUI": "95837bd44b4e89c4d4bc29db69798bf71b36d2f1025e6e1c1156b1c512ac35d2"
           },
-          "downloads": 4248
+          "downloads": 4250
         },
         {
           "tag": "v3.0.47",
@@ -2005,7 +2005,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 42178
+      "downloads": 42316
     },
     {
       "id": "survivor-ui-classic",
@@ -2035,7 +2035,7 @@
           "SurvivorUIClassic": "322dfc5629fa87c0daa3d60d78719ca168dfcd37d427812eb83a68ba5a9a25d8"
         },
         "notes": "**A hotfix for an error on heals while Survivor UI is the one in use.**\n\n#### Hotfixes\n\n- **Healing numbers:** with both addons installed and Survivor UI chosen, a heal no longer brings up a `CombatColumns.lua` error. SurvivorUI Classic now leaves the heals alone while it stands aside.\n\nSurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below (launcher 1.12.1), unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto update**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.24.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game.",
-        "downloads": 579
+        "downloads": 599
       },
       "earlier": [
         {
@@ -2052,7 +2052,7 @@
             "SurvivorUIClassic": "68cae3dfb8fac2d2f6678d775b0c4904a4a547d6256db9c480f8a1f0706838d6"
           },
           "notes": "**The big one: Run History comes to SurvivorUI Classic, the action bar becomes the Build panel, the damage meter goes down by levels, and your damage numbers can sit right on the enemies.**\n\n#### New\n\n- **Run History:** every run you end is kept, with all that made it. Open it with the new small button under the talents' one in the Build panel, or with `/suic history`.\n  - **The list:** your runs at the left, the newest first, each with its result in color (Victory, Fallen, Left), class, level, zone, Heroic, Hyper and Endless, how long it took and how long ago it was.\n  - **Summary:** run time, level, kills, elites, guardians, bosses, total damage, DPS, healing, damage taken, gold, caches, marks and talent XP, each with its name. Under them the bosses, when each was due and when it fell; in an endless run, the bosses killed after the victory apart.\n  - **Build:** your spells by rank, then by damage, each in its color in that run's damage meter, with its rank, cooldown, damage, share and biggest crit. Your jewelry, a jewel's rank always in sight. Your armor and weapons, the set they make and the set bonuses that were on. Your talents as three small trees, the ones you had lit with their rank.\n  - **Damage:** a bar for each source in the colors of that run's meter, with its damage and share, then total damage, DPS and healing. In a party, a bar for each hero in its class's color.\n  - **Loot:** what the run dropped, how many and when, and the marks it gave.\n  - **Full view:** one button shows all four pages at once, side by side.\n  - **Tooltips kept with the run:** the mouse on a spell, a jewel, a piece of armor or a drop shows its tooltip as it read at the end of that run, so an old run still reads true after an upgrade or a game patch.\n  - **Pin and Delete:** a pinned run is never let go; Delete asks twice.\n  - **Yours to set:** the options' Run History tab chooses which runs are kept (all, victories only, none) and how many, 100 as it comes.\n…",
-          "downloads": 204
+          "downloads": 205
         },
         {
           "tag": "v0.2.22",
@@ -2068,7 +2068,7 @@
             "SurvivorUIClassic": "0638ca10bb0d76b97b26e482c3aa4a37d2d98abc615396abe1a4f42777abc324"
           },
           "notes": "**The performance monitor comes to SurvivorUI Classic: /suic perf.**\n\n#### New\n\n- **/suic perf:** the performance monitor, as Survivor UI's, in a window of the game's own make: the frame rate, the slow frames and how much of each frame goes to addons, then the time, calls and memory garbage of every addon's scripts, by addon, by event and in the frames that ran slow. Report saves it all; `/suic perf off` stops it.\n\nSurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below (launcher 1.12.1), unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto update**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.22.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game.",
-          "downloads": 555
+          "downloads": 557
         },
         {
           "tag": "v0.2.21",
@@ -2100,7 +2100,7 @@
             "SurvivorUIClassic": "320c9ab389228d71c2bcc0639ecacf099dbb0c80debf5928b02a70eeca808396"
           },
           "notes": "**A hotfix for combat text when thousands of hits land at once.**\n\n#### Hotfixes\n\n- **Combat text** no longer freezes the game when thousands of hits land at once: each hit now costs the same small amount, however many come together.\n\nSurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below (launcher 1.12.1), unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto update**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.20.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game.",
-          "downloads": 102
+          "downloads": 104
         },
         {
           "tag": "v0.2.19",
@@ -2148,7 +2148,7 @@
             "SurvivorUIClassic": "c619bc31e39d5effe8767499d662bb1c5cbfb19da49dc087bc02986bbc77147a"
           },
           "notes": "**The Guide's Jewels page shows the average pick past the first.**\n\n#### New\n\n**Guide**\n- **Jewels page, picks in groups:** Rings and Trinkets show the first pick, then what one pick adds on average for picks 2 to 4, 5 to 8 and 9 to 14, then the most. A jewel the game stops offering says how many times it comes instead, and one with a soft cap says where it slows down. Hover a row for every pick, one by one.\n\nSurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below (launcher 1.12.0), unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto update**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.17.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game.",
-          "downloads": 213
+          "downloads": 214
         },
         {
           "tag": "v0.2.16",
@@ -2164,7 +2164,7 @@
             "SurvivorUIClassic": "1c8c3f6f34ed7b9a221cc2b35aba2da2adecdda5052cfab79ce0b7c474299ba8"
           },
           "notes": "**The boss bars and the nameplates can now show the health as a number, a percent, both or nothing.**\n\n#### New\n\n**Boss bars**\n- **Health on the bars:** Off, Value (1.23M / 3.40M), Percent (36%) or Both (1.23M / 3.40M (36%)), on the Boss bars page of the options. The debuffs inside the bar make room for it.\n\n**Nameplates**\n- **Health on the plates:** Off, Value (12.3k), Percent or Both (12.3k | 36%), on the Nameplates page. Guardians, bosses and elites show the game's own numbers; where the game does not give a monster's numbers, its plate shows the percent.\n\nSurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below (launcher 1.12.0), unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto update**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.16.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game.",
-          "downloads": 203
+          "downloads": 204
         },
         {
           "tag": "v0.2.15",
@@ -2180,7 +2180,7 @@
             "SurvivorUIClassic": "1539f04a4273a30912021df34b3a26bb52cc028b0bc06adaee17ce93afc77876"
           },
           "notes": "**The Guide's Jewels page now shows what each pick adds, and an amulet at its cap.**\n\n#### New\n\n**Guide**\n- **Jewels page, what each pick adds:** Rings and Trinkets now show, pick by pick, what that pick adds over the one before (+22.5%, +10.5%, +8.4%...), the most still the total at the last pick, in yellow. Hover a row for each pick with the game's own line. Amulets show Rank 1, Rank 5 and Rank 10, then the amulet's icon: hover it for the amulet at its cap, 3 times its first numbers. A short note under them says how an amulet grows: it never changes rarity, and taking the one you wear again ranks it up, a bit less each time, toward 3 times.\n\nSurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below (launcher 1.12.0), unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto update**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.15.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game.",
-          "downloads": 30
+          "downloads": 31
         },
         {
           "tag": "v0.2.14",
@@ -2196,7 +2196,7 @@
             "SurvivorUIClassic": "18b66fb30eab392dca944f7d33d63c6559c49a3c8b82a5984bc514439e58a777"
           },
           "notes": "**The Guide's new Jewels page: every ring, trinket and amulet, and why nothing in them is rolled.**\n\n#### New\n\n**Guide**\n- **Jewels page:** every ring, trinket and amulet, read from the game itself. Nothing in a jewel is rolled: its rarity sets its numbers. Pick Rings or Trinkets and a rarity to see the total after 1 to 5 picks of the same jewel, and its most: the last pick before the game stops offering it, or \"no cap\". Hover a row for every pick. Amulets show what each gives and how its numbers grow with each rank, toward 3 times the first. Names and lines in the game's own language.\n\nSurvivorUI Classic is a branch of [Survivor UI](https://github.com/morderous/survivor-ui) in the game's own look. It works on its own: neither addon needs the other.\n\n## Install\n\n**With the launcher:** download `SurvivorUI-Installer.zip` below (launcher 1.12.0), unzip it and open `SurvivorInstaller.exe`. On a PC with no launcher before it, it installs SurvivorUI Classic and Survivor UI by itself once the game is there. If you already have a launcher, in the **Addons** tab pick **SurvivorUI Classic** and click **Install**. A new version then comes by itself once the game is closed, unless you untick **Auto update**.\n\n**By hand:** unzip `SurvivorUIClassic-0.2.14.zip` into `benilla-config\\AddOns\\`, so you have `AddOns\\SurvivorUIClassic`, then restart the game.",
-          "downloads": 109
+          "downloads": 112
         },
         {
           "tag": "v0.2.13",
@@ -2211,7 +2211,7 @@
           "folders": {
             "SurvivorUIClassic": "2111f6adeb3bf2d2f51d48c9459552ee9bfea6f8d84b2ae0b4e345962118e0b7"
           },
-          "downloads": 790
+          "downloads": 792
         },
         {
           "tag": "v0.2.12",
@@ -2241,7 +2241,7 @@
           "folders": {
             "SurvivorUIClassic": "7d5e0c780fe20f5369095f410c6fba5dde4246df2193124cf0b4165812a8b4ce"
           },
-          "downloads": 786
+          "downloads": 788
         },
         {
           "tag": "v0.2.10",
@@ -2271,7 +2271,7 @@
           "folders": {
             "SurvivorUIClassic": "0109d39ee504d9b673cbfe1118bc921f2dda577b9f3442b8bd5e3d7ecb094073"
           },
-          "downloads": 357
+          "downloads": 358
         },
         {
           "tag": "v0.2.8",
@@ -2301,7 +2301,7 @@
           "folders": {
             "SurvivorUIClassic": "3290d0caa1bacdcc890f888a7dbdb677b482e57f84df136318d016f9cb4c3d32"
           },
-          "downloads": 705
+          "downloads": 706
         },
         {
           "tag": "v0.2.6",
@@ -2316,7 +2316,7 @@
           "folders": {
             "SurvivorUIClassic": "8bca245387d6dbaa303a0588f5d0eeb1edede875196a9f4d907ed10d2c24bd64"
           },
-          "downloads": 1069
+          "downloads": 1070
         },
         {
           "tag": "v0.2.5",
@@ -2331,7 +2331,7 @@
           "folders": {
             "SurvivorUIClassic": "6cbd343ac30746c298f5e007584469ac109c5caa8f884e313d01391dfa0b01d1"
           },
-          "downloads": 345
+          "downloads": 347
         },
         {
           "tag": "v0.2.4",
@@ -2391,7 +2391,7 @@
           "folders": {
             "SurvivorUIClassic": "eca6cc98899102cb335013c816c98f7999436830a870be1372870bedaf00b1bf"
           },
-          "downloads": 37
+          "downloads": 38
         },
         {
           "tag": "v0.2.0",
@@ -2406,12 +2406,12 @@
           "folders": {
             "SurvivorUIClassic": "f3fc97b85c0f4b8fe17189ea59b39a708ef28ebe2b7c46295acb748304e7a8ea"
           },
-          "downloads": 35
+          "downloads": 36
         }
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 9347
+      "downloads": 9389
     },
     {
       "id": "survivors-dragon-ui",
@@ -2441,7 +2441,7 @@
           "SurvivorsDragonUi": "f441fb9b85bca75d9555f60efc8f7f1a6ed9ab724f4385cb5beb3c1db14780fa"
         },
         "notes": "Addon package for **SurvivorsDragonUi 3.2.101**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
-        "downloads": 1216
+        "downloads": 1511
       },
       "earlier": [
         {
@@ -2458,7 +2458,7 @@
             "SurvivorsDragonUi": "0046df79a18d9cbe692cdcf91a8eef218d0da794ab8370d7cdfa6ebc27985ea7"
           },
           "notes": "Addon package for **SurvivorsDragonUi 3.2.100**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
-          "downloads": 821
+          "downloads": 822
         },
         {
           "tag": "build-d8f6d765703a124f13a3541840b90ae65830a31c",
@@ -2490,7 +2490,7 @@
             "SurvivorsDragonUi": "217e27096d7a86c9ca99b1473ce9e87382b7fbe9a20fe6338cbcd466fc28a629"
           },
           "notes": "Addon package for **SurvivorsDragonUi 3.2.98**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
-          "downloads": 2371
+          "downloads": 2372
         },
         {
           "tag": "build-cb544e7127f49220afa1951053c6e1a32740cb3a",
@@ -2506,7 +2506,7 @@
             "SurvivorsDragonUi": "970aade8301d1b6018706bf8f105b3fa5564ffeb471fec1b9aa6ce7c233e1b0a"
           },
           "notes": "Addon package for **SurvivorsDragonUi 3.2.97**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
-          "downloads": 4073
+          "downloads": 4074
         },
         {
           "tag": "build-0235cec98a0e965a02bd927f7dba0c193664fc4d",
@@ -2554,7 +2554,7 @@
             "SurvivorsDragonUi": "41220edfe9acb8872bcedc5bb4cefe72dd8c5c6de884649ee6843bfc2ebadf16"
           },
           "notes": "Addon package for **SurvivorsDragonUi 3.2.94**.\r\n\r\n## Install\r\n\r\n1. Download [SurvivorsDragonUi.zip](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/SurvivorsDragonUi.zip) from the latest release.\r\n2. In the game, open **Options → AddOns → Open AddOns Folder**.\r\n3. Extract the ZIP and put the `SurvivorsDragonUi` folder there.\r\n4. Enable the addon and enter a run. Type `/sdui` to set it up.\r\n\r\nFor a manual Windows install, open the folder containing `AzerothSurvivors.exe` and place the addon in `benilla-config/AddOns/`. The finished path should be:\r\n\r\n```text\r\nbenilla-config/AddOns/SurvivorsDragonUi/SurvivorsDragonUi.toc\r\n```\r\n\r\n**Optional Windows auto-update:** Download [avrt.dll](https://github.com/migwynkriid13/SurvivorsDragonUi/releases/latest/download/avrt.dll) and place it beside `AzerothSurvivors.exe`. It updates the addon before the game starts. If checking or downloading fails or takes more than 10 seconds, the game starts with your installed copy. Enable the addon in **Options → AddOns**.\r\n\r\nRemove `avrt.dll` to stop automatic updates. It cannot be used alongside another mod that needs the same filename. See [details and troubleshooting](updater/README.md).\r\n\r\n**Playing in a browser?** Open **Options → AddOns → install a .zip** and choose the downloaded ZIP.\r\n\r\n<details>\r\n<summary>Windows settings and older installations</summary>\r\n\r\nThe game keeps addons, addon data, options, key bindings, chat windows and camera settings in `benilla-config` beside `AzerothSurvivors.exe`. On the first launch after this folder change, it copies addons and settings from older folders, keeping newer changes and filling in missing settings. Characters are unaffected.\r\n\r\n</details>",
-          "downloads": 1066
+          "downloads": 1067
         },
         {
           "tag": "build-f9ac90e10eb0d9b77dbc23744f23403ce9bc420d",
@@ -2692,7 +2692,7 @@
           "folders": {
             "SurvivorsDragonUi": "19ccb596ae63e34c81a7892e7b40970ee045a94821c10545d08a285e1a5f92dd"
           },
-          "downloads": 1371
+          "downloads": 1373
         },
         {
           "tag": "build-29facbe832f72b7fa31d1afdf64e9c9471cc9411",
@@ -2752,7 +2752,7 @@
           "folders": {
             "SurvivorsDragonUi": "5afb1c73105cdc24e4116b0a0befb7970ae3ba5e887557ba277cf440e8cbb46a"
           },
-          "downloads": 1222
+          "downloads": 1224
         },
         {
           "tag": "build-1dd6848c82c0c55abed361bd4480c5474083ce3a",
@@ -2782,7 +2782,7 @@
           "folders": {
             "SurvivorsDragonUi": "036849be215df78e983fdef5dcfb14256af03f114c81b31af254cc619440d0d3"
           },
-          "downloads": 945
+          "downloads": 946
         },
         {
           "tag": "build-e62edce3009c3871637f1c7a69948b6db208305a",
@@ -2797,7 +2797,7 @@
           "folders": {
             "SurvivorsDragonUi": "301e684ca44f55f716020597b76b1f92366903940f0ec116f2fb19e66bf63cf3"
           },
-          "downloads": 1088
+          "downloads": 1090
         },
         {
           "tag": "build-965c043a64e755bd8abf4139fa2259c0856f1fc9",
@@ -2827,7 +2827,7 @@
           "folders": {
             "SurvivorsDragonUi": "9f106eb95d7db58ce06401e71542704f50c3b1adf4bca944639c0d516cdfa218"
           },
-          "downloads": 4227
+          "downloads": 4228
         },
         {
           "tag": "build-44ecba615f4c901d37f283f3ff8bd5263be33985",
@@ -2857,7 +2857,7 @@
           "folders": {
             "SurvivorsDragonUi": "8c3d241803388c46d96a40bd795969f31f6f697827bd23ccab2f6ee45fd93f09"
           },
-          "downloads": 92
+          "downloads": 95
         },
         {
           "tag": "build-8abf94608913d2bbea0b453b06c62730e7bee26a",
@@ -2872,7 +2872,7 @@
           "folders": {
             "SurvivorsDragonUi": "4b568108bd60d903abd766df6098eabd74797898fed6c9c4b89266e83818ad25"
           },
-          "downloads": 341
+          "downloads": 342
         },
         {
           "tag": "build-74579c5a40e6f32e509d5db1be7800d05e6eddf8",
@@ -2917,7 +2917,7 @@
           "folders": {
             "SurvivorsDragonUi": "8cc6e00f3548c290d3ec68fc56b780460ebd7b5ab1574b8c1c81ddd3e10cd774"
           },
-          "downloads": 741
+          "downloads": 743
         },
         {
           "tag": "build-0bef905c1dc75691dc4951d1bf8a06b5df781bf2",
@@ -2947,7 +2947,7 @@
           "folders": {
             "SurvivorsDragonUi": "f471b378315ca3c695c2d30b81da14dd73cb8e95dde42324b5248f4a68851743"
           },
-          "downloads": 3970
+          "downloads": 3973
         },
         {
           "tag": "build-ff20747587c6cd56b7e2dbcc564dd4cc1428332b",
@@ -2977,7 +2977,7 @@
           "folders": {
             "SurvivorsDragonUi": "03ce9e2c688e6f83289360a22791b91bc6fbbed8ba0642663ab95c46cd6f970e"
           },
-          "downloads": 1116
+          "downloads": 1118
         },
         {
           "tag": "build-bf761c97c3b7d0a095055fcd45f7b40471063d47",
@@ -2992,7 +2992,7 @@
           "folders": {
             "SurvivorsDragonUi": "10f8ea00128280171090fad16514151344ea25a1942cad2efbe200ec74188e3d"
           },
-          "downloads": 187
+          "downloads": 188
         },
         {
           "tag": "build-6284ab9995305ec45046c881ccfe88f776184a1b",
@@ -3067,7 +3067,7 @@
           "folders": {
             "SurvivorsDragonUi": "81d145a6f9bcdbd17f7e8fddc0c511af1b3b6171942627de6ff99b88bd4aee79"
           },
-          "downloads": 2595
+          "downloads": 2596
         },
         {
           "tag": "build-3c7ce887d15aef46d8e0c17b9fe71142cb37c4ba",
@@ -3112,7 +3112,7 @@
           "folders": {
             "SurvivorsDragonUi": "f2458f13b48d3de10e280f8e6381375a3e11805574858cd5b22f110c1a3c8332"
           },
-          "downloads": 2781
+          "downloads": 2782
         },
         {
           "tag": "build-c89c8f320686b57c45e93fa52ddee36fd329cd87",
@@ -3142,7 +3142,7 @@
           "folders": {
             "SurvivorsDragonUi": "ebdcf1c992a15a7e7fdf18637bdb9331f76d0768726cbdf8ab4a04b20c6cd574"
           },
-          "downloads": 558
+          "downloads": 559
         },
         {
           "tag": "build-7329e125b2d1fecd5a7341a705da930ab133298f",
@@ -3202,12 +3202,12 @@
           "folders": {
             "SurvivorsDragonUi": "0c218d34d36d8a01d783fe0a9d8a0469fb9a7ede3565aaf2ad24076ca0d76877"
           },
-          "downloads": 250
+          "downloads": 252
         }
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 100091
+      "downloads": 100415
     },
     {
       "id": "bordo-ui",
@@ -3237,7 +3237,7 @@
           "BordoUI": "3495ce53962753a238d4298882bc65119b6e1b98b588e600a2c5380fd76c5e4c"
         },
         "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.17...v2.8.18",
-        "downloads": 798
+        "downloads": 801
       },
       "earlier": [
         {
@@ -3270,7 +3270,7 @@
             "BordoUI": "c9f1695fd5360cb9736ebba9c22f62c64d8f23c81a2697c912fd2424cd9cdfaf"
           },
           "notes": "**Full Changelog**: https://github.com/threenox/BordoUI/compare/v2.8.15...v2.8.16",
-          "downloads": 23
+          "downloads": 24
         },
         {
           "tag": "v2.8.15",
@@ -3413,7 +3413,7 @@
           "folders": {
             "BordoUI": "8593f81e2209465fb50a916a67c63c18634415ca09d1375df2c0f0186d2348e7"
           },
-          "downloads": 38
+          "downloads": 39
         },
         {
           "tag": "v2.0.0",
@@ -3428,12 +3428,12 @@
           "folders": {
             "BordoUI": "2c993ff6122b8338399e58d1a6550e28d3975009eb197f52be787bb3799fc10d"
           },
-          "downloads": 403
+          "downloads": 405
         }
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1808
+      "downloads": 1815
     },
     {
       "id": "creed-ui",
@@ -3621,7 +3621,7 @@
           "AzerothFieldKit": "cd7564698dc8c4851cb6ec0f456b2798484fc2a3663e928bba2ac62f77a97827"
         },
         "notes": "# Azeroth FieldKit 0.6.0\n\n## Highlights\n- New Elwynn-themed HUD layouts, interactive cards, native data integrations, placement and scaling controls.\n- Improvements to chat styling, HUD profiles, minimap and launcher presentation.\n- Performance optimizations: avoid unnecessary HUD teardown when changing scale; reduce redundant chat/theme refreshes; scan Loadout on changes rather than every frame; additional diagnostic controls.\n- Existing SavedVariables remain in place; back up your settings before upgrading.\n\n## Not included\n- **Naxxramas is not released in 0.6.0.** Its unfinished theme is hidden from the player menu and blocked for ordinary selection. Development assets and internal regression fixtures remain in the source tree for a future update.\n\n## Validation scope\n- Maintainer reported no microfreezes during approximately five minutes of gameplay at x10 speed with the theme active, and accepted the other tested functionality.\n- This does not establish long-session performance or a full native-client regression certification.\n- Release must not be published until the CI verification suite and distribution manifest pass for the exact release commit.\n\n## Install\n1. Close Azeroth Survivors.\n2. Back up the current `AzerothFieldKit` addon folder and `FieldKitDB` SavedVariables.\n3. Replace only the `AzerothFieldKit` folder in your game's `AddOns` directory with the folder from the release ZIP.\n4. Restart the game and open `/fieldkit`.\n\nSource: https://github.com/Maidenquinn/azeroth-fieldkit",
-        "downloads": 137
+        "downloads": 142
       },
       "earlier": [
         {
@@ -3802,7 +3802,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 2305
+      "downloads": 2310
     },
     {
       "id": "azs-spell-meter",
@@ -3832,7 +3832,7 @@
           "AZSSpellMeter": "a0751a7c90ddbc9789e6c835f71e1cc3a6623a2a584b8d51a9c96c93ed10fd17"
         },
         "notes": "- Settings has a Refresh rate under Window, from 0.25 to 2 seconds in 0.25 s steps. It sets how often the meter windows redraw and starts at 1 second. The DPS graph keeps sampling at its own pace, so its line stays as fine. Clicks, tab changes, and settings still redraw at once.\n- A kill no longer redraws the whole meter. It shows on the next redraw, so a big pull with many deaths costs far less.\n- Combat text is read 20 times a second instead of every frame. A death reads it first, so the kill still goes to the spell that landed the last hit.\n- Hits, the boss fight check, window placement, and open tips do less work per frame. Long runs no longer keep every hit's id.\n\nUnzip into your AddOns folder, so the path ends in `AddOns/AZSSpellMeter/AZSSpellMeter.toc`. Relog.",
-        "downloads": 1825
+        "downloads": 1855
       },
       "earlier": [
         {
@@ -4253,7 +4253,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 26505
+      "downloads": 26535
     },
     {
       "id": "local-clock",
@@ -4318,7 +4318,7 @@
           "LuckyOdds": "6a66c097663554554e18d026f269a8b7f1b13cc3c28a88440e451a894192b021"
         },
         "notes": "Needs game 0.126.0 or newer.\n\n- The old panel design is back. Lots of you liked the table with a row per card type, so it's now an option next to the new one.\n- Open the cog and hit \"Design\" to flip between New and Old. It remembers your pick.\n- The old design has the same cog, language list, \"Show on selection\" and the new chest and guardian buttons as the new one.\n- Both designs share the same spot on your screen, drag one and the other follows.\n\nInstall: drop the `LuckyOdds` folder into your `AddOns` folder and `/reload`.",
-        "downloads": 5356
+        "downloads": 5388
       },
       "earlier": [
         {
@@ -4404,7 +4404,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 18112
+      "downloads": 18144
     },
     {
       "id": "move-ui",
@@ -4434,7 +4434,7 @@
           "MoveUI": "45958b3a6ecd23d208b99fd29cb0357bf59d0faf55a88a6432238dfc3ce74dbc"
         },
         "notes": "## What's Changed\n* Move UI 1.3.0: modular architecture refactor by @JamieeLee in https://github.com/JamieeLee/MoveUI/pull/2\n\n\n**Full Changelog**: https://github.com/JamieeLee/MoveUI/compare/v1.2.9...v1.3.0",
-        "downloads": 286
+        "downloads": 529
       },
       "earlier": [
         {
@@ -4520,7 +4520,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 529
+      "downloads": 772
     },
     {
       "id": "move-anything",
@@ -4550,7 +4550,7 @@
           "MoveAnything": "9ea17cffce77b5f44f9da9d3900914ba63de5f7b2a74ae993fb34980fb202636"
         },
         "notes": "Hot fix to text being truncated when scaling windows due to rounding errors.",
-        "downloads": 928
+        "downloads": 933
       },
       "earlier": [
         {
@@ -4587,7 +4587,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 957
+      "downloads": 962
     },
     {
       "id": "as-tiny-plates",
@@ -4617,7 +4617,7 @@
           "ASTinyPlates": "73962e602ec928f1e8cac3e317ffbdbb8fd4cdd9209ba6934cef5b8e54a6ac5f"
         },
         "notes": "Lets players color the health bars themselves, separately for regular (shrunken) plates and boss/guardian plates, with colorblind-friendly presets.\r\n\r\n## What's Changed\r\n* Add custom bar colors with colorblind presets by @Valorless in https://github.com/Valorless/ASTinyPlates/pull/6\r\n\r\n## \r\n- **Settings window** (`ASTinyPlatesSettings.lua`): each plate type gets a **Custom bar color** checkbox, a color-picker swatch (`ColorPickerFrame`, live preview, Cancel reverts), six colorblind-friendly presets (Okabe-Ito: blue, orange, sky blue, vermillion, yellow, pink, at full brightness to offset the bar texture dimming colors) and a **Reset** button.\r\n- **Off by default**: with the option off, bars keep the game's colors, so nothing changes for existing users.\r\n- **Saved variables**: `bossBarColor`/`bossBarColorOn` and `regularBarColor`/`regularBarColorOn` in `ASTinyPlatesDB`.\r\n- **Applies on every path** (`ASTinyPlates.lua`): the default UI (native bar, which our overlay copies) and SDUI (StatusBars inside its styled visual), for both boss/guardian and regular plates. Re-applied every update, so changes are live.\r\n- **Plate recycling**: each bar's original color is remembered and restored when the override is turned off or a recycled plate switches between boss and regular.\r\n- README documents the feature and the new settings.\r\n\r\n**Full Changelog**: https://github.com/Valorless/ASTinyPlates/compare/v1.4.5...v1.5.6",
-        "downloads": 747
+        "downloads": 748
       },
       "earlier": [
         {
@@ -4687,7 +4687,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1851
+      "downloads": 1852
     },
     {
       "id": "as-drops",
@@ -4717,7 +4717,7 @@
           "ASDrops": "893430930f48dfa673b07d2a04a9697ddf9d1ce4f71dce9af87db141a1a1a803"
         },
         "notes": "Adds an **Always on-top** checkbox to the settings window, so players can choose whether ASDrops sits over the level-up and jewelry cards. It is on by default, saved as `ASDropsDB.onTopOff`, and applies live without a /reload.\r\n\r\n## What's Changed\r\n* Add \"Always on-top\" setting by @Valorless in https://github.com/Valorless/ASDrops/pull/9\r\n\r\n##\r\n- `ASDropsKeepOnTop` now remembers every frame it is given, including GameTooltip. It only calls `AZS_SetOnTopOfScreens(frame, true)` while the option is on.\r\n- New `ASDropsApplyOnTop()` re-applies the setting to all registered frames. It also runs on `VARIABLES_LOADED` and `PLAYER_ENTERING_WORLD`, so the saved value is read after saved variables load. Frames created later follow the current setting.\r\n- On clients without `AZS_SetOnTopOfScreens` the checkbox is disabled, with an explanatory tooltip.\r\n- The settings window now has the section headers **General** (the new option), **Rows** and **Missing-items row**.\r\n- The option is labelled \"Always on-top\".\r\n- README: Features, Saved Variables and a developer note about `ASDropsKeepOnTop` / `ASDropsApplyOnTop`.\r\n\r\n**Full Changelog**: https://github.com/Valorless/ASDrops/compare/v1.6.8...v1.7.9",
-        "downloads": 530
+        "downloads": 535
       },
       "earlier": [
         {
@@ -4819,7 +4819,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1316
+      "downloads": 1321
     },
     {
       "id": "azs-max-hit",
@@ -4849,7 +4849,7 @@
           "AZSMaxHit": "4271e0e304d788dfc49bab17beda93d6c64777aabd3eeed81713d65b3d337768"
         },
         "notes": "Tested with game 0.140.0.\r\n\r\n- Numbers no longer reset when you switch away from the browser and come back during a run. The addon now goes by the game's id for the run, on games that have one.\r\n- The window now sorts by Total by default. If you already clicked a column header, your choice is kept.\r\n- Hunter: Kill Command has its own row with its own Hit, Crit and Burst, so its big hits no longer count as the pet's.\r\n- Shaman: the game now reports all of Windfury Weapon together, so its Total under each spell is shared out by how much it hit there. The two Totals are an estimate and still add up to the game's\r\nmeter.\r\n- Updated for game 0.140's new names in every language, including Kill Command and the Tier 0.5 sets' damage lines.",
-        "downloads": 454
+        "downloads": 460
       },
       "earlier": [
         {
@@ -5060,7 +5060,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1446
+      "downloads": 1452
     },
     {
       "id": "vulchans-combat-text",
@@ -5090,7 +5090,7 @@
           "VulchansCombatText": "2834c8c9482c890007a820d19b3454f4a6b1bcc0664adeb49faf9be36e777b79"
         },
         "notes": "**Full Changelog**: https://github.com/Vulchan/Vulchan-s-Combat-Text/compare/v0.3.4...v0.4.14",
-        "downloads": 1208
+        "downloads": 1220
       },
       "earlier": [
         {
@@ -5112,7 +5112,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1367
+      "downloads": 1379
     },
     {
       "id": "azeroth-cursor",
@@ -5142,7 +5142,7 @@
           "AzerothCursor": "0d55473f67df32b3f58a6c641ca6e65246a459e56cd8f362244c6ef0c94694d3"
         },
         "notes": "# Azeroth Cursor 1.2.0 — Optional Class Icons\n\nShow your class crest on the cursor — or keep the ring alone. Marker and icon are\nindependent. Thanks to **Joker / Kohrinthian** for the class masks in\n[PR #2](https://github.com/Maidenquinn/AzerothCursor/pull/2)!\n\n## Optional class icon\n\n- Toggle **Class icon** / **Icône de classe** (**off by default**).\n- Use the icon alone, the ring marker alone, or both together.\n- All nine classes, including Rogue / Voleur, as circular white masks that tint\n  with your marker color.\n- Dedicated **class icon size** slider (8–120).\n- With the icon on, class-color buttons also choose which crest to display.\n\n## Randomize and polish\n\n- **Random** / **Aléatoire** (and `/azcursor random`): marker stays on; randomizes\n  halo, class icon, sliders, color and icon token.\n- Live cursor overlay while options are open.\n- Preview keeps the same marker/icon proportions as the real cursor.\n- Texture reload when switching class so preview and live stay in sync.\n\n## Download and update\n\nDownload **AzerothCursor-1.2.0.zip** below. Close the game, replace the `AzerothCursor`\nfolder in your active `benilla-config/AddOns` directory, keep `AzerothCursorDB`, and restart.\nOpen the cyan minimap button or `/azcursor`.\n\nUse the attached player ZIP rather than GitHub's automatic source archive.\nYour saved settings and original-cursor default are preserved. No other addon is required.\n\n## Validation\n\nNative Lua 5.0.3 regression tests cover optional/independent class icons, all nine\nmasks, Random, preview proportions, FR/EN, class colors, scaled maps and persistence.\nRuntime syntax, TOC/version consistency and all twenty TGA assets pass as well.\n\nTests simulate FrameXML behavior; keep an eye on native rendering after `/reload`.\n\n[Full changelog](https://github.com/Maidenquinn/AzerothCursor/blob/v1.2.0/CHANGELOG.md) · [Report an issue](https://github.com/Maidenquinn/AzerothCursor/issues)",
-        "downloads": 388
+        "downloads": 392
       },
       "earlier": [
         {
@@ -5180,7 +5180,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 706
+      "downloads": 710
     },
     {
       "id": "big-cursor",
@@ -5210,12 +5210,12 @@
           "BigCursor": "dfecc5a7cfe54566009a9b290f98ab0370e905d99697ead5ec219cb9bb360fd4"
         },
         "notes": "Tired of losing track of your mouse cursor in the middle of the action? Big Cursor makes it easier to spot your cursor in-game with a larger, more visible pointer. A simple, lightweight quality-of-life addon designed to help you keep your cursor in sight when you need it most.",
-        "downloads": 484
+        "downloads": 486
       },
       "earlier": [],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 484
+      "downloads": 486
     },
     {
       "id": "cursor-reticle",
@@ -5245,7 +5245,7 @@
           "CursorReticle": "2d23a30d757d92ab729b0c0848c065d07530b450724961edd9daf0223cd2ef10"
         },
         "notes": "**Fixed**\n- The Cooldown sweep tab finds your spells again. A game update had stopped it from finding them.\n\n**New**\n- Save tab: save your cursor setups under a name, each with a small preview, then rename them or switch between them.\n- Share cursors: export a saved cursor as a code, or import someone else's.\n- Reset all: resets every tab at once (your saved cursors are kept).\n- Window size slider at the top of the options window.\n- The options window is now the same size on every tab.\n- The dot and crosshair can now be up to 50 px.\n\n**Project page:** https://github.com/Muffla/CursorReticle\n\nDownload **CursorReticle.zip** below and replace your old `CursorReticle` folder in `AddOns`.",
-        "downloads": 932
+        "downloads": 934
       },
       "earlier": [
         {
@@ -5283,7 +5283,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 1044
+      "downloads": 1046
     },
     {
       "id": "as-builder",
@@ -5313,7 +5313,7 @@
           "ASBuilder": "2a76edc8c20f84e809518065da6060068ab1c291cda99f8268abe94c467b7907"
         },
         "notes": "Small fix.\n\n- The \"Find more build\" link at the bottom of the planner now points to asbuilds.app (it had the wrong address before).",
-        "downloads": 3434
+        "downloads": 3481
       },
       "earlier": [
         {
@@ -5659,7 +5659,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 32639
+      "downloads": 32686
     },
     {
       "id": "azerloot",
@@ -5689,7 +5689,7 @@
           "Azerloot": "a98e83443617629d7d974cd746786833a8c6cfdf6bd4951efdd5f315913f4b70"
         },
         "notes": "Builds can now plan which cards to banish, and the Chronicle shows your co-op party at the press of a button. Co-op runs are counted correctly again, the best run goes by level, and the wishlist window keeps its size wherever you put it. Most of this came from player feedback, thank you!\r\n\r\n⛔ Banish\r\n\r\n* Every build has three banish places under its jewelry, in a small triangle. Click the + to choose: two lists, Spells and Jewelry.\r\n* Any card can be banished, the build's own spells and the starting spell too: you keep the spell, but no more upgrades for it are offered, so the ones you want come more often (for example, a Magma Totem build banishing three of its other spells).\r\n* In a run, the wishlist window shows the banished cards in a row under the build's card. The game does not tell addons which cards it offers or which you banished, so click an icon once you have banished it: it turns grey with a green tick. The marks start fresh every run.\r\n* The Chronicle keeps each run's banish list with your marks (\"Banish 2/3\" on the build line, the cards on hovering it).\r\n* Build codes carry the banish list. Older codes and older versions of Azerloot still work, without it.\r\n\r\n🛠️ Builds\r\n\r\n* The spell places are numbered 1 to 6, for the order to take them in.\r\n* Battle traits in two columns, the page's rows evenly spaced, Strengths and weaknesses keep their five lines.\r\n* Paladins, Shamans and Druids have a Relic place instead of Ranged.\r\n\r\n📖 Chronicle\r\n\r\n* Best run: survived first, then the higher level, then the longer time. Damage no longer decides, and your best runs are measured anew once.\r\n* Co-op: going down no longer ends a run in the book. Before, a run was cut at your first fall and carried on as if in endless mode; such runs are repaired, and those that reached endless mode count as survived.\r\n* Co-op runs are marked in the list, e.g. \"Alterac Valley (Co-op)\".\n…",
-        "downloads": 1044
+        "downloads": 1060
       },
       "earlier": [
         {
@@ -5885,7 +5885,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 7570
+      "downloads": 7586
     },
     {
       "id": "azeroth-stats",
@@ -5915,7 +5915,7 @@
           "AzerothStats": "9a2a317a8da542a58fc461f1770b99f9cdde4d8179d82d88810d0a9dcfee37d8"
         },
         "notes": "# Azeroth Stats 2.0.4\n\nCommunity feedback, safer backups and UI polish (12 November 2026)\n\n- **Analyze Run:** Highlights display up to four recent build-journal events per page with navigation.\n- **Settings:** clearer descriptions for Effects, Summons, Combat Intelligence and record sounds, with reviewed French and English text.\n- **Minimap:** refinements for circular/square icons, centered native ring and glyph, theme switching, and removal of square-grain artifacts in round mode.\n- **Abandoned runs:** conservative read-only preview (`/azstats abandon preview 2`), temporary History-only hide (`/azstats abandon hide 2`) and show (`/azstats abandon show`). Favorites and cumulative totals stay untouched; no automatic run deletion.\n- **Backups:** skip unnecessary full-database cloning for identical automatic backups with validated, bounded comparison; improve handling of invalid live data and legacy backup roots. Existing manual/automatic backups remain compatible.\n- **Diagnostics:** `/azstats storage` reports retained runs and backup snapshot counts; synthetic size/timing benchmarks and a metadata-only file size tool are provided for troubleshooting.\n- **WoW Logs AS:** retained SavedVariables structure and separate manual AZST1 export preserved; no network upload, no new remote co-op talent/equipment inference.\n- **Compatibility:** no SavedVariables schema migration, loss-inducing compaction, or compression; storage bytes may remain large with multiple snapshots.",
-        "downloads": 299
+        "downloads": 310
       },
       "earlier": [
         {
@@ -5980,7 +5980,7 @@
             "AzerothStats": "382f4a2b94d6c35cfd12f32a7dceb28e73454e31607f2387c0a62e57ea907989"
           },
           "notes": "## Azeroth Stats V2 preview — 2.0.0-dev.12\n\nPerformance hotfix for the live 1 Hz sampler while keeping V2 preview features and schema 1 history.\n\n### Highlights\n- Removes severe in-combat freezes reported with Stats alone and with FieldKit + Hub\n- Keeps kills/gold/damage, meters, build journal, jewelry, equipment tooltips, V2 observations and official summaries\n- Staggered equipment tooltip capture with end-of-run flush; stamp-aware meter and spell freshness\n- Safer V2 writes on large SavedVariables (~10 MB histories)\n\n### Install\nClose the game. Extract **AzerothStats-2.0.0-dev.12.zip** into your active AddOns folder so it contains `AddOns/AzerothStats/AzerothStats.toc`. Keep `AzerothStatsDB` and fully restart. Use the player ZIP below, not GitHub's Source code ZIP.\n\n### Validation\n7,432 Lua offline assertions (including PERF DATA INTEGRITY), TOC/manifest/package policy checks. Native freeze recovery confirmed by the maintainer with the three-addon stack. Not every live edge case is claimed as acceptance.\n\n### Limits\nUnavailable native fields stay unavailable. Summary-only current-run HUD values may still say At run end until the official summary. The native move-to-begin overlay is outside this addon.",
-          "downloads": 46
+          "downloads": 47
         },
         {
           "tag": "v2.0.0-dev.11",
@@ -6012,7 +6012,7 @@
             "AzerothStats": "3d1c32d7f60c0e3aaeb575576f1509030f572dd407ef8e599d9121ccac8ca8ab"
           },
           "notes": "## Current-run HUD availability hotfix\n\n- Current-run bosses, elites, guardians and magnets now say **At run end** while waiting for their official final count, with an explanatory tooltip.\n- The just-finished tracked run keeps its official HUD values until detached; clicking opens its activity view.\n- Translated into all 14 supported languages.\n- No changes to accounting, save schema or existing history. V2 and unreleased themes are not included.\n\n**Availability clarification:** this does not add an exact live boss-kill counter. Boss damage meters and disappearing units are not treated as proof of a kill.\n\n## Install\nClose the game. Extract **AzerothStats-1.7.1-beta.1.zip** into your active client's AddOns folder so it contains `AddOns/AzerothStats/AzerothStats.toc`. Keep AzerothStatsDB and fully restart. Use the player ZIP below, not GitHub's Source code ZIP.\n\nOpen `/azstats hud` to customize the bar. No stats reset is needed.\n\n## Validation\n5,094 Lua 5.1 offline assertions, native Lua 5.0.3 behavior suite, 15 Python tests and green GitHub CI. The player ZIP is manifest-verified. This particular HUD change still needs in-game feedback.\n\nSource change: https://github.com/Maidenquinn/AzerothStats/pull/12",
-          "downloads": 283
+          "downloads": 284
         },
         {
           "tag": "v1.7.0-beta.1",
@@ -6136,12 +6136,12 @@
           "folders": {
             "AzerothStats": "23ec6ddc515b2c4bd32666a7871e19c1d6b934abf7005d51e2c829c066f36157"
           },
-          "downloads": 27
+          "downloads": 29
         }
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 3931
+      "downloads": 3946
     },
     {
       "id": "azeroth-hub",
@@ -6171,7 +6171,7 @@
           "AzerothHub": "04bcdce299e5312395d421e8268e79b589710c979350870c0658a011bbe890ce"
         },
         "notes": "Fix: language switch now refreshes search bars, profiles, appearance and default profile labels. Install AzerothHub-0.7.5.zip then /reload.",
-        "downloads": 208
+        "downloads": 210
       },
       "earlier": [
         {
@@ -6289,7 +6289,7 @@
       ],
       "doesnt_mix_with": [],
       "notes": [],
-      "downloads": 243
+      "downloads": 245
     }
   ]
 }
